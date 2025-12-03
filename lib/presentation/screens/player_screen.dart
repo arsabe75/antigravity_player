@@ -99,13 +99,24 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         child: Stack(
           children: [
             // Video Layer
-            Center(
-              child: controller != null && controller.value.isInitialized
-                  ? AspectRatio(
-                      aspectRatio: controller.value.aspectRatio,
-                      child: VideoPlayer(controller),
-                    )
-                  : const CircularProgressIndicator(color: Colors.white),
+            GestureDetector(
+              onDoubleTap: () {
+                notifier.toggleFullscreen();
+                // Handle actual window fullscreen
+                if (state.isFullscreen) {
+                  windowManager.setFullScreen(false);
+                } else {
+                  windowManager.setFullScreen(true);
+                }
+              },
+              child: Center(
+                child: controller != null && controller.value.isInitialized
+                    ? AspectRatio(
+                        aspectRatio: controller.value.aspectRatio,
+                        child: VideoPlayer(controller),
+                      )
+                    : const CircularProgressIndicator(color: Colors.white),
+              ),
             ),
 
             // Controls Layer
