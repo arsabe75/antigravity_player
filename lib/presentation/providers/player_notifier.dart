@@ -6,7 +6,7 @@ import '../../infrastructure/repositories/video_repository_impl.dart';
 import 'player_state.dart';
 
 // Repository Provider
-final videoRepositoryProvider = Provider<VideoRepository>((ref) {
+final videoRepositoryProvider = Provider.autoDispose<VideoRepository>((ref) {
   final repo = VideoRepositoryImpl();
   ref.onDispose(() => repo.dispose());
   return repo;
@@ -93,6 +93,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
   }
 }
 
-final playerProvider = NotifierProvider<PlayerNotifier, PlayerState>(
-  PlayerNotifier.new,
-);
+final playerProvider =
+    NotifierProvider.autoDispose<PlayerNotifier, PlayerState>(
+      PlayerNotifier.new,
+    );

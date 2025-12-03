@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:window_manager/window_manager.dart';
 
 class HomeScreen extends StatelessWidget {
   const HomeScreen({super.key});
@@ -56,38 +57,109 @@ class HomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(LucideIcons.clapperboard, size: 64, color: Colors.white),
-            const SizedBox(height: 32),
-            const Text(
-              'Antigravity Player',
-              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+      body: Stack(
+        children: [
+          // Main content
+          Center(
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  LucideIcons.clapperboard,
+                  size: 64,
+                  color: Colors.white,
+                ),
+                const SizedBox(height: 32),
+                const Text(
+                  'Antigravity Player',
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 48),
+                SizedBox(
+                  width: 250,
+                  height: 50,
+                  child: ElevatedButton.icon(
+                    onPressed: () => _pickFile(context),
+                    icon: const Icon(LucideIcons.folderOpen),
+                    label: const Text('Open Local File'),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: 250,
+                  height: 50,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _enterUrl(context),
+                    icon: const Icon(LucideIcons.globe),
+                    label: const Text('Open Network URL'),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 48),
-            SizedBox(
-              width: 250,
-              height: 50,
-              child: ElevatedButton.icon(
-                onPressed: () => _pickFile(context),
-                icon: const Icon(LucideIcons.folderOpen),
-                label: const Text('Open Local File'),
+          ),
+          // Top bar with window controls
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: GestureDetector(
+              onPanStart: (_) => windowManager.startDragging(),
+              child: Container(
+                height: 40,
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [Colors.black54, Colors.transparent],
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    const SizedBox(width: 16),
+                    const Text(
+                      'Antigravity Player',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const Spacer(),
+                    IconButton(
+                      icon: const Icon(
+                        LucideIcons.minus,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      onPressed: () => windowManager.minimize(),
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        LucideIcons.maximize,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      onPressed: () async {
+                        if (await windowManager.isMaximized()) {
+                          windowManager.unmaximize();
+                        } else {
+                          windowManager.maximize();
+                        }
+                      },
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        LucideIcons.x,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      onPressed: () => windowManager.close(),
+                    ),
+                  ],
+                ),
               ),
             ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: 250,
-              height: 50,
-              child: OutlinedButton.icon(
-                onPressed: () => _enterUrl(context),
-                icon: const Icon(LucideIcons.globe),
-                label: const Text('Open Network URL'),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

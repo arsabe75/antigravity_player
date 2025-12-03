@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:go_router/go_router.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -119,58 +120,70 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                       top: 0,
                       left: 0,
                       right: 0,
-                      child: Container(
-                        height: 40,
-                        decoration: const BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topCenter,
-                            end: Alignment.bottomCenter,
-                            colors: [Colors.black54, Colors.transparent],
+                      child: GestureDetector(
+                        onPanStart: (_) => windowManager.startDragging(),
+                        child: Container(
+                          height: 40,
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.black54, Colors.transparent],
+                            ),
                           ),
-                        ),
-                        child: Row(
-                          children: [
-                            const SizedBox(width: 16),
-                            Text(
-                              state.currentVideoPath?.split('/').last ??
-                                  'Video Player',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
+                          child: Row(
+                            children: [
+                              const SizedBox(width: 8),
+                              IconButton(
+                                icon: const Icon(
+                                  LucideIcons.arrowLeft,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                                onPressed: () => context.go('/'),
                               ),
-                            ),
-                            const Spacer(),
-                            IconButton(
-                              icon: const Icon(
-                                LucideIcons.minus,
-                                color: Colors.white,
-                                size: 20,
+                              const SizedBox(width: 8),
+                              Text(
+                                state.currentVideoPath?.split('/').last ??
+                                    'Video Player',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
-                              onPressed: () => windowManager.minimize(),
-                            ),
-                            IconButton(
-                              icon: const Icon(
-                                LucideIcons.maximize,
-                                color: Colors.white,
-                                size: 20,
+                              const Spacer(),
+                              IconButton(
+                                icon: const Icon(
+                                  LucideIcons.minus,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                                onPressed: () => windowManager.minimize(),
                               ),
-                              onPressed: () async {
-                                if (await windowManager.isMaximized()) {
-                                  windowManager.unmaximize();
-                                } else {
-                                  windowManager.maximize();
-                                }
-                              },
-                            ),
-                            IconButton(
-                              icon: const Icon(
-                                LucideIcons.x,
-                                color: Colors.white,
-                                size: 20,
+                              IconButton(
+                                icon: const Icon(
+                                  LucideIcons.maximize,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                                onPressed: () async {
+                                  if (await windowManager.isMaximized()) {
+                                    windowManager.unmaximize();
+                                  } else {
+                                    windowManager.maximize();
+                                  }
+                                },
                               ),
-                              onPressed: () => windowManager.close(),
-                            ),
-                          ],
+                              IconButton(
+                                icon: const Icon(
+                                  LucideIcons.x,
+                                  color: Colors.white,
+                                  size: 20,
+                                ),
+                                onPressed: () => windowManager.close(),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
