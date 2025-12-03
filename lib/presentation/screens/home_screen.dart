@@ -1,0 +1,94 @@
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+import 'package:lucide_icons/lucide_icons.dart';
+
+class HomeScreen extends StatelessWidget {
+  const HomeScreen({super.key});
+
+  Future<void> _pickFile(BuildContext context) async {
+    final result = await FilePicker.platform.pickFiles(
+      type: FileType.video,
+      allowMultiple: false,
+    );
+
+    if (result != null && result.files.single.path != null) {
+      if (context.mounted) {
+        context.go('/player', extra: result.files.single.path);
+      }
+    }
+  }
+
+  Future<void> _enterUrl(BuildContext context) async {
+    final controller = TextEditingController();
+    final url = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Enter Network URL'),
+        content: TextField(
+          controller: controller,
+          decoration: const InputDecoration(
+            hintText: 'https://example.com/video.mp4',
+            border: OutlineInputBorder(),
+          ),
+          autofocus: true,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: const Text('Open'),
+          ),
+        ],
+      ),
+    );
+
+    if (url != null && url.isNotEmpty) {
+      if (context.mounted) {
+        context.go('/player', extra: url);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(LucideIcons.clapperboard, size: 64, color: Colors.white),
+            const SizedBox(height: 32),
+            const Text(
+              'Antigravity Player',
+              style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 48),
+            SizedBox(
+              width: 250,
+              height: 50,
+              child: ElevatedButton.icon(
+                onPressed: () => _pickFile(context),
+                icon: const Icon(LucideIcons.folderOpen),
+                label: const Text('Open Local File'),
+              ),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: 250,
+              height: 50,
+              child: OutlinedButton.icon(
+                onPressed: () => _enterUrl(context),
+                icon: const Icon(LucideIcons.globe),
+                label: const Text('Open Network URL'),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
