@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:go_router/go_router.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:lucide_icons/lucide_icons.dart';
@@ -94,6 +95,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     return Scaffold(
       backgroundColor: Colors.black,
       body: MouseRegion(
+        cursor: state.isFullscreen && !state.areControlsVisible
+            ? SystemMouseCursors.none
+            : SystemMouseCursors.basic,
         onHover: (_) => _onHover(),
         onExit: (_) => _onExit(),
         child: Stack(
