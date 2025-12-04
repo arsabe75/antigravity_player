@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:window_manager/window_manager.dart';
 import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
 import '../../infrastructure/repositories/video_repository_impl.dart';
@@ -117,6 +118,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
   void toggleFullscreen() {
     state = state.copyWith(isFullscreen: !state.isFullscreen);
+  }
+
+  Future<void> toggleAlwaysOnTop() async {
+    final newState = !state.isAlwaysOnTop;
+    await windowManager.setAlwaysOnTop(newState);
+    state = state.copyWith(isAlwaysOnTop: newState);
   }
 
   void setControlsVisibility(bool visible) {

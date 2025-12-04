@@ -384,6 +384,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                   ),
                                   IconButton(
                                     icon: Icon(
+                                      LucideIcons.pin,
+                                      color: state.isAlwaysOnTop
+                                          ? Colors.blue
+                                          : Colors.white,
+                                    ),
+                                    onPressed: notifier.toggleAlwaysOnTop,
+                                    tooltip: state.isAlwaysOnTop
+                                        ? 'Disable Always on Top'
+                                        : 'Enable Always on Top',
+                                  ),
+                                  IconButton(
+                                    icon: Icon(
                                       state.isFullscreen
                                           ? LucideIcons.minimize
                                           : LucideIcons.maximize,

@@ -14,7 +14,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$PlayerState {
 
- bool get isPlaying; bool get isBuffering; Duration get position; Duration get duration; double get volume; bool get isFullscreen; bool get areControlsVisible; String? get currentVideoPath; String? get error;
+ bool get isPlaying; bool get isBuffering; Duration get position; Duration get duration; double get volume; bool get isFullscreen; bool get areControlsVisible; bool get isAlwaysOnTop; String? get currentVideoPath; String? get error;
 /// Create a copy of PlayerState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -25,16 +25,16 @@ $PlayerStateCopyWith<PlayerState> get copyWith => _$PlayerStateCopyWithImpl<Play
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is PlayerState&&(identical(other.isPlaying, isPlaying) || other.isPlaying == isPlaying)&&(identical(other.isBuffering, isBuffering) || other.isBuffering == isBuffering)&&(identical(other.position, position) || other.position == position)&&(identical(other.duration, duration) || other.duration == duration)&&(identical(other.volume, volume) || other.volume == volume)&&(identical(other.isFullscreen, isFullscreen) || other.isFullscreen == isFullscreen)&&(identical(other.areControlsVisible, areControlsVisible) || other.areControlsVisible == areControlsVisible)&&(identical(other.currentVideoPath, currentVideoPath) || other.currentVideoPath == currentVideoPath)&&(identical(other.error, error) || other.error == error));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is PlayerState&&(identical(other.isPlaying, isPlaying) || other.isPlaying == isPlaying)&&(identical(other.isBuffering, isBuffering) || other.isBuffering == isBuffering)&&(identical(other.position, position) || other.position == position)&&(identical(other.duration, duration) || other.duration == duration)&&(identical(other.volume, volume) || other.volume == volume)&&(identical(other.isFullscreen, isFullscreen) || other.isFullscreen == isFullscreen)&&(identical(other.areControlsVisible, areControlsVisible) || other.areControlsVisible == areControlsVisible)&&(identical(other.isAlwaysOnTop, isAlwaysOnTop) || other.isAlwaysOnTop == isAlwaysOnTop)&&(identical(other.currentVideoPath, currentVideoPath) || other.currentVideoPath == currentVideoPath)&&(identical(other.error, error) || other.error == error));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,isPlaying,isBuffering,position,duration,volume,isFullscreen,areControlsVisible,currentVideoPath,error);
+int get hashCode => Object.hash(runtimeType,isPlaying,isBuffering,position,duration,volume,isFullscreen,areControlsVisible,isAlwaysOnTop,currentVideoPath,error);
 
 @override
 String toString() {
-  return 'PlayerState(isPlaying: $isPlaying, isBuffering: $isBuffering, position: $position, duration: $duration, volume: $volume, isFullscreen: $isFullscreen, areControlsVisible: $areControlsVisible, currentVideoPath: $currentVideoPath, error: $error)';
+  return 'PlayerState(isPlaying: $isPlaying, isBuffering: $isBuffering, position: $position, duration: $duration, volume: $volume, isFullscreen: $isFullscreen, areControlsVisible: $areControlsVisible, isAlwaysOnTop: $isAlwaysOnTop, currentVideoPath: $currentVideoPath, error: $error)';
 }
 
 
@@ -45,7 +45,7 @@ abstract mixin class $PlayerStateCopyWith<$Res>  {
   factory $PlayerStateCopyWith(PlayerState value, $Res Function(PlayerState) _then) = _$PlayerStateCopyWithImpl;
 @useResult
 $Res call({
- bool isPlaying, bool isBuffering, Duration position, Duration duration, double volume, bool isFullscreen, bool areControlsVisible, String? currentVideoPath, String? error
+ bool isPlaying, bool isBuffering, Duration position, Duration duration, double volume, bool isFullscreen, bool areControlsVisible, bool isAlwaysOnTop, String? currentVideoPath, String? error
 });
 
 
@@ -62,7 +62,7 @@ class _$PlayerStateCopyWithImpl<$Res>
 
 /// Create a copy of PlayerState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? isPlaying = null,Object? isBuffering = null,Object? position = null,Object? duration = null,Object? volume = null,Object? isFullscreen = null,Object? areControlsVisible = null,Object? currentVideoPath = freezed,Object? error = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? isPlaying = null,Object? isBuffering = null,Object? position = null,Object? duration = null,Object? volume = null,Object? isFullscreen = null,Object? areControlsVisible = null,Object? isAlwaysOnTop = null,Object? currentVideoPath = freezed,Object? error = freezed,}) {
   return _then(_self.copyWith(
 isPlaying: null == isPlaying ? _self.isPlaying : isPlaying // ignore: cast_nullable_to_non_nullable
 as bool,isBuffering: null == isBuffering ? _self.isBuffering : isBuffering // ignore: cast_nullable_to_non_nullable
@@ -71,6 +71,7 @@ as Duration,duration: null == duration ? _self.duration : duration // ignore: ca
 as Duration,volume: null == volume ? _self.volume : volume // ignore: cast_nullable_to_non_nullable
 as double,isFullscreen: null == isFullscreen ? _self.isFullscreen : isFullscreen // ignore: cast_nullable_to_non_nullable
 as bool,areControlsVisible: null == areControlsVisible ? _self.areControlsVisible : areControlsVisible // ignore: cast_nullable_to_non_nullable
+as bool,isAlwaysOnTop: null == isAlwaysOnTop ? _self.isAlwaysOnTop : isAlwaysOnTop // ignore: cast_nullable_to_non_nullable
 as bool,currentVideoPath: freezed == currentVideoPath ? _self.currentVideoPath : currentVideoPath // ignore: cast_nullable_to_non_nullable
 as String?,error: freezed == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
 as String?,
@@ -158,10 +159,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool isPlaying,  bool isBuffering,  Duration position,  Duration duration,  double volume,  bool isFullscreen,  bool areControlsVisible,  String? currentVideoPath,  String? error)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool isPlaying,  bool isBuffering,  Duration position,  Duration duration,  double volume,  bool isFullscreen,  bool areControlsVisible,  bool isAlwaysOnTop,  String? currentVideoPath,  String? error)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _PlayerState() when $default != null:
-return $default(_that.isPlaying,_that.isBuffering,_that.position,_that.duration,_that.volume,_that.isFullscreen,_that.areControlsVisible,_that.currentVideoPath,_that.error);case _:
+return $default(_that.isPlaying,_that.isBuffering,_that.position,_that.duration,_that.volume,_that.isFullscreen,_that.areControlsVisible,_that.isAlwaysOnTop,_that.currentVideoPath,_that.error);case _:
   return orElse();
 
 }
@@ -179,10 +180,10 @@ return $default(_that.isPlaying,_that.isBuffering,_that.position,_that.duration,
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool isPlaying,  bool isBuffering,  Duration position,  Duration duration,  double volume,  bool isFullscreen,  bool areControlsVisible,  String? currentVideoPath,  String? error)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool isPlaying,  bool isBuffering,  Duration position,  Duration duration,  double volume,  bool isFullscreen,  bool areControlsVisible,  bool isAlwaysOnTop,  String? currentVideoPath,  String? error)  $default,) {final _that = this;
 switch (_that) {
 case _PlayerState():
-return $default(_that.isPlaying,_that.isBuffering,_that.position,_that.duration,_that.volume,_that.isFullscreen,_that.areControlsVisible,_that.currentVideoPath,_that.error);case _:
+return $default(_that.isPlaying,_that.isBuffering,_that.position,_that.duration,_that.volume,_that.isFullscreen,_that.areControlsVisible,_that.isAlwaysOnTop,_that.currentVideoPath,_that.error);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -199,10 +200,10 @@ return $default(_that.isPlaying,_that.isBuffering,_that.position,_that.duration,
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool isPlaying,  bool isBuffering,  Duration position,  Duration duration,  double volume,  bool isFullscreen,  bool areControlsVisible,  String? currentVideoPath,  String? error)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool isPlaying,  bool isBuffering,  Duration position,  Duration duration,  double volume,  bool isFullscreen,  bool areControlsVisible,  bool isAlwaysOnTop,  String? currentVideoPath,  String? error)?  $default,) {final _that = this;
 switch (_that) {
 case _PlayerState() when $default != null:
-return $default(_that.isPlaying,_that.isBuffering,_that.position,_that.duration,_that.volume,_that.isFullscreen,_that.areControlsVisible,_that.currentVideoPath,_that.error);case _:
+return $default(_that.isPlaying,_that.isBuffering,_that.position,_that.duration,_that.volume,_that.isFullscreen,_that.areControlsVisible,_that.isAlwaysOnTop,_that.currentVideoPath,_that.error);case _:
   return null;
 
 }
@@ -214,7 +215,7 @@ return $default(_that.isPlaying,_that.isBuffering,_that.position,_that.duration,
 
 
 class _PlayerState implements PlayerState {
-  const _PlayerState({this.isPlaying = false, this.isBuffering = false, this.position = Duration.zero, this.duration = Duration.zero, this.volume = 1.0, this.isFullscreen = false, this.areControlsVisible = true, this.currentVideoPath, this.error});
+  const _PlayerState({this.isPlaying = false, this.isBuffering = false, this.position = Duration.zero, this.duration = Duration.zero, this.volume = 1.0, this.isFullscreen = false, this.areControlsVisible = true, this.isAlwaysOnTop = false, this.currentVideoPath, this.error});
   
 
 @override@JsonKey() final  bool isPlaying;
@@ -224,6 +225,7 @@ class _PlayerState implements PlayerState {
 @override@JsonKey() final  double volume;
 @override@JsonKey() final  bool isFullscreen;
 @override@JsonKey() final  bool areControlsVisible;
+@override@JsonKey() final  bool isAlwaysOnTop;
 @override final  String? currentVideoPath;
 @override final  String? error;
 
@@ -237,16 +239,16 @@ _$PlayerStateCopyWith<_PlayerState> get copyWith => __$PlayerStateCopyWithImpl<_
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _PlayerState&&(identical(other.isPlaying, isPlaying) || other.isPlaying == isPlaying)&&(identical(other.isBuffering, isBuffering) || other.isBuffering == isBuffering)&&(identical(other.position, position) || other.position == position)&&(identical(other.duration, duration) || other.duration == duration)&&(identical(other.volume, volume) || other.volume == volume)&&(identical(other.isFullscreen, isFullscreen) || other.isFullscreen == isFullscreen)&&(identical(other.areControlsVisible, areControlsVisible) || other.areControlsVisible == areControlsVisible)&&(identical(other.currentVideoPath, currentVideoPath) || other.currentVideoPath == currentVideoPath)&&(identical(other.error, error) || other.error == error));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _PlayerState&&(identical(other.isPlaying, isPlaying) || other.isPlaying == isPlaying)&&(identical(other.isBuffering, isBuffering) || other.isBuffering == isBuffering)&&(identical(other.position, position) || other.position == position)&&(identical(other.duration, duration) || other.duration == duration)&&(identical(other.volume, volume) || other.volume == volume)&&(identical(other.isFullscreen, isFullscreen) || other.isFullscreen == isFullscreen)&&(identical(other.areControlsVisible, areControlsVisible) || other.areControlsVisible == areControlsVisible)&&(identical(other.isAlwaysOnTop, isAlwaysOnTop) || other.isAlwaysOnTop == isAlwaysOnTop)&&(identical(other.currentVideoPath, currentVideoPath) || other.currentVideoPath == currentVideoPath)&&(identical(other.error, error) || other.error == error));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,isPlaying,isBuffering,position,duration,volume,isFullscreen,areControlsVisible,currentVideoPath,error);
+int get hashCode => Object.hash(runtimeType,isPlaying,isBuffering,position,duration,volume,isFullscreen,areControlsVisible,isAlwaysOnTop,currentVideoPath,error);
 
 @override
 String toString() {
-  return 'PlayerState(isPlaying: $isPlaying, isBuffering: $isBuffering, position: $position, duration: $duration, volume: $volume, isFullscreen: $isFullscreen, areControlsVisible: $areControlsVisible, currentVideoPath: $currentVideoPath, error: $error)';
+  return 'PlayerState(isPlaying: $isPlaying, isBuffering: $isBuffering, position: $position, duration: $duration, volume: $volume, isFullscreen: $isFullscreen, areControlsVisible: $areControlsVisible, isAlwaysOnTop: $isAlwaysOnTop, currentVideoPath: $currentVideoPath, error: $error)';
 }
 
 
@@ -257,7 +259,7 @@ abstract mixin class _$PlayerStateCopyWith<$Res> implements $PlayerStateCopyWith
   factory _$PlayerStateCopyWith(_PlayerState value, $Res Function(_PlayerState) _then) = __$PlayerStateCopyWithImpl;
 @override @useResult
 $Res call({
- bool isPlaying, bool isBuffering, Duration position, Duration duration, double volume, bool isFullscreen, bool areControlsVisible, String? currentVideoPath, String? error
+ bool isPlaying, bool isBuffering, Duration position, Duration duration, double volume, bool isFullscreen, bool areControlsVisible, bool isAlwaysOnTop, String? currentVideoPath, String? error
 });
 
 
@@ -274,7 +276,7 @@ class __$PlayerStateCopyWithImpl<$Res>
 
 /// Create a copy of PlayerState
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? isPlaying = null,Object? isBuffering = null,Object? position = null,Object? duration = null,Object? volume = null,Object? isFullscreen = null,Object? areControlsVisible = null,Object? currentVideoPath = freezed,Object? error = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? isPlaying = null,Object? isBuffering = null,Object? position = null,Object? duration = null,Object? volume = null,Object? isFullscreen = null,Object? areControlsVisible = null,Object? isAlwaysOnTop = null,Object? currentVideoPath = freezed,Object? error = freezed,}) {
   return _then(_PlayerState(
 isPlaying: null == isPlaying ? _self.isPlaying : isPlaying // ignore: cast_nullable_to_non_nullable
 as bool,isBuffering: null == isBuffering ? _self.isBuffering : isBuffering // ignore: cast_nullable_to_non_nullable
@@ -283,6 +285,7 @@ as Duration,duration: null == duration ? _self.duration : duration // ignore: ca
 as Duration,volume: null == volume ? _self.volume : volume // ignore: cast_nullable_to_non_nullable
 as double,isFullscreen: null == isFullscreen ? _self.isFullscreen : isFullscreen // ignore: cast_nullable_to_non_nullable
 as bool,areControlsVisible: null == areControlsVisible ? _self.areControlsVisible : areControlsVisible // ignore: cast_nullable_to_non_nullable
+as bool,isAlwaysOnTop: null == isAlwaysOnTop ? _self.isAlwaysOnTop : isAlwaysOnTop // ignore: cast_nullable_to_non_nullable
 as bool,currentVideoPath: freezed == currentVideoPath ? _self.currentVideoPath : currentVideoPath // ignore: cast_nullable_to_non_nullable
 as String?,error: freezed == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
 as String?,

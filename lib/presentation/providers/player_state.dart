@@ -12,6 +12,7 @@ abstract class PlayerState with _$PlayerState {
     @Default(1.0) double volume,
     @Default(false) bool isFullscreen,
     @Default(true) bool areControlsVisible,
+    @Default(false) bool isAlwaysOnTop,
     String? currentVideoPath,
     String? error,
   }) = _PlayerState;
