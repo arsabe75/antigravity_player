@@ -25,11 +25,36 @@ class VideoRepositoryImpl implements VideoRepository {
 
   @override
   Future<void> dispose() async {
+    // Cancel position timer first
     _positionTimer?.cancel();
-    await _controller?.dispose();
-    _controller = null;
-    // Don't close stream controllers if this repo is singleton/long-lived,
-    // but if it's scoped, we should. For now, we'll keep them open or close if we implement full dispose logic.
+    _positionTimer = null;
+
+    // Pause and clean up controller before disposing
+    if (_controller != null) {
+      try {
+        // Pause the video to stop playback
+        if (_controller!.value.isPlaying) {
+          await _controller!.pause();
+        }
+
+        // Remove listener before disposing
+        _controller!.removeListener(_onControllerUpdate);
+
+        // Dispose the controller
+        await _controller!.dispose();
+      } catch (e) {
+        // Silently handle errors during cleanup
+        // The controller might already be in an invalid state
+      } finally {
+        _controller = null;
+      }
+    }
+
+    // Close all stream controllers to prevent memory leaks
+    await _positionController.close();
+    await _durationController.close();
+    await _isPlayingController.close();
+    await _isBufferingController.close();
   }
 
   @override
