@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
 import '../../infrastructure/repositories/video_repository_impl.dart';
+import '../../infrastructure/services/playback_storage_service.dart';
 import 'player_state.dart';
 
 // Repository Provider
@@ -12,9 +13,14 @@ final videoRepositoryProvider = Provider.autoDispose<VideoRepository>((ref) {
   return repo;
 });
 
+final playbackStorageServiceProvider = Provider<PlaybackStorageService>((ref) {
+  return PlaybackStorageService();
+});
+
 // Player Notifier
 class PlayerNotifier extends Notifier<PlayerState> {
   late final VideoRepository _repository;
+  late final PlaybackStorageService _storageService;
   StreamSubscription? _positionSub;
   StreamSubscription? _durationSub;
   StreamSubscription? _playingSub;
@@ -23,6 +29,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
   @override
   PlayerState build() {
     _repository = ref.watch(videoRepositoryProvider);
+    _storageService = ref.watch(playbackStorageServiceProvider);
     _initStreams();
 
     ref.onDispose(() {
@@ -30,6 +37,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
       _durationSub?.cancel();
       _playingSub?.cancel();
       _bufferingSub?.cancel();
+      _savePosition();
     });
 
     return const PlayerState();
@@ -38,6 +46,9 @@ class PlayerNotifier extends Notifier<PlayerState> {
   void _initStreams() {
     _positionSub = _repository.positionStream.listen((pos) {
       state = state.copyWith(position: pos);
+      if (pos.inSeconds % 5 == 0) {
+        _savePosition();
+      }
     });
     _durationSub = _repository.durationStream.listen((dur) {
       state = state.copyWith(duration: dur);
@@ -61,6 +72,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
       );
       final video = VideoEntity(path: path, isNetwork: isNetwork);
       await _repository.play(video);
+
+      final savedPositionMs = await _storageService.getPosition(path);
+      if (savedPositionMs != null && savedPositionMs > 0) {
+        final position = Duration(milliseconds: savedPositionMs);
+        await seekTo(position);
+      }
     } catch (e) {
       state = state.copyWith(error: e.toString());
     }
@@ -69,6 +86,7 @@ class PlayerNotifier extends Notifier<PlayerState> {
   Future<void> togglePlay() async {
     if (state.isPlaying) {
       await _repository.pause();
+      await _savePosition();
     } else {
       await _repository.resume();
     }
@@ -90,6 +108,19 @@ class PlayerNotifier extends Notifier<PlayerState> {
 
   void setControlsVisibility(bool visible) {
     state = state.copyWith(areControlsVisible: visible);
+  }
+
+  Future<void> _savePosition() async {
+    try {
+      if (state.currentVideoPath != null) {
+        await _storageService.savePosition(
+          state.currentVideoPath!,
+          state.position.inMilliseconds,
+        );
+      }
+    } catch (e) {
+      // Ignore errors during save, especially during dispose
+    }
   }
 }
 

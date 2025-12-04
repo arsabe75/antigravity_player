@@ -61,7 +61,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   void _onExit() {
     _hideTimer?.cancel();
-    ref.read(playerProvider.notifier).setControlsVisibility(false);
+    if (mounted) {
+      ref.read(playerProvider.notifier).setControlsVisibility(false);
+    }
   }
 
   String _formatDuration(Duration duration) {
