@@ -350,6 +350,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                   ),
                                   const Spacer(),
                                   // Volume
+                                  IconButton(
+                                    icon: Icon(
+                                      state.volume > 0
+                                          ? LucideIcons.volume2
+                                          : LucideIcons.volumeX,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    onPressed: notifier.toggleMute,
+                                    tooltip: state.volume > 0
+                                        ? 'Mute'
+                                        : 'Unmute',
+                                  ),
                                   SizedBox(
                                     width: 100,
                                     child: SliderTheme(
