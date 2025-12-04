@@ -119,16 +119,19 @@ class HomeScreen extends ConsumerWidget {
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
-                    colors: [Colors.black54, Colors.transparent],
+                    colors: [
+                      isDarkMode ? Colors.black54 : Colors.transparent,
+                      Colors.transparent,
+                    ],
                   ),
                 ),
                 child: Row(
                   children: [
                     const SizedBox(width: 16),
-                    const Text(
+                    Text(
                       'Antigravity Player',
                       style: TextStyle(
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onSurface,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -137,7 +140,7 @@ class HomeScreen extends ConsumerWidget {
                     IconButton(
                       icon: Icon(
                         isDarkMode ? LucideIcons.sun : LucideIcons.moon,
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onSurface,
                         size: 20,
                       ),
                       onPressed: () {
@@ -148,17 +151,17 @@ class HomeScreen extends ConsumerWidget {
                           : 'Switch to Dark Mode',
                     ),
                     IconButton(
-                      icon: const Icon(
+                      icon: Icon(
                         LucideIcons.minus,
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onSurface,
                         size: 20,
                       ),
                       onPressed: () => windowManager.minimize(),
                     ),
                     IconButton(
-                      icon: const Icon(
+                      icon: Icon(
                         LucideIcons.maximize,
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onSurface,
                         size: 20,
                       ),
                       onPressed: () async {
@@ -170,9 +173,9 @@ class HomeScreen extends ConsumerWidget {
                       },
                     ),
                     IconButton(
-                      icon: const Icon(
+                      icon: Icon(
                         LucideIcons.x,
-                        color: Colors.white,
+                        color: Theme.of(context).colorScheme.onSurface,
                         size: 20,
                       ),
                       onPressed: () => windowManager.close(),
