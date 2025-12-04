@@ -93,8 +93,10 @@ class PlayerNotifier extends Notifier<PlayerState> {
   }
 
   Future<void> seekTo(Duration position) async {
-    await _repository.seekTo(position);
+    // Optimistic update
     state = state.copyWith(position: position);
+    await _savePosition();
+    await _repository.seekTo(position);
   }
 
   Future<void> setVolume(double volume) async {
