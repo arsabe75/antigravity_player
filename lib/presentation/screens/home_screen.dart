@@ -1,10 +1,13 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
 
-class HomeScreen extends StatelessWidget {
+import '../providers/theme_provider.dart';
+
+class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   Future<void> _pickFile(BuildContext context) async {
@@ -55,7 +58,9 @@ class HomeScreen extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
+    final isDarkMode = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
       body: Stack(
         children: [
@@ -64,15 +69,19 @@ class HomeScreen extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(
+                Icon(
                   LucideIcons.clapperboard,
                   size: 64,
-                  color: Colors.white,
+                  color: Theme.of(context).colorScheme.primary,
                 ),
                 const SizedBox(height: 32),
-                const Text(
+                Text(
                   'Antigravity Player',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
                 ),
                 const SizedBox(height: 48),
                 SizedBox(
@@ -106,7 +115,7 @@ class HomeScreen extends StatelessWidget {
               onPanStart: (_) => windowManager.startDragging(),
               child: Container(
                 height: 40,
-                decoration: const BoxDecoration(
+                decoration: BoxDecoration(
                   gradient: LinearGradient(
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
@@ -124,6 +133,20 @@ class HomeScreen extends StatelessWidget {
                       ),
                     ),
                     const Spacer(),
+                    // Theme Toggle Button
+                    IconButton(
+                      icon: Icon(
+                        isDarkMode ? LucideIcons.sun : LucideIcons.moon,
+                        color: Colors.white,
+                        size: 20,
+                      ),
+                      onPressed: () {
+                        ref.read(themeProvider.notifier).toggleTheme();
+                      },
+                      tooltip: isDarkMode
+                          ? 'Switch to Light Mode'
+                          : 'Switch to Dark Mode',
+                    ),
                     IconButton(
                       icon: const Icon(
                         LucideIcons.minus,
