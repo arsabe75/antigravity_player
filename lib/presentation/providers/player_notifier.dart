@@ -99,9 +99,20 @@ class PlayerNotifier extends Notifier<PlayerState> {
     await _repository.seekTo(position);
   }
 
+  double _lastVolume = 1.0;
+
   Future<void> setVolume(double volume) async {
     await _repository.setVolume(volume);
     state = state.copyWith(volume: volume);
+  }
+
+  Future<void> toggleMute() async {
+    if (state.volume > 0) {
+      _lastVolume = state.volume;
+      await setVolume(0);
+    } else {
+      await setVolume(_lastVolume > 0 ? _lastVolume : 1.0);
+    }
   }
 
   void toggleFullscreen() {

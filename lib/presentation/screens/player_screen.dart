@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:go_router/go_router.dart';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'package:lucide_icons/lucide_icons.dart';
@@ -120,267 +121,300 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     return Scaffold(
       backgroundColor: Colors.black,
-      body: MouseRegion(
-        cursor: state.isFullscreen && !state.areControlsVisible
-            ? SystemMouseCursors.none
-            : SystemMouseCursors.basic,
-        onHover: (_) => _onHover(),
-        onExit: (_) => _onExit(),
-        child: Stack(
-          children: [
-            // Video Layer
-            GestureDetector(
-              onDoubleTap: () {
-                notifier.toggleFullscreen();
-                // Handle actual window fullscreen
-                if (state.isFullscreen) {
-                  windowManager.setFullScreen(false);
-                } else {
-                  windowManager.setFullScreen(true);
-                }
-              },
-              child: Center(
-                child:
-                    !_isDisposing &&
-                        controller != null &&
-                        controller.value.isInitialized
-                    ? AspectRatio(
-                        aspectRatio: controller.value.aspectRatio,
-                        child: VideoPlayer(controller),
-                      )
-                    : const CircularProgressIndicator(color: Colors.white),
-              ),
-            ),
+      body: CallbackShortcuts(
+        bindings: {
+          const SingleActivator(LogicalKeyboardKey.space): () {
+            notifier.togglePlay();
+          },
+          const SingleActivator(LogicalKeyboardKey.keyF): () {
+            notifier.toggleFullscreen();
+            if (state.isFullscreen) {
+              windowManager.setFullScreen(false);
+            } else {
+              windowManager.setFullScreen(true);
+            }
+          },
+          const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
+            final newPos = state.position - const Duration(seconds: 10);
+            notifier.seekTo(newPos < Duration.zero ? Duration.zero : newPos);
+          },
+          const SingleActivator(LogicalKeyboardKey.arrowRight): () {
+            final newPos = state.position + const Duration(seconds: 10);
+            final maxDur = state.duration;
+            notifier.seekTo(newPos > maxDur ? maxDur : newPos);
+          },
+          const SingleActivator(LogicalKeyboardKey.keyM): () {
+            notifier.toggleMute();
+          },
+        },
+        child: Focus(
+          autofocus: true,
+          child: MouseRegion(
+            cursor: state.isFullscreen && !state.areControlsVisible
+                ? SystemMouseCursors.none
+                : SystemMouseCursors.basic,
+            onHover: (_) => _onHover(),
+            onExit: (_) => _onExit(),
+            child: Stack(
+              children: [
+                // Video Layer
+                GestureDetector(
+                  onDoubleTap: () {
+                    notifier.toggleFullscreen();
+                    // Handle actual window fullscreen
+                    if (state.isFullscreen) {
+                      windowManager.setFullScreen(false);
+                    } else {
+                      windowManager.setFullScreen(true);
+                    }
+                  },
+                  child: Center(
+                    child:
+                        !_isDisposing &&
+                            controller != null &&
+                            controller.value.isInitialized
+                        ? AspectRatio(
+                            aspectRatio: controller.value.aspectRatio,
+                            child: VideoPlayer(controller),
+                          )
+                        : const CircularProgressIndicator(color: Colors.white),
+                  ),
+                ),
 
-            // Controls Layer
-            AnimatedOpacity(
-              opacity: state.areControlsVisible ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 300),
-              child: Stack(
-                children: [
-                  // Top Bar (Window Controls)
-                  if (!state.isFullscreen)
-                    Positioned(
-                      top: 0,
-                      left: 0,
-                      right: 0,
-                      child: GestureDetector(
-                        onPanStart: (_) => windowManager.startDragging(),
+                // Controls Layer
+                AnimatedOpacity(
+                  opacity: state.areControlsVisible ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 300),
+                  child: Stack(
+                    children: [
+                      // Top Bar (Window Controls)
+                      if (!state.isFullscreen)
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          right: 0,
+                          child: GestureDetector(
+                            onPanStart: (_) => windowManager.startDragging(),
+                            child: Container(
+                              height: 40,
+                              decoration: const BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.topCenter,
+                                  end: Alignment.bottomCenter,
+                                  colors: [Colors.black54, Colors.transparent],
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  const SizedBox(width: 8),
+                                  IconButton(
+                                    icon: const Icon(
+                                      LucideIcons.arrowLeft,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    onPressed: () async {
+                                      if (_isDisposing) return;
+                                      setState(() {
+                                        _isDisposing = true;
+                                      });
+                                      // Wait for frame to unmount VideoPlayer
+                                      await Future.delayed(
+                                        const Duration(milliseconds: 100),
+                                      );
+                                      await notifier.stop();
+                                      if (context.mounted) context.go('/');
+                                    },
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    state.currentVideoPath?.split('/').last ??
+                                        'Video Player',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  IconButton(
+                                    icon: const Icon(
+                                      LucideIcons.minus,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    onPressed: () => windowManager.minimize(),
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(
+                                      LucideIcons.maximize,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    onPressed: () async {
+                                      if (await windowManager.isMaximized()) {
+                                        windowManager.unmaximize();
+                                      } else {
+                                        windowManager.maximize();
+                                      }
+                                    },
+                                  ),
+                                  IconButton(
+                                    icon: const Icon(
+                                      LucideIcons.x,
+                                      color: Colors.white,
+                                      size: 20,
+                                    ),
+                                    onPressed: () async {
+                                      await windowManager.close();
+                                    },
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+
+                      // Bottom Bar (Player Controls)
+                      Positioned(
+                        bottom: 0,
+                        left: 0,
+                        right: 0,
                         child: Container(
-                          height: 40,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 16,
+                          ),
                           decoration: const BoxDecoration(
                             gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [Colors.black54, Colors.transparent],
+                              begin: Alignment.bottomCenter,
+                              end: Alignment.topCenter,
+                              colors: [Colors.black87, Colors.transparent],
                             ),
                           ),
-                          child: Row(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              const SizedBox(width: 8),
-                              IconButton(
-                                icon: const Icon(
-                                  LucideIcons.arrowLeft,
-                                  color: Colors.white,
-                                  size: 20,
-                                ),
-                                onPressed: () async {
-                                  if (_isDisposing) return;
-                                  setState(() {
-                                    _isDisposing = true;
-                                  });
-                                  // Wait for frame to unmount VideoPlayer
-                                  await Future.delayed(
-                                    const Duration(milliseconds: 100),
-                                  );
-                                  await notifier.stop();
-                                  if (context.mounted) context.go('/');
-                                },
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                state.currentVideoPath?.split('/').last ??
-                                    'Video Player',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const Spacer(),
-                              IconButton(
-                                icon: const Icon(
-                                  LucideIcons.minus,
-                                  color: Colors.white,
-                                  size: 20,
-                                ),
-                                onPressed: () => windowManager.minimize(),
-                              ),
-                              IconButton(
-                                icon: const Icon(
-                                  LucideIcons.maximize,
-                                  color: Colors.white,
-                                  size: 20,
-                                ),
-                                onPressed: () async {
-                                  if (await windowManager.isMaximized()) {
-                                    windowManager.unmaximize();
-                                  } else {
-                                    windowManager.maximize();
-                                  }
-                                },
-                              ),
-                              IconButton(
-                                icon: const Icon(
-                                  LucideIcons.x,
-                                  color: Colors.white,
-                                  size: 20,
-                                ),
-                                onPressed: () async {
-                                  await windowManager.close();
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-
-                  // Bottom Bar (Player Controls)
-                  Positioned(
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 16,
-                      ),
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.bottomCenter,
-                          end: Alignment.topCenter,
-                          colors: [Colors.black87, Colors.transparent],
-                        ),
-                      ),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Progress Bar
-                          SliderTheme(
-                            data: SliderThemeData(
-                              trackHeight: 2,
-                              thumbShape: const RoundSliderThumbShape(
-                                enabledThumbRadius: 6,
-                              ),
-                              overlayShape: const RoundSliderOverlayShape(
-                                overlayRadius: 12,
-                              ),
-                              activeTrackColor: Colors.blue,
-                              inactiveTrackColor: Colors.white24,
-                              thumbColor: Colors.white,
-                            ),
-                            child: Slider(
-                              value: state.position.inMilliseconds
-                                  .toDouble()
-                                  .clamp(
-                                    0,
-                                    state.duration.inMilliseconds.toDouble(),
+                              // Progress Bar
+                              SliderTheme(
+                                data: SliderThemeData(
+                                  trackHeight: 2,
+                                  thumbShape: const RoundSliderThumbShape(
+                                    enabledThumbRadius: 6,
                                   ),
-                              min: 0,
-                              max: state.duration.inMilliseconds.toDouble() > 0
-                                  ? state.duration.inMilliseconds.toDouble()
-                                  : 1.0,
-                              onChanged: (value) {
-                                notifier.seekTo(
-                                  Duration(milliseconds: value.toInt()),
-                                );
-                              },
-                            ),
-                          ),
-                          Row(
-                            children: [
-                              IconButton(
-                                icon: Icon(
-                                  state.isPlaying
-                                      ? LucideIcons.pause
-                                      : LucideIcons.play,
-                                  color: Colors.white,
+                                  overlayShape: const RoundSliderOverlayShape(
+                                    overlayRadius: 12,
+                                  ),
+                                  activeTrackColor: Colors.blue,
+                                  inactiveTrackColor: Colors.white24,
+                                  thumbColor: Colors.white,
                                 ),
-                                onPressed: notifier.togglePlay,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                '${_formatDuration(state.position)} / ${_formatDuration(state.duration)}',
-                                style: const TextStyle(
-                                  color: Colors.white70,
-                                  fontSize: 12,
+                                child: Slider(
+                                  value: state.position.inMilliseconds
+                                      .toDouble()
+                                      .clamp(
+                                        0,
+                                        state.duration.inMilliseconds
+                                            .toDouble(),
+                                      ),
+                                  min: 0,
+                                  max:
+                                      state.duration.inMilliseconds.toDouble() >
+                                          0
+                                      ? state.duration.inMilliseconds.toDouble()
+                                      : 1.0,
+                                  onChanged: (value) {
+                                    notifier.seekTo(
+                                      Duration(milliseconds: value.toInt()),
+                                    );
+                                  },
                                 ),
                               ),
-                              const Spacer(),
-                              // Volume
-                              SizedBox(
-                                width: 100,
-                                child: SliderTheme(
-                                  data: SliderThemeData(
-                                    trackHeight: 2,
-                                    thumbShape: const RoundSliderThumbShape(
-                                      enabledThumbRadius: 4,
+                              Row(
+                                children: [
+                                  IconButton(
+                                    icon: Icon(
+                                      state.isPlaying
+                                          ? LucideIcons.pause
+                                          : LucideIcons.play,
+                                      color: Colors.white,
                                     ),
-                                    activeTrackColor: Colors.white,
-                                    inactiveTrackColor: Colors.white24,
-                                    thumbColor: Colors.white,
+                                    onPressed: notifier.togglePlay,
                                   ),
-                                  child: Slider(
-                                    value: state.volume,
-                                    onChanged: (value) =>
-                                        notifier.setVolume(value),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    '${_formatDuration(state.position)} / ${_formatDuration(state.duration)}',
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 12,
+                                    ),
                                   ),
-                                ),
-                              ),
-                              IconButton(
-                                icon: Icon(
-                                  state.isFullscreen
-                                      ? LucideIcons.minimize
-                                      : LucideIcons.maximize,
-                                  color: Colors.white,
-                                ),
-                                onPressed: () {
-                                  notifier.toggleFullscreen();
-                                  // Handle actual window fullscreen
-                                  if (state.isFullscreen) {
-                                    windowManager.setFullScreen(false);
-                                  } else {
-                                    windowManager.setFullScreen(true);
-                                  }
-                                },
+                                  const Spacer(),
+                                  // Volume
+                                  SizedBox(
+                                    width: 100,
+                                    child: SliderTheme(
+                                      data: SliderThemeData(
+                                        trackHeight: 2,
+                                        thumbShape: const RoundSliderThumbShape(
+                                          enabledThumbRadius: 4,
+                                        ),
+                                        activeTrackColor: Colors.white,
+                                        inactiveTrackColor: Colors.white24,
+                                        thumbColor: Colors.white,
+                                      ),
+                                      child: Slider(
+                                        value: state.volume,
+                                        onChanged: (value) =>
+                                            notifier.setVolume(value),
+                                      ),
+                                    ),
+                                  ),
+                                  IconButton(
+                                    icon: Icon(
+                                      state.isFullscreen
+                                          ? LucideIcons.minimize
+                                          : LucideIcons.maximize,
+                                      color: Colors.white,
+                                    ),
+                                    onPressed: () {
+                                      notifier.toggleFullscreen();
+                                      // Handle actual window fullscreen
+                                      if (state.isFullscreen) {
+                                        windowManager.setFullScreen(false);
+                                      } else {
+                                        windowManager.setFullScreen(true);
+                                      }
+                                    },
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
+                        ),
                       ),
+                    ],
+                  ),
+                ),
+
+                // File Picker Button (if no video loaded)
+                if (state.currentVideoPath == null)
+                  Center(
+                    child: ElevatedButton.icon(
+                      onPressed: () {
+                        // Implement file picker logic here or in notifier
+                        // For now, just load a sample
+                        notifier.loadVideo(
+                          'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
+                          isNetwork: true,
+                        );
+                      },
+                      icon: const Icon(LucideIcons.fileVideo),
+                      label: const Text('Open Video'),
                     ),
                   ),
-                ],
-              ),
+              ],
             ),
-
-            // File Picker Button (if no video loaded)
-            if (state.currentVideoPath == null)
-              Center(
-                child: ElevatedButton.icon(
-                  onPressed: () {
-                    // Implement file picker logic here or in notifier
-                    // For now, just load a sample
-                    notifier.loadVideo(
-                      'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4',
-                      isNetwork: true,
-                    );
-                  },
-                  icon: const Icon(LucideIcons.fileVideo),
-                  label: const Text('Open Video'),
-                ),
-              ),
-          ],
+          ),
         ),
       ),
     );
