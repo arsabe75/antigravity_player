@@ -124,6 +124,12 @@ class PlayerNotifier extends Notifier<PlayerState> {
       // Ignore errors during save, especially during dispose
     }
   }
+
+  Future<void> stop() async {
+    await _savePosition();
+    // We manually dispose the repo here to ensure resources are freed before window close
+    await _repository.dispose();
+  }
 }
 
 final playerProvider =

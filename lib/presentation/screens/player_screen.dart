@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:go_router/go_router.dart';
 
 import 'package:flutter/material.dart';
@@ -22,6 +23,7 @@ class PlayerScreen extends ConsumerStatefulWidget {
 class _PlayerScreenState extends ConsumerState<PlayerScreen>
     with WindowListener {
   Timer? _hideTimer;
+  bool _isDisposing = false;
 
   @override
   void initState() {
@@ -36,13 +38,36 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             .loadVideo(widget.videoUrl!, isNetwork: isNetwork),
       );
     }
+
+    // Prevent default close to handle cleanup
+    windowManager.setPreventClose(true);
   }
 
   @override
   void dispose() {
     windowManager.removeListener(this);
+    windowManager.setPreventClose(false);
     _hideTimer?.cancel();
     super.dispose();
+  }
+
+  @override
+  Future<void> onWindowClose() async {
+    if (_isDisposing) return;
+    setState(() {
+      _isDisposing = true;
+    });
+
+    // Wait for frame to unmount VideoPlayer
+    await Future.delayed(const Duration(milliseconds: 200));
+
+    if (mounted) {
+      await ref.read(playerProvider.notifier).stop();
+    }
+
+    // Use exit(0) to force a clean shutdown of the process, avoiding GTK/OpenGL errors
+    // that can occur if the engine tries to render during window destruction.
+    exit(0);
   }
 
   void _startHideTimer() {
@@ -115,7 +140,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 }
               },
               child: Center(
-                child: controller != null && controller.value.isInitialized
+                child:
+                    !_isDisposing &&
+                        controller != null &&
+                        controller.value.isInitialized
                     ? AspectRatio(
                         aspectRatio: controller.value.aspectRatio,
                         child: VideoPlayer(controller),
@@ -156,7 +184,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                   color: Colors.white,
                                   size: 20,
                                 ),
-                                onPressed: () => context.go('/'),
+                                onPressed: () async {
+                                  if (_isDisposing) return;
+                                  setState(() {
+                                    _isDisposing = true;
+                                  });
+                                  // Wait for frame to unmount VideoPlayer
+                                  await Future.delayed(
+                                    const Duration(milliseconds: 100),
+                                  );
+                                  await notifier.stop();
+                                  if (context.mounted) context.go('/');
+                                },
                               ),
                               const SizedBox(width: 8),
                               Text(
@@ -196,7 +235,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                                   color: Colors.white,
                                   size: 20,
                                 ),
-                                onPressed: () => windowManager.close(),
+                                onPressed: () async {
+                                  await windowManager.close();
+                                },
                               ),
                             ],
                           ),

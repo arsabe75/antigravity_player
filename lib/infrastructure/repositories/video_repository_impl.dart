@@ -42,6 +42,8 @@ class VideoRepositoryImpl implements VideoRepository {
 
         // Dispose the controller
         await _controller!.dispose();
+        // Give native side a moment to clean up textures
+        await Future.delayed(const Duration(milliseconds: 100));
       } catch (e) {
         // Silently handle errors during cleanup
         // The controller might already be in an invalid state
