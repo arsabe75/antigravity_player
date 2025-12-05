@@ -82,7 +82,12 @@ class UrlValidator {
       if (lastDot == -1 || lastDot == cleanPath.length - 1) {
         return null;
       }
-      return cleanPath.substring(lastDot + 1).toLowerCase();
+      final extension = cleanPath.substring(lastDot + 1).toLowerCase();
+      // If extension contains slashes, it's likely part of the path, not a file extension
+      if (extension.contains('/')) {
+        return null;
+      }
+      return extension;
     } catch (_) {
       return null;
     }
@@ -97,6 +102,7 @@ class UrlValidator {
   static String? getDomain(String url) {
     try {
       final uri = Uri.parse(url);
+      if (uri.host.isEmpty) return null;
       return uri.host;
     } catch (_) {
       return null;
