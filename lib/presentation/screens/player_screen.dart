@@ -10,6 +10,7 @@ import 'package:video_player/video_player.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../config/constants/app_constants.dart';
+import '../../domain/entities/player_error.dart';
 import '../providers/player_notifier.dart';
 import '../providers/player_state.dart';
 import '../widgets/player/player_widgets.dart';
@@ -176,8 +177,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 ),
 
                 // File Picker Button (if no video loaded)
-                if (state.currentVideoPath == null)
+                if (state.currentVideoPath == null && state.error == null)
                   _buildNoVideoPlaceholder(notifier),
+
+                // Error Overlay
+                if (state.error != null)
+                  ErrorOverlay(
+                    error: PlayerErrorFactory.fromException(state.error),
+                    onRetry: () {
+                      if (state.currentVideoPath != null) {
+                        notifier.loadVideo(
+                          state.currentVideoPath!,
+                          isNetwork: state.currentVideoPath!.startsWith('http'),
+                        );
+                      }
+                    },
+                    onGoHome: _handleBack,
+                  ),
               ],
             ),
           ),

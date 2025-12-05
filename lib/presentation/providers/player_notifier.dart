@@ -5,6 +5,7 @@ import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
 import '../../infrastructure/repositories/video_repository_impl.dart';
 import '../../infrastructure/services/playback_storage_service.dart';
+import '../../infrastructure/services/recent_videos_service.dart';
 import 'player_state.dart';
 
 part 'player_notifier.g.dart';
@@ -78,6 +79,10 @@ class PlayerNotifier extends _$PlayerNotifier {
       );
       final video = VideoEntity(path: path, isNetwork: isNetwork);
       await _repository.play(video);
+
+      // Save to recent videos history
+      final recentVideosService = RecentVideosService();
+      await recentVideosService.addVideo(path, isNetwork: isNetwork);
 
       final savedPositionMs = await _storageService.getPosition(path);
       if (savedPositionMs != null && savedPositionMs > 0) {
