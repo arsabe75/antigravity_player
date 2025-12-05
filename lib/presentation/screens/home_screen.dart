@@ -43,57 +43,65 @@ class HomeScreen extends ConsumerWidget {
       body: Stack(
         children: [
           // Main content
-          Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const SizedBox(height: 60), // Space for top bar
-                  Icon(
-                    LucideIcons.clapperboard,
-                    size: 64,
-                    color: Theme.of(context).colorScheme.primary,
-                  ),
-                  const SizedBox(height: 32),
-                  Text(
-                    'Antigravity Player',
-                    style: TextStyle(
-                      fontSize: 24,
-                      fontWeight: FontWeight.bold,
-                      color: Theme.of(context).colorScheme.onSurface,
+          Column(
+            children: [
+              Expanded(
+                child: Center(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        const SizedBox(height: 60), // Space for top bar
+                        Icon(
+                          LucideIcons.clapperboard,
+                          size: 64,
+                          color: Theme.of(context).colorScheme.primary,
+                        ),
+                        const SizedBox(height: 32),
+                        Text(
+                          'Antigravity Player',
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(context).colorScheme.onSurface,
+                          ),
+                        ),
+                        const SizedBox(height: 48),
+                        SizedBox(
+                          width: 250,
+                          height: 50,
+                          child: ElevatedButton.icon(
+                            onPressed: () => _pickFile(context),
+                            icon: const Icon(LucideIcons.folderOpen),
+                            label: const Text('Open Local File'),
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+                        SizedBox(
+                          width: 250,
+                          height: 50,
+                          child: OutlinedButton.icon(
+                            onPressed: () => _enterUrl(context),
+                            icon: const Icon(LucideIcons.globe),
+                            label: const Text('Open Network URL'),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 48),
-                  SizedBox(
-                    width: 250,
-                    height: 50,
-                    child: ElevatedButton.icon(
-                      onPressed: () => _pickFile(context),
-                      icon: const Icon(LucideIcons.folderOpen),
-                      label: const Text('Open Local File'),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    width: 250,
-                    height: 50,
-                    child: OutlinedButton.icon(
-                      onPressed: () => _enterUrl(context),
-                      icon: const Icon(LucideIcons.globe),
-                      label: const Text('Open Network URL'),
-                    ),
-                  ),
-                  // Recent Videos
-                  RecentVideosWidget(
-                    onVideoSelected: (path, isNetwork) {
-                      context.go('/player', extra: path);
-                    },
-                  ),
-                  const SizedBox(height: 32),
-                ],
+                ),
               ),
-            ),
+              // Recent Videos pinned to bottom
+              Padding(
+                padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
+                child: RecentVideosWidget(
+                  onVideoSelected: (path, isNetwork) {
+                    context.go('/player', extra: path);
+                  },
+                ),
+              ),
+            ],
           ),
           // Top bar with window controls
           Positioned(
