@@ -10,6 +10,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:video_player/video_player.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../../config/constants/app_constants.dart';
 import '../providers/player_notifier.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
@@ -74,7 +75,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   void _startHideTimer() {
     _hideTimer?.cancel();
     ref.read(playerProvider.notifier).setControlsVisibility(true);
-    _hideTimer = Timer(const Duration(seconds: 3), () {
+    _hideTimer = Timer(AppConstants.controlsHideDelay, () {
       if (mounted) {
         ref.read(playerProvider.notifier).setControlsVisibility(false);
       }
@@ -105,19 +106,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final state = ref.watch(playerProvider);
     final notifier = ref.read(playerProvider.notifier);
 
-    // We need the controller to pass to VideoPlayer widget.
-    // Since VideoPlayer widget requires a controller, and our repo holds it,
-    // we might need to expose it or wrap it.
-    // For this implementation, we'll assume the repo exposes it or we access it via a provider that exposes the controller.
-    // Let's cast repo to impl to get controller for now, or better, add a getter in interface/impl.
-    // I added `VideoPlayerController? get controller` to VideoRepositoryImpl, but not interface.
-    // I'll cast it here for simplicity or update interface. Casting is quick for now.
-
-    // Actually, VideoPlayer widget needs a controller.
-    // Let's assume we can get it.
-    final controller =
-        (ref.read(videoRepositoryProvider) as dynamic).controller
-            as VideoPlayerController?;
+    // Access the controller through the repository interface
+    final controller = ref.read(videoRepositoryProvider).controller;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -135,11 +125,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             }
           },
           const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
-            final newPos = state.position - const Duration(seconds: 10);
+            final newPos = state.position - AppConstants.seekDuration;
             notifier.seekTo(newPos < Duration.zero ? Duration.zero : newPos);
           },
           const SingleActivator(LogicalKeyboardKey.arrowRight): () {
-            final newPos = state.position + const Duration(seconds: 10);
+            final newPos = state.position + AppConstants.seekDuration;
             final maxDur = state.duration;
             notifier.seekTo(newPos > maxDur ? maxDur : newPos);
           },
@@ -184,7 +174,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 // Controls Layer
                 AnimatedOpacity(
                   opacity: state.areControlsVisible ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 300),
+                  duration: AppConstants.controlsFadeDuration,
                   child: Stack(
                     children: [
                       // Top Bar (Window Controls)

@@ -1,3 +1,5 @@
+import 'package:video_player/video_player.dart';
+
 import '../entities/video_entity.dart';
 
 abstract class VideoRepository {
@@ -15,4 +17,7 @@ abstract class VideoRepository {
   Duration get currentPosition;
   Duration get totalDuration;
   bool get isPlaying;
+
+  /// Exposes the underlying VideoPlayerController for the VideoPlayer widget
+  VideoPlayerController? get controller;
 }

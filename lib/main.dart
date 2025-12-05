@@ -5,6 +5,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'config/router/app_router.dart';
 import 'config/theme/app_theme.dart';
+import 'config/constants/app_constants.dart';
 import 'presentation/providers/theme_provider.dart';
 
 void main() async {
@@ -17,7 +18,10 @@ void main() async {
   await windowManager.ensureInitialized();
 
   WindowOptions windowOptions = const WindowOptions(
-    size: Size(800, 600),
+    size: Size(
+      AppConstants.defaultWindowWidth,
+      AppConstants.defaultWindowHeight,
+    ),
     center: true,
     backgroundColor: Colors.transparent,
     skipTaskbar: false,

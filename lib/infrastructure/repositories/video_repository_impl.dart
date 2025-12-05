@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:video_player/video_player.dart';
 
+import '../../config/constants/app_constants.dart';
 import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
 
@@ -43,7 +44,7 @@ class VideoRepositoryImpl implements VideoRepository {
         // Dispose the controller
         await _controller!.dispose();
         // Give native side a moment to clean up textures
-        await Future.delayed(const Duration(milliseconds: 100));
+        await Future.delayed(AppConstants.disposeDelay);
       } catch (e) {
         // Silently handle errors during cleanup
         // The controller might already be in an invalid state
@@ -97,7 +98,7 @@ class VideoRepositoryImpl implements VideoRepository {
   }
 
   void _startPositionTimer() {
-    _positionTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
+    _positionTimer = Timer.periodic(AppConstants.positionUpdateInterval, (_) {
       if (_controller != null && _controller!.value.isPlaying) {
         _positionController.add(_controller!.value.position);
       }
@@ -146,5 +147,6 @@ class VideoRepositoryImpl implements VideoRepository {
   bool get isPlaying => _controller?.value.isPlaying ?? false;
 
   // Helper to expose controller for VideoPlayer widget
+  @override
   VideoPlayerController? get controller => _controller;
 }
