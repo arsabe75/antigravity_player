@@ -17,6 +17,7 @@ import '../providers/player_state.dart';
 import '../providers/playlist_notifier.dart';
 import '../widgets/player/player_widgets.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
+import '../../infrastructure/services/media_control_service.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   final String? videoUrl;
@@ -32,6 +33,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   Timer? _hideTimer;
   bool _isDisposing = false;
   bool _showPlaylist = false;
+  final _mediaControl = MediaControlService();
 
   @override
   void initState() {
@@ -49,10 +51,67 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     // Prevent default close to handle cleanup
     windowManager.setPreventClose(true);
+
+    _initMediaControl();
+  }
+
+  Future<void> _initMediaControl() async {
+    // Set callbacks
+    _mediaControl.onPlay = () => ref.read(playerProvider.notifier).togglePlay();
+    _mediaControl.onPause = () =>
+        ref.read(playerProvider.notifier).togglePlay();
+    _mediaControl.onPlayPause = () =>
+        ref.read(playerProvider.notifier).togglePlay();
+    _mediaControl.onNext = () {
+      final playlistNotifier = ref.read(playlistProvider.notifier);
+      if (playlistNotifier.next()) {
+        final newItem = ref.read(playlistProvider).currentItem;
+        if (newItem != null) {
+          ref
+              .read(playerProvider.notifier)
+              .loadVideo(newItem.path, isNetwork: newItem.isNetwork);
+        }
+      }
+    };
+    _mediaControl.onPrevious = () {
+      final playlistNotifier = ref.read(playlistProvider.notifier);
+      if (playlistNotifier.previous()) {
+        final newItem = ref.read(playlistProvider).currentItem;
+        if (newItem != null) {
+          ref
+              .read(playerProvider.notifier)
+              .loadVideo(newItem.path, isNetwork: newItem.isNetwork);
+        }
+      }
+    };
+    _mediaControl.onSeek = (offset) {
+      final state = ref.read(playerProvider);
+      final newPos = state.position + offset;
+      ref.read(playerProvider.notifier).seekTo(newPos);
+    };
+
+    // Send initial state
+    final currentState = ref.read(playerProvider);
+    _mediaControl.updatePlaybackState(
+      isPlaying: currentState.isPlaying,
+      position: currentState.position,
+      speed: currentState.playbackSpeed,
+    );
+    if (currentState.currentVideoPath != null) {
+      final filename = currentState.currentVideoPath!.split('/').last;
+      _mediaControl.updateMetaData(
+        title: filename,
+        duration: currentState.duration,
+      );
+    }
+
+    // Initialize service
+    await _mediaControl.init();
   }
 
   @override
   void dispose() {
+    _mediaControl.dispose();
     windowManager.removeListener(this);
     windowManager.setPreventClose(false);
     _hideTimer?.cancel();
@@ -140,6 +199,28 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             notifier.loadVideo(newItem.path, isNetwork: newItem.isNetwork);
           }
         }
+      }
+
+      // Update Media Control
+      if (previous?.isPlaying != next.isPlaying ||
+          previous?.position != next.position ||
+          previous?.playbackSpeed != next.playbackSpeed) {
+        _mediaControl.updatePlaybackState(
+          isPlaying: next.isPlaying,
+          position: next.position,
+          speed: next.playbackSpeed,
+        );
+      }
+
+      if (previous?.currentVideoPath != next.currentVideoPath &&
+          next.currentVideoPath != null) {
+        final filename = next.currentVideoPath!.split('/').last;
+        _mediaControl.updateMetaData(title: filename, duration: next.duration);
+      }
+      // Also update duration if it changes (e.g. loaded)
+      if (previous?.duration != next.duration) {
+        final filename = next.currentVideoPath?.split('/').last ?? 'Unknown';
+        _mediaControl.updateMetaData(title: filename, duration: next.duration);
       }
     });
 

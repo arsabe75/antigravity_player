@@ -44,6 +44,8 @@ dependencies:
   freezed_annotation: ^3.1.0
   file_picker: ^10.3.7
   shared_preferences: ^2.5.3
+  mpris_service:
+    git: https://github.com/alexmercerind/mpris_service.git
 
 dev_dependencies:
   flutter_test:
