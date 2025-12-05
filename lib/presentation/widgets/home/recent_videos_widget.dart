@@ -147,7 +147,7 @@ class _RecentVideosWidgetState extends State<RecentVideosWidget> {
 
           // Videos List
           SizedBox(
-            height: 100,
+            height: 120,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: _videos.length,
@@ -208,17 +208,19 @@ class _RecentVideosWidgetState extends State<RecentVideosWidget> {
 
               // Title
               Expanded(
-                child: Text(
-                  video.displayName,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
-                    color: Theme.of(context).colorScheme.onSurface,
+                child: SingleChildScrollView(
+                  child: Text(
+                    video.displayName,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
                   ),
                 ),
               ),
+
+              const SizedBox(height: 6),
 
               // Time and position
               Row(
