@@ -1,0 +1,135 @@
+import 'package:flutter/material.dart';
+import 'package:lucide_icons/lucide_icons.dart';
+
+import 'video_progress_slider.dart';
+import 'volume_control.dart';
+import 'playback_speed_control.dart';
+
+/// Barra inferior del reproductor con controles de reproducción
+class PlayerBottomBar extends StatelessWidget {
+  // Estado de reproducción
+  final bool isPlaying;
+  final Duration position;
+  final Duration duration;
+  final double volume;
+  final double playbackSpeed;
+  final bool isFullscreen;
+  final bool isAlwaysOnTop;
+
+  // Callbacks
+  final VoidCallback onTogglePlay;
+  final ValueChanged<Duration> onSeek;
+  final ValueChanged<double> onVolumeChanged;
+  final VoidCallback onToggleMute;
+  final ValueChanged<double> onSpeedChanged;
+  final VoidCallback onToggleFullscreen;
+  final VoidCallback onToggleAlwaysOnTop;
+
+  const PlayerBottomBar({
+    super.key,
+    required this.isPlaying,
+    required this.position,
+    required this.duration,
+    required this.volume,
+    required this.playbackSpeed,
+    required this.isFullscreen,
+    required this.isAlwaysOnTop,
+    required this.onTogglePlay,
+    required this.onSeek,
+    required this.onVolumeChanged,
+    required this.onToggleMute,
+    required this.onSpeedChanged,
+    required this.onToggleFullscreen,
+    required this.onToggleAlwaysOnTop,
+  });
+
+  String _formatDuration(Duration duration) {
+    String twoDigits(int n) => n.toString().padLeft(2, '0');
+    final hours = duration.inHours;
+    final minutes = twoDigits(duration.inMinutes.remainder(60));
+    final seconds = twoDigits(duration.inSeconds.remainder(60));
+    return hours > 0 ? '$hours:$minutes:$seconds' : '$minutes:$seconds';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      bottom: 0,
+      left: 0,
+      right: 0,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.bottomCenter,
+            end: Alignment.topCenter,
+            colors: [Colors.black87, Colors.transparent],
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Progress Bar
+            VideoProgressSlider(
+              position: position,
+              duration: duration,
+              onSeek: onSeek,
+            ),
+            // Controls Row
+            Row(
+              children: [
+                // Play/Pause button
+                IconButton(
+                  icon: Icon(
+                    isPlaying ? LucideIcons.pause : LucideIcons.play,
+                    color: Colors.white,
+                  ),
+                  onPressed: onTogglePlay,
+                  tooltip: isPlaying ? 'Pause' : 'Play',
+                ),
+                const SizedBox(width: 8),
+                // Time display
+                Text(
+                  '${_formatDuration(position)} / ${_formatDuration(duration)}',
+                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                ),
+                const Spacer(),
+                // Playback speed
+                PlaybackSpeedControl(
+                  currentSpeed: playbackSpeed,
+                  onSpeedChanged: onSpeedChanged,
+                ),
+                // Volume control
+                VolumeControl(
+                  volume: volume,
+                  onVolumeChanged: onVolumeChanged,
+                  onToggleMute: onToggleMute,
+                ),
+                // Always on top button
+                IconButton(
+                  icon: Icon(
+                    LucideIcons.pin,
+                    color: isAlwaysOnTop ? Colors.blue : Colors.white,
+                  ),
+                  onPressed: onToggleAlwaysOnTop,
+                  tooltip: isAlwaysOnTop
+                      ? 'Disable Always on Top'
+                      : 'Enable Always on Top',
+                ),
+                // Fullscreen button
+                IconButton(
+                  icon: Icon(
+                    isFullscreen ? LucideIcons.minimize : LucideIcons.maximize,
+                    color: Colors.white,
+                  ),
+                  onPressed: onToggleFullscreen,
+                  tooltip: isFullscreen ? 'Exit Fullscreen' : 'Fullscreen',
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}

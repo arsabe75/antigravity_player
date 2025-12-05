@@ -10,6 +10,7 @@ abstract class PlayerState with _$PlayerState {
     @Default(Duration.zero) Duration position,
     @Default(Duration.zero) Duration duration,
     @Default(1.0) double volume,
+    @Default(1.0) double playbackSpeed,
     @Default(false) bool isFullscreen,
     @Default(true) bool areControlsVisible,
     @Default(false) bool isAlwaysOnTop,

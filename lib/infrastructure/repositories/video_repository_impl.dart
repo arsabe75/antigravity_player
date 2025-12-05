@@ -149,4 +149,9 @@ class VideoRepositoryImpl implements VideoRepository {
   // Helper to expose controller for VideoPlayer widget
   @override
   VideoPlayerController? get controller => _controller;
+
+  @override
+  Future<void> setPlaybackSpeed(double speed) async {
+    await _controller?.setPlaybackSpeed(speed);
+  }
 }

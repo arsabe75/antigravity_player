@@ -131,6 +131,11 @@ class PlayerNotifier extends _$PlayerNotifier {
     state = state.copyWith(isAlwaysOnTop: newState);
   }
 
+  Future<void> setPlaybackSpeed(double speed) async {
+    await _repository.setPlaybackSpeed(speed);
+    state = state.copyWith(playbackSpeed: speed);
+  }
+
   void setControlsVisibility(bool visible) {
     state = state.copyWith(areControlsVisible: visible);
   }

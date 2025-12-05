@@ -20,4 +20,7 @@ abstract class VideoRepository {
 
   /// Exposes the underlying VideoPlayerController for the VideoPlayer widget
   VideoPlayerController? get controller;
+
+  /// Sets the playback speed
+  Future<void> setPlaybackSpeed(double speed);
 }

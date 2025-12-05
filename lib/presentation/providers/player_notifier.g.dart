@@ -49,7 +49,7 @@ final class VideoRepositoryProvider
   }
 }
 
-String _$videoRepositoryHash() => r'81ecba53f4accc3872c4878c1365ad905499ec49';
+String _$videoRepositoryHash() => r'ded075264c12680b239f7f4d81f3cf985eee6190';
 
 @ProviderFor(playbackStorageService)
 const playbackStorageServiceProvider = PlaybackStorageServiceProvider._();
@@ -97,7 +97,7 @@ final class PlaybackStorageServiceProvider
 }
 
 String _$playbackStorageServiceHash() =>
-    r'7974daa4585a9943ed8c9cfca508cd61de9653a7';
+    r'f296c36645a0c5f35e53bbcbf9a8d18cd0dd69b8';
 
 @ProviderFor(PlayerNotifier)
 const playerProvider = PlayerNotifierProvider._();
