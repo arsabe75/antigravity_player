@@ -16,6 +16,7 @@ import '../providers/player_notifier.dart';
 import '../providers/player_state.dart';
 import '../providers/playlist_notifier.dart';
 import '../widgets/player/player_widgets.dart';
+import '../../infrastructure/services/recent_videos_service.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
   final String? videoUrl;
@@ -243,6 +244,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                       }
                     },
                     onGoHome: _handleBack,
+                    onRemoveFromHistory: () async {
+                      if (state.currentVideoPath != null) {
+                        final service = RecentVideosService();
+                        await service.removeVideo(state.currentVideoPath!);
+                        await _handleBack();
+                      }
+                    },
                   ),
 
                 // Playlist Sidebar

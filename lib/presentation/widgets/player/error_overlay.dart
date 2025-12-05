@@ -7,12 +7,14 @@ import '../../../domain/entities/player_error.dart';
 class ErrorOverlay extends StatelessWidget {
   final PlayerError error;
   final VoidCallback? onRetry;
+  final VoidCallback? onRemoveFromHistory;
   final VoidCallback onGoHome;
 
   const ErrorOverlay({
     super.key,
     required this.error,
     this.onRetry,
+    this.onRemoveFromHistory,
     required this.onGoHome,
   });
 
@@ -102,6 +104,21 @@ class ErrorOverlay extends StatelessWidget {
                       side: const BorderSide(color: Colors.white54),
                     ),
                   ),
+
+                  // Remove from History Button (if applicable)
+                  if (error is FileNotFoundError &&
+                      onRemoveFromHistory != null) ...[
+                    const SizedBox(width: 16),
+                    ElevatedButton.icon(
+                      onPressed: onRemoveFromHistory,
+                      icon: const Icon(LucideIcons.trash2),
+                      label: const Text('Remove from History'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                      ),
+                    ),
+                  ],
 
                   // Retry Button (if applicable)
                   if (error.canRetry && onRetry != null) ...[

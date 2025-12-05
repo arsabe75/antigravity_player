@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:window_manager/window_manager.dart';
 import '../../domain/entities/video_entity.dart';
@@ -77,6 +78,14 @@ class PlayerNotifier extends _$PlayerNotifier {
         duration: Duration.zero,
         isPlaying: false,
       );
+
+      if (!isNetwork) {
+        final file = File(path);
+        if (!await file.exists()) {
+          throw const FileSystemException('File not found');
+        }
+      }
+
       final video = VideoEntity(path: path, isNetwork: isNetwork);
       await _repository.play(video);
 
