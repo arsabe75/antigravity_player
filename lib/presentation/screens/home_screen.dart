@@ -5,6 +5,8 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../../domain/entities/playlist_entity.dart';
+import '../providers/playlist_notifier.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/dialogs/url_input_dialog.dart';
 import '../widgets/home/recent_videos_widget.dart';
@@ -12,15 +14,31 @@ import '../widgets/home/recent_videos_widget.dart';
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
-  Future<void> _pickFile(BuildContext context) async {
+  Future<void> _pickFile(BuildContext context, WidgetRef ref) async {
     final result = await FilePicker.platform.pickFiles(
       type: FileType.video,
-      allowMultiple: false,
+      allowMultiple: true,
     );
 
-    if (result != null && result.files.single.path != null) {
+    if (result != null && result.files.isNotEmpty) {
       if (context.mounted) {
-        context.go('/player', extra: result.files.single.path);
+        // Create playlist items
+        final items = result.files
+            .where((file) => file.path != null)
+            .map(
+              (file) => PlaylistItem(
+                path: file.path!,
+                isNetwork: false,
+                title: file.name,
+              ),
+            )
+            .toList();
+
+        if (items.isNotEmpty) {
+          // Set playlist and start playing first item
+          ref.read(playlistProvider.notifier).setPlaylist(items);
+          context.go('/player', extra: items.first.path);
+        }
       }
     }
   }
@@ -72,9 +90,9 @@ class HomeScreen extends ConsumerWidget {
                           width: 250,
                           height: 50,
                           child: ElevatedButton.icon(
-                            onPressed: () => _pickFile(context),
+                            onPressed: () => _pickFile(context, ref),
                             icon: const Icon(LucideIcons.folderOpen),
-                            label: const Text('Open Local File'),
+                            label: const Text('Open Local File(s)'),
                           ),
                         ),
                         const SizedBox(height: 16),
