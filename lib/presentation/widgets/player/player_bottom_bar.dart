@@ -15,6 +15,7 @@ class PlayerBottomBar extends StatelessWidget {
   final double playbackSpeed;
   final bool isFullscreen;
   final bool isAlwaysOnTop;
+  final bool showPlaylist;
 
   // Callbacks
   final VoidCallback onTogglePlay;
@@ -24,6 +25,7 @@ class PlayerBottomBar extends StatelessWidget {
   final ValueChanged<double> onSpeedChanged;
   final VoidCallback onToggleFullscreen;
   final VoidCallback onToggleAlwaysOnTop;
+  final VoidCallback onTogglePlaylist;
 
   const PlayerBottomBar({
     super.key,
@@ -34,6 +36,7 @@ class PlayerBottomBar extends StatelessWidget {
     required this.playbackSpeed,
     required this.isFullscreen,
     required this.isAlwaysOnTop,
+    required this.showPlaylist,
     required this.onTogglePlay,
     required this.onSeek,
     required this.onVolumeChanged,
@@ -41,6 +44,7 @@ class PlayerBottomBar extends StatelessWidget {
     required this.onSpeedChanged,
     required this.onToggleFullscreen,
     required this.onToggleAlwaysOnTop,
+    required this.onTogglePlaylist,
   });
 
   String _formatDuration(Duration duration) {
@@ -115,6 +119,15 @@ class PlayerBottomBar extends StatelessWidget {
                   tooltip: isAlwaysOnTop
                       ? 'Disable Always on Top'
                       : 'Enable Always on Top',
+                ),
+                // Playlist button
+                IconButton(
+                  icon: Icon(
+                    LucideIcons.listVideo,
+                    color: showPlaylist ? Colors.blue : Colors.white,
+                  ),
+                  onPressed: onTogglePlaylist,
+                  tooltip: 'Playlist',
                 ),
                 // Fullscreen button
                 IconButton(

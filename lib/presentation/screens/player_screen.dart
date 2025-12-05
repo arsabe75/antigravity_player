@@ -13,6 +13,7 @@ import '../../config/constants/app_constants.dart';
 import '../../domain/entities/player_error.dart';
 import '../providers/player_notifier.dart';
 import '../providers/player_state.dart';
+import '../providers/playlist_notifier.dart';
 import '../widgets/player/player_widgets.dart';
 
 class PlayerScreen extends ConsumerStatefulWidget {
@@ -28,6 +29,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     with WindowListener {
   Timer? _hideTimer;
   bool _isDisposing = false;
+  bool _showPlaylist = false;
 
   @override
   void initState() {
@@ -164,6 +166,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         playbackSpeed: state.playbackSpeed,
                         isFullscreen: state.isFullscreen,
                         isAlwaysOnTop: state.isAlwaysOnTop,
+                        showPlaylist: _showPlaylist,
                         onTogglePlay: notifier.togglePlay,
                         onSeek: notifier.seekTo,
                         onVolumeChanged: notifier.setVolume,
@@ -171,6 +174,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         onSpeedChanged: notifier.setPlaybackSpeed,
                         onToggleFullscreen: _handleToggleFullscreen,
                         onToggleAlwaysOnTop: notifier.toggleAlwaysOnTop,
+                        onTogglePlaylist: () =>
+                            setState(() => _showPlaylist = !_showPlaylist),
                       ),
                     ],
                   ),
@@ -193,6 +198,28 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                       }
                     },
                     onGoHome: _handleBack,
+                  ),
+
+                // Playlist Sidebar
+                if (_showPlaylist)
+                  Positioned(
+                    right: 0,
+                    top: state.isFullscreen ? 0 : 40, // Below window controls
+                    bottom: 0,
+                    child: PlaylistSidebar(
+                      onVideoSelected: () {
+                        // Play selected video from playlist
+                        final playlist = ref.read(playlistProvider);
+                        final item = playlist.currentItem;
+                        if (item != null) {
+                          notifier.loadVideo(
+                            item.path,
+                            isNetwork: item.isNetwork,
+                          );
+                        }
+                      },
+                      onClose: () => setState(() => _showPlaylist = false),
+                    ),
                   ),
               ],
             ),
@@ -278,6 +305,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     PlayerNotifier notifier,
   ) {
     return GestureDetector(
+      onTap: notifier.togglePlay,
       onDoubleTap: _handleToggleFullscreen,
       child: Center(
         child:
