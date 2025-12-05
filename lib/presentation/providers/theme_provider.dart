@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../infrastructure/services/theme_storage_service.dart';
 
-class ThemeNotifier extends Notifier<ThemeMode> {
+part 'theme_provider.g.dart';
+
+@Riverpod(keepAlive: true)
+class ThemeNotifier extends _$ThemeNotifier {
   late final ThemeStorageService _storageService;
 
   @override
@@ -42,7 +45,3 @@ class ThemeNotifier extends Notifier<ThemeMode> {
     }
   }
 }
-
-final themeProvider = NotifierProvider<ThemeNotifier, ThemeMode>(() {
-  return ThemeNotifier();
-});

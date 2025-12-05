@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:window_manager/window_manager.dart';
 import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
@@ -7,19 +7,24 @@ import '../../infrastructure/repositories/video_repository_impl.dart';
 import '../../infrastructure/services/playback_storage_service.dart';
 import 'player_state.dart';
 
+part 'player_notifier.g.dart';
+
 // Repository Provider
-final videoRepositoryProvider = Provider.autoDispose<VideoRepository>((ref) {
+@riverpod
+VideoRepository videoRepository(Ref ref) {
   final repo = VideoRepositoryImpl();
   ref.onDispose(() => repo.dispose());
   return repo;
-});
+}
 
-final playbackStorageServiceProvider = Provider<PlaybackStorageService>((ref) {
+@riverpod
+PlaybackStorageService playbackStorageService(Ref ref) {
   return PlaybackStorageService();
-});
+}
 
 // Player Notifier
-class PlayerNotifier extends Notifier<PlayerState> {
+@riverpod
+class PlayerNotifier extends _$PlayerNotifier {
   late final VideoRepository _repository;
   late final PlaybackStorageService _storageService;
   StreamSubscription? _positionSub;
@@ -149,8 +154,3 @@ class PlayerNotifier extends Notifier<PlayerState> {
     await _repository.dispose();
   }
 }
-
-final playerProvider =
-    NotifierProvider.autoDispose<PlayerNotifier, PlayerState>(
-      PlayerNotifier.new,
-    );
