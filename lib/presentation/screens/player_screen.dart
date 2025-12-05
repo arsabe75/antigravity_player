@@ -11,6 +11,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../config/constants/app_constants.dart';
 import '../../domain/entities/player_error.dart';
+import '../../domain/entities/playlist_entity.dart';
 import '../providers/player_notifier.dart';
 import '../providers/player_state.dart';
 import '../providers/playlist_notifier.dart';
@@ -122,6 +123,42 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final state = ref.watch(playerProvider);
     final notifier = ref.read(playerProvider.notifier);
     final controller = ref.read(videoRepositoryProvider).controller;
+    final playlist = ref.watch(playlistProvider);
+    final playlistNotifier = ref.read(playlistProvider.notifier);
+
+    // Auto-advance listener
+    ref.listen(playerProvider, (previous, next) {
+      if (previous?.isPlaying == true &&
+          !next.isPlaying &&
+          next.duration > Duration.zero &&
+          next.position >= next.duration) {
+        // Video finished, play next
+        if (playlistNotifier.next()) {
+          final newItem = ref.read(playlistProvider).currentItem;
+          if (newItem != null) {
+            notifier.loadVideo(newItem.path, isNetwork: newItem.isNetwork);
+          }
+        }
+      }
+    });
+
+    void playNext() {
+      if (playlistNotifier.next()) {
+        final newItem = ref.read(playlistProvider).currentItem;
+        if (newItem != null) {
+          notifier.loadVideo(newItem.path, isNetwork: newItem.isNetwork);
+        }
+      }
+    }
+
+    void playPrevious() {
+      if (playlistNotifier.previous()) {
+        final newItem = ref.read(playlistProvider).currentItem;
+        if (newItem != null) {
+          notifier.loadVideo(newItem.path, isNetwork: newItem.isNetwork);
+        }
+      }
+    }
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -167,7 +204,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         isFullscreen: state.isFullscreen,
                         isAlwaysOnTop: state.isAlwaysOnTop,
                         showPlaylist: _showPlaylist,
+                        hasNext:
+                            playlist.hasNext ||
+                            playlist.repeatMode == RepeatMode.all,
+                        hasPrevious:
+                            playlist.hasPrevious ||
+                            playlist.repeatMode == RepeatMode.all,
                         onTogglePlay: notifier.togglePlay,
+                        onNext: playNext,
+                        onPrevious: playPrevious,
                         onSeek: notifier.seekTo,
                         onVolumeChanged: notifier.setVolume,
                         onToggleMute: notifier.toggleMute,

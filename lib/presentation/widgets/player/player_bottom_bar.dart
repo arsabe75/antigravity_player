@@ -16,9 +16,13 @@ class PlayerBottomBar extends StatelessWidget {
   final bool isFullscreen;
   final bool isAlwaysOnTop;
   final bool showPlaylist;
+  final bool hasNext;
+  final bool hasPrevious;
 
   // Callbacks
   final VoidCallback onTogglePlay;
+  final VoidCallback onNext;
+  final VoidCallback onPrevious;
   final ValueChanged<Duration> onSeek;
   final ValueChanged<double> onVolumeChanged;
   final VoidCallback onToggleMute;
@@ -37,7 +41,11 @@ class PlayerBottomBar extends StatelessWidget {
     required this.isFullscreen,
     required this.isAlwaysOnTop,
     required this.showPlaylist,
+    required this.hasNext,
+    required this.hasPrevious,
     required this.onTogglePlay,
+    required this.onNext,
+    required this.onPrevious,
     required this.onSeek,
     required this.onVolumeChanged,
     required this.onToggleMute,
@@ -82,6 +90,12 @@ class PlayerBottomBar extends StatelessWidget {
             // Controls Row
             Row(
               children: [
+                // Previous button
+                IconButton(
+                  icon: const Icon(LucideIcons.skipBack, color: Colors.white),
+                  onPressed: hasPrevious ? onPrevious : null,
+                  tooltip: 'Previous',
+                ),
                 // Play/Pause button
                 IconButton(
                   icon: Icon(
@@ -90,6 +104,15 @@ class PlayerBottomBar extends StatelessWidget {
                   ),
                   onPressed: onTogglePlay,
                   tooltip: isPlaying ? 'Pause' : 'Play',
+                ),
+                // Next button
+                IconButton(
+                  icon: const Icon(
+                    LucideIcons.skipForward,
+                    color: Colors.white,
+                  ),
+                  onPressed: hasNext ? onNext : null,
+                  tooltip: 'Next',
                 ),
                 const SizedBox(width: 8),
                 // Time display
