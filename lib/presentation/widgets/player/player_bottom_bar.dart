@@ -18,6 +18,7 @@ class PlayerBottomBar extends StatelessWidget {
   final bool showPlaylist;
   final bool hasNext;
   final bool hasPrevious;
+  final bool isPlaylistEmpty;
 
   // Callbacks
   final VoidCallback onTogglePlay;
@@ -43,6 +44,7 @@ class PlayerBottomBar extends StatelessWidget {
     required this.showPlaylist,
     required this.hasNext,
     required this.hasPrevious,
+    required this.isPlaylistEmpty,
     required this.onTogglePlay,
     required this.onNext,
     required this.onPrevious,
@@ -91,11 +93,15 @@ class PlayerBottomBar extends StatelessWidget {
             Row(
               children: [
                 // Previous button
-                IconButton(
-                  icon: const Icon(LucideIcons.skipBack, color: Colors.white),
-                  onPressed: hasPrevious ? onPrevious : null,
-                  tooltip: 'Previous',
-                ),
+                if (!isPlaylistEmpty)
+                  IconButton(
+                    icon: Icon(
+                      LucideIcons.skipBack,
+                      color: hasPrevious ? Colors.white : Colors.white30,
+                    ),
+                    onPressed: hasPrevious ? onPrevious : null,
+                    tooltip: 'Previous',
+                  ),
                 // Play/Pause button
                 IconButton(
                   icon: Icon(
@@ -106,15 +112,16 @@ class PlayerBottomBar extends StatelessWidget {
                   tooltip: isPlaying ? 'Pause' : 'Play',
                 ),
                 // Next button
-                IconButton(
-                  icon: const Icon(
-                    LucideIcons.skipForward,
-                    color: Colors.white,
+                if (!isPlaylistEmpty)
+                  IconButton(
+                    icon: Icon(
+                      LucideIcons.skipForward,
+                      color: hasNext ? Colors.white : Colors.white30,
+                    ),
+                    onPressed: hasNext ? onNext : null,
+                    tooltip: 'Next',
                   ),
-                  onPressed: hasNext ? onNext : null,
-                  tooltip: 'Next',
-                ),
-                const SizedBox(width: 8),
+                if (!isPlaylistEmpty) const SizedBox(width: 8),
                 // Time display
                 Text(
                   '${_formatDuration(position)} / ${_formatDuration(duration)}',

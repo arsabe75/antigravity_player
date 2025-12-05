@@ -11,7 +11,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../../config/constants/app_constants.dart';
 import '../../domain/entities/player_error.dart';
-import '../../domain/entities/playlist_entity.dart';
+
 import '../providers/player_notifier.dart';
 import '../providers/player_state.dart';
 import '../providers/playlist_notifier.dart';
@@ -205,12 +205,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         isFullscreen: state.isFullscreen,
                         isAlwaysOnTop: state.isAlwaysOnTop,
                         showPlaylist: _showPlaylist,
-                        hasNext:
-                            playlist.hasNext ||
-                            playlist.repeatMode == RepeatMode.all,
-                        hasPrevious:
-                            playlist.hasPrevious ||
-                            playlist.repeatMode == RepeatMode.all,
+                        isPlaylistEmpty: playlist.isEmpty,
+                        hasNext: playlist.hasNext,
+                        hasPrevious: playlist.hasPrevious,
                         onTogglePlay: notifier.togglePlay,
                         onNext: playNext,
                         onPrevious: playPrevious,
