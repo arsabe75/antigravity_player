@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../providers/player_notifier.dart';
-import '../../providers/player_state.dart';
 
 class TrackSelectionSheet extends ConsumerWidget {
   const TrackSelectionSheet({super.key});
