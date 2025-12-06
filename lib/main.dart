@@ -1,7 +1,7 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:fvp/fvp.dart' as fvp;
+import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'config/router/app_router.dart';
@@ -12,8 +12,8 @@ import 'presentation/providers/theme_provider.dart';
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize FVP
-  fvp.registerWith();
+  // Initialize MediaKit
+  MediaKit.ensureInitialized();
 
   // Initialize Window Manager
   await windowManager.ensureInitialized();

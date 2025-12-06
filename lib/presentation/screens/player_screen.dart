@@ -6,7 +6,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:video_player/video_player.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../config/constants/app_constants.dart';
@@ -16,6 +16,7 @@ import '../providers/player_notifier.dart';
 import '../providers/player_state.dart';
 import '../providers/playlist_notifier.dart';
 import '../widgets/player/player_widgets.dart';
+import '../widgets/player/track_selection_sheet.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
 import '../../infrastructure/services/media_control_service.dart';
 
@@ -300,6 +301,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         onToggleAlwaysOnTop: notifier.toggleAlwaysOnTop,
                         onTogglePlaylist: () =>
                             setState(() => _showPlaylist = !_showPlaylist),
+                        onToggleTracks: () {
+                          showModalBottomSheet(
+                            context: context,
+                            backgroundColor: Colors.transparent,
+                            builder: (context) => const TrackSelectionSheet(),
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -431,7 +439,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   Widget _buildVideoLayer(
-    VideoPlayerController? controller,
+    VideoController? controller,
     PlayerState state,
     PlayerNotifier notifier,
   ) {
@@ -439,14 +447,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       onTap: notifier.togglePlay,
       onDoubleTap: _handleToggleFullscreen,
       child: Center(
-        child:
-            !_isDisposing &&
-                controller != null &&
-                controller.value.isInitialized
-            ? AspectRatio(
-                aspectRatio: controller.value.aspectRatio,
-                child: VideoPlayer(controller),
-              )
+        child: !_isDisposing && controller != null
+            ? Video(controller: controller, controls: NoVideoControls)
             : const CircularProgressIndicator(color: Colors.white),
       ),
     );

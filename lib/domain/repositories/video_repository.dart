@@ -1,4 +1,4 @@
-import 'package:video_player/video_player.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 
 import '../entities/video_entity.dart';
 
@@ -18,9 +18,21 @@ abstract class VideoRepository {
   Duration get totalDuration;
   bool get isPlaying;
 
-  /// Exposes the underlying VideoPlayerController for the VideoPlayer widget
-  VideoPlayerController? get controller;
+  /// Exposes the underlying VideoController for the Video widget
+  VideoController? get controller;
 
   /// Sets the playback speed
   Future<void> setPlaybackSpeed(double speed);
+
+  /// Gets available audio tracks (ID: Name)
+  Future<Map<int, String>> getAudioTracks();
+
+  /// Gets available subtitle tracks (ID: Name)
+  Future<Map<int, String>> getSubtitleTracks();
+
+  /// Sets the audio track by ID
+  Future<void> setAudioTrack(int trackId);
+
+  /// Sets the subtitle track by ID
+  Future<void> setSubtitleTrack(int trackId);
 }

@@ -33,6 +33,7 @@ class PlayerNotifier extends _$PlayerNotifier {
   StreamSubscription? _durationSub;
   StreamSubscription? _playingSub;
   StreamSubscription? _bufferingSub;
+  Timer? _saveTimer;
 
   @override
   PlayerState build() {
@@ -44,7 +45,9 @@ class PlayerNotifier extends _$PlayerNotifier {
       _positionSub?.cancel();
       _durationSub?.cancel();
       _playingSub?.cancel();
+      _playingSub?.cancel();
       _bufferingSub?.cancel();
+      _saveTimer?.cancel();
       _savePosition();
     });
 
@@ -54,9 +57,6 @@ class PlayerNotifier extends _$PlayerNotifier {
   void _initStreams() {
     _positionSub = _repository.positionStream.listen((pos) {
       state = state.copyWith(position: pos);
-      if (pos.inSeconds % 5 == 0) {
-        _savePosition();
-      }
     });
     _durationSub = _repository.durationStream.listen((dur) {
       state = state.copyWith(duration: dur);
@@ -89,6 +89,10 @@ class PlayerNotifier extends _$PlayerNotifier {
       final video = VideoEntity(path: path, isNetwork: isNetwork);
       await _repository.play(video);
 
+      // Give player a moment to load tracks
+      await Future.delayed(const Duration(milliseconds: 500));
+      await _loadTracks();
+
       // Save to recent videos history
       final recentVideosService = RecentVideosService();
       await recentVideosService.addVideo(path, isNetwork: isNetwork);
@@ -96,8 +100,12 @@ class PlayerNotifier extends _$PlayerNotifier {
       final savedPositionMs = await _storageService.getPosition(path);
       if (savedPositionMs != null && savedPositionMs > 0) {
         final position = Duration(milliseconds: savedPositionMs);
+        // Wait a bit to ensure player is ready to seek
+        await Future.delayed(const Duration(milliseconds: 500));
         await seekTo(position);
       }
+
+      _startSaveTimer();
     } catch (e) {
       state = state.copyWith(error: e.toString());
     }
@@ -107,8 +115,10 @@ class PlayerNotifier extends _$PlayerNotifier {
     if (state.isPlaying) {
       await _repository.pause();
       await _savePosition();
+      _saveTimer?.cancel();
     } else {
       await _repository.resume();
+      _startSaveTimer();
     }
   }
 
@@ -167,9 +177,41 @@ class PlayerNotifier extends _$PlayerNotifier {
     }
   }
 
+  Future<void> _loadTracks() async {
+    final audioTracks = await _repository.getAudioTracks();
+    final subtitleTracks = await _repository.getSubtitleTracks();
+    state = state.copyWith(
+      audioTracks: audioTracks,
+      subtitleTracks: subtitleTracks,
+      // Reset current selection or set default if needed
+      currentAudioTrack: 0,
+      currentSubtitleTrack: 0,
+    );
+  }
+
+  Future<void> setAudioTrack(int trackId) async {
+    await _repository.setAudioTrack(trackId);
+    state = state.copyWith(currentAudioTrack: trackId);
+  }
+
+  Future<void> setSubtitleTrack(int trackId) async {
+    await _repository.setSubtitleTrack(trackId);
+    state = state.copyWith(currentSubtitleTrack: trackId);
+  }
+
   Future<void> stop() async {
+    _saveTimer?.cancel();
     await _savePosition();
     // We manually dispose the repo here to ensure resources are freed before window close
     await _repository.dispose();
+  }
+
+  void _startSaveTimer() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (state.isPlaying) {
+        _savePosition();
+      }
+    });
   }
 }

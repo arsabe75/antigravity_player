@@ -14,6 +14,10 @@ abstract class PlayerState with _$PlayerState {
     @Default(false) bool isFullscreen,
     @Default(true) bool areControlsVisible,
     @Default(false) bool isAlwaysOnTop,
+    @Default({}) Map<int, String> audioTracks,
+    @Default({}) Map<int, String> subtitleTracks,
+    int? currentAudioTrack,
+    int? currentSubtitleTrack,
     String? currentVideoPath,
     String? error,
   }) = _PlayerState;

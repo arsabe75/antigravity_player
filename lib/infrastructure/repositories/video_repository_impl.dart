@@ -1,59 +1,34 @@
 import 'dart:async';
-import 'dart:io';
-
-import 'package:video_player/video_player.dart';
-
-import '../../config/constants/app_constants.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
 
 class VideoRepositoryImpl implements VideoRepository {
-  VideoPlayerController? _controller;
+  Player? _player;
+  VideoController? _controller;
 
   final _positionController = StreamController<Duration>.broadcast();
   final _durationController = StreamController<Duration>.broadcast();
   final _isPlayingController = StreamController<bool>.broadcast();
   final _isBufferingController = StreamController<bool>.broadcast();
 
-  Timer? _positionTimer;
+  StreamSubscription? _playerSub;
+  Duration _currentPosition = Duration.zero;
+  Duration _totalDuration = Duration.zero;
+  bool _isPlaying = false;
 
   @override
   Future<void> initialize() async {
-    // FVP registration is typically done at app startup, but we can ensure it here or in main.
-    // For this repo, we assume main.dart calls registerWith() or we do it here if safe.
-    // fvp.registerWith(); // Usually called in main.
+    // MediaKit initialization is done in main.dart
   }
 
   @override
   Future<void> dispose() async {
-    // Cancel position timer first
-    _positionTimer?.cancel();
-    _positionTimer = null;
-
-    // Pause and clean up controller before disposing
-    if (_controller != null) {
-      try {
-        // Pause the video to stop playback
-        if (_controller!.value.isPlaying) {
-          await _controller!.pause();
-        }
-
-        // Remove listener before disposing
-        _controller!.removeListener(_onControllerUpdate);
-
-        // Dispose the controller
-        await _controller!.dispose();
-        // Give native side a moment to clean up textures
-        await Future.delayed(AppConstants.disposeDelay);
-      } catch (e) {
-        // Silently handle errors during cleanup
-        // The controller might already be in an invalid state
-      } finally {
-        _controller = null;
-      }
-    }
-
-    // Close all stream controllers to prevent memory leaks
+    _playerSub?.cancel();
+    await _player?.dispose();
+    _player = null;
+    _controller = null;
     await _positionController.close();
     await _durationController.close();
     await _isPlayingController.close();
@@ -62,67 +37,59 @@ class VideoRepositoryImpl implements VideoRepository {
 
   @override
   Future<void> play(VideoEntity video) async {
-    _positionTimer?.cancel();
-    await _controller?.dispose();
-
-    if (video.isNetwork) {
-      _controller = VideoPlayerController.networkUrl(Uri.parse(video.path));
-    } else {
-      _controller = VideoPlayerController.file(File(video.path));
+    // Clean up previous instance partially if needed, or re-use
+    // For now, let's create a new player per video for safety
+    if (_player != null) {
+      await _player!.dispose();
     }
 
-    await _controller!.initialize();
+    _player = Player();
+    _controller = VideoController(_player!);
 
-    // FVP specific configuration if needed, usually automatic via video_player_mdk/fvp
-
-    _controller!.addListener(_onControllerUpdate);
-    await _controller!.play();
-    _startPositionTimer();
-
-    // Emit initial duration
-    if (_controller!.value.duration != Duration.zero) {
-      _durationController.add(_controller!.value.duration);
-    }
-  }
-
-  void _onControllerUpdate() {
-    if (_controller == null) return;
-    final value = _controller!.value;
-
-    _isPlayingController.add(value.isPlaying);
-    _isBufferingController.add(value.isBuffering);
-
-    if (value.duration != Duration.zero) {
-      _durationController.add(value.duration);
-    }
-  }
-
-  void _startPositionTimer() {
-    _positionTimer = Timer.periodic(AppConstants.positionUpdateInterval, (_) {
-      if (_controller != null && _controller!.value.isPlaying) {
-        _positionController.add(_controller!.value.position);
-      }
+    // Listen to streams
+    _playerSub = _player!.stream.position.listen((pos) {
+      _currentPosition = pos;
+      _positionController.add(pos);
     });
+
+    _player!.stream.duration.listen((dur) {
+      _totalDuration = dur;
+      _durationController.add(dur);
+    });
+
+    _player!.stream.playing.listen((playing) {
+      _isPlaying = playing;
+      _isPlayingController.add(playing);
+    });
+
+    _player!.stream.buffering.listen((buffering) {
+      _isBufferingController.add(buffering);
+    });
+
+    await _player!.open(Media(video.path));
+
+    // Auto play is default in open(), but ensuring it
+    // Wait a bit or let stream handle it
   }
 
   @override
   Future<void> pause() async {
-    await _controller?.pause();
+    await _player?.pause();
   }
 
   @override
   Future<void> resume() async {
-    await _controller?.play();
+    await _player?.play();
   }
 
   @override
   Future<void> seekTo(Duration position) async {
-    await _controller?.seekTo(position);
+    await _player?.seek(position);
   }
 
   @override
   Future<void> setVolume(double volume) async {
-    await _controller?.setVolume(volume);
+    await _player?.setVolume(volume * 100); // media_kit wraps libmpv 0-100
   }
 
   @override
@@ -138,20 +105,91 @@ class VideoRepositoryImpl implements VideoRepository {
   Stream<bool> get isBufferingStream => _isBufferingController.stream;
 
   @override
-  Duration get currentPosition => _controller?.value.position ?? Duration.zero;
+  Duration get currentPosition => _currentPosition;
 
   @override
-  Duration get totalDuration => _controller?.value.duration ?? Duration.zero;
+  Duration get totalDuration => _totalDuration;
 
   @override
-  bool get isPlaying => _controller?.value.isPlaying ?? false;
+  bool get isPlaying => _isPlaying;
 
-  // Helper to expose controller for VideoPlayer widget
   @override
-  VideoPlayerController? get controller => _controller;
+  VideoController? get controller => _controller;
 
   @override
   Future<void> setPlaybackSpeed(double speed) async {
-    await _controller?.setPlaybackSpeed(speed);
+    await _player?.setRate(speed);
+  }
+
+  @override
+  Future<Map<int, String>> getAudioTracks() async {
+    if (_player == null) return {};
+    final tracks = _player!.state.tracks.audio;
+    final Map<int, String> result = {};
+    // Tracks are stored in a list. We can use index as ID or some internal ID if available.
+    // media_kit Track has id, but let's check.
+    // Actually, checking the list of tracks seems safer.
+    // _player.state.tracks is of type Tracks.
+    // tracks.audio is List<AudioTrack>.
+
+    for (var i = 0; i < tracks.length; i++) {
+      // Skip 'no' audio track if desired, or include it.
+      // Usually we want to identify them.
+      final track = tracks[i];
+      // ID is unique usually.
+      // Use a map of ID -> Display Name
+      // track.id is a String usually? media_kit Track ID.
+      // Let's assume we map hashcode or internal ID if needed,
+      // but media_kit setAudioTrack takes AudioTrack object reference usually.
+      // Wait, repository interface asks for Map<int, String>.
+      // Let's assume int ID is index for simplicity or hash if stable.
+      // But better: modify interface to handle this better?
+      // No, let's stick to int ID and map internally if needed.
+      // Actually, media_kit uses methods: setAudioTrack(AudioTrack track).
+      // So we need to store the AudioTrack objects or map index back to them.
+
+      // Simpler implementation:
+      // Return index as ID.
+      var name = track.language ?? track.title ?? 'Audio ${i + 1}';
+      if (track.codec != null) name += ' (${track.codec})';
+      result[i] = name;
+    }
+    return result;
+  }
+
+  // Helper to get actual track object
+  // Since we don't return objects in interface, we need to fetch state again or cache.
+  // Ideally, valid call is only when state is valid.
+
+  @override
+  Future<Map<int, String>> getSubtitleTracks() async {
+    if (_player == null) return {};
+    final tracks = _player!.state.tracks.subtitle;
+    final Map<int, String> result = {};
+    for (var i = 0; i < tracks.length; i++) {
+      final track = tracks[i];
+      var name = track.language ?? track.title ?? 'Subtitle ${i + 1}';
+      if (track.codec != null) name += ' (${track.codec})';
+      result[i] = name;
+    }
+    return result;
+  }
+
+  @override
+  Future<void> setAudioTrack(int trackId) async {
+    if (_player == null) return;
+    final tracks = _player!.state.tracks.audio;
+    if (trackId >= 0 && trackId < tracks.length) {
+      await _player!.setAudioTrack(tracks[trackId]);
+    }
+  }
+
+  @override
+  Future<void> setSubtitleTrack(int trackId) async {
+    if (_player == null) return;
+    final tracks = _player!.state.tracks.subtitle;
+    if (trackId >= 0 && trackId < tracks.length) {
+      await _player!.setSubtitleTrack(tracks[trackId]);
+    }
   }
 }

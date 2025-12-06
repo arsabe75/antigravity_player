@@ -37,8 +37,6 @@ dependencies:
   flutter_riverpod: ^3.0.3
   riverpod_annotation: ^3.0.3
   go_router: ^17.0.0
-  video_player: ^2.10.1
-  fvp: ^0.35.1
   lucide_icons: ^0.257.0
   window_manager: ^0.5.1
   freezed_annotation: ^3.1.0
@@ -46,6 +44,9 @@ dependencies:
   shared_preferences: ^2.5.3
   mpris_service:
     git: https://github.com/alexmercerind/mpris_service.git
+  media_kit: ^1.2.3
+  media_kit_video: ^2.0.1
+  media_kit_libs_video: ^1.0.7
 
 dev_dependencies:
   flutter_test:
