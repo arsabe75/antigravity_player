@@ -126,32 +126,28 @@ class VideoRepositoryImpl implements VideoRepository {
     if (_player == null) return {};
     final tracks = _player!.state.tracks.audio;
     final Map<int, String> result = {};
-    // Tracks are stored in a list. We can use index as ID or some internal ID if available.
-    // media_kit Track has id, but let's check.
-    // Actually, checking the list of tracks seems safer.
-    // _player.state.tracks is of type Tracks.
-    // tracks.audio is List<AudioTrack>.
 
     for (var i = 0; i < tracks.length; i++) {
-      // Skip 'no' audio track if desired, or include it.
-      // Usually we want to identify them.
       final track = tracks[i];
-      // ID is unique usually.
-      // Use a map of ID -> Display Name
-      // track.id is a String usually? media_kit Track ID.
-      // Let's assume we map hashcode or internal ID if needed,
-      // but media_kit setAudioTrack takes AudioTrack object reference usually.
-      // Wait, repository interface asks for Map<int, String>.
-      // Let's assume int ID is index for simplicity or hash if stable.
-      // But better: modify interface to handle this better?
-      // No, let's stick to int ID and map internally if needed.
-      // Actually, media_kit uses methods: setAudioTrack(AudioTrack track).
-      // So we need to store the AudioTrack objects or map index back to them.
+      if (track.id == 'no') {
+        result[i] = 'Off';
+        continue;
+      }
+      if (track.id == 'auto') {
+        result[i] = 'Auto';
+        continue;
+      }
 
-      // Simpler implementation:
-      // Return index as ID.
       var name = track.language ?? track.title ?? 'Audio ${i + 1}';
+      // Append codec if useful and not redundant
       if (track.codec != null) name += ' (${track.codec})';
+
+      // If we have both title and language, maybe show both?
+      if (track.title != null && track.language != null) {
+        name = '${track.title} - ${track.language}';
+        if (track.codec != null) name += ' (${track.codec})';
+      }
+
       result[i] = name;
     }
     return result;
@@ -168,7 +164,21 @@ class VideoRepositoryImpl implements VideoRepository {
     final Map<int, String> result = {};
     for (var i = 0; i < tracks.length; i++) {
       final track = tracks[i];
+      if (track.id == 'no') {
+        result[i] = 'Off';
+        continue;
+      }
+      if (track.id == 'auto') {
+        result[i] = 'Auto';
+        continue;
+      }
+
       var name = track.language ?? track.title ?? 'Subtitle ${i + 1}';
+
+      if (track.title != null && track.language != null) {
+        name = '${track.title} - ${track.language}';
+      }
+
       if (track.codec != null) name += ' (${track.codec})';
       result[i] = name;
     }
