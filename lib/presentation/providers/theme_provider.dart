@@ -11,8 +11,11 @@ class ThemeNotifier extends _$ThemeNotifier {
   @override
   ThemeMode build() {
     _storageService = ThemeStorageService();
+    // Iniciamos la carga asíncrona, pero retornamos un valor initial síncrono inmediatamente.
+    // Si quisiéramos que el estado fuera asíncrono desde el principio, usaríamos AsyncNotifier<ThemeMode>
+    // y retornaríamos un Future<ThemeMode>.
     _loadTheme();
-    return ThemeMode.system; // Default state while loading
+    return ThemeMode.system; // Estado inicial por defecto mientras carga
   }
 
   Future<void> _loadTheme() async {
@@ -27,6 +30,8 @@ class ThemeNotifier extends _$ThemeNotifier {
 
   Future<void> toggleTheme() async {
     if (state == ThemeMode.dark) {
+      // Cambio de estado simple. Al no ser una clase compleja con copyWith,
+      // simplemente asignamos el nuevo valor.
       state = ThemeMode.light;
       await _storageService.saveThemeMode(false);
     } else {

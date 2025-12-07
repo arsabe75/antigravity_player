@@ -6,10 +6,13 @@ import '../../domain/entities/playlist_entity.dart';
 
 part 'playlist_notifier.g.dart';
 
+// Riverpod 3: keepAlive: true evita que el estado se destruya cuando no hay listeners.
+// Por defecto (sin keepAlive), Riverpod destruye el estado si nadie lo está "viendo" (watching).
 @Riverpod(keepAlive: true)
 class PlaylistNotifier extends _$PlaylistNotifier {
   @override
   PlaylistEntity build() {
+    // Retornamos el estado inicial de la playlist (vacía).
     return const PlaylistEntity();
   }
 
@@ -20,6 +23,9 @@ class PlaylistNotifier extends _$PlaylistNotifier {
       isNetwork: isNetwork,
       title: title ?? path.split('/').last,
     );
+    // Actualizamos el estado creando una nueva copia con el nuevo item añadido.
+    // Nunca mutamos el estado directamente (ej. state.items.add(item) NO funcionaría si la lista fuera mutable,
+    // pero aquí usamos listas inmutables y copyWith).
     state = state.copyWith(items: [...state.items, item]);
   }
 

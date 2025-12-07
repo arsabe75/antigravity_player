@@ -12,9 +12,14 @@ import 'player_state.dart';
 part 'player_notifier.g.dart';
 
 // Repository Provider
+// Riverpod 3: Esta es una función "provider" generada.
+// La anotación @riverpod le dice al generador que cree un provider (AutoDisposeProvider por defecto).
+// 'Ref' es el objeto que nos permite interactuar con otros providers y el ciclo de vida.
 @riverpod
 VideoRepository videoRepository(Ref ref) {
   final repo = VideoRepositoryImpl();
+  // ref.onDispose registra una función que se ejecuta cuando el provider es destruido.
+  // Es crucial para limpiar recursos (streams, controladores, etc.).
   ref.onDispose(() => repo.dispose());
   return repo;
 }
@@ -25,6 +30,8 @@ PlaybackStorageService playbackStorageService(Ref ref) {
 }
 
 // Player Notifier
+// Riverpod 3: @riverpod sobre una clase genera un NotifierProvider (o AsyncNotifierProvider si build devuelve Future).
+// La clase debe extender de _$NombreDeLaClase (generated mixin).
 @riverpod
 class PlayerNotifier extends _$PlayerNotifier {
   late final VideoRepository _repository;
@@ -37,10 +44,16 @@ class PlayerNotifier extends _$PlayerNotifier {
 
   @override
   PlayerState build() {
+    // Riverpod 3: El método build() reemplaza al constructor.
+    // Aquí inicializamos el estado y las dependencias.
+    // ref.watch lee el valor de otro provider y escucha sus cambios.
+    // Si videoRepositoryProvider cambia, este provider se reconstruirá.
     _repository = ref.watch(videoRepositoryProvider);
     _storageService = ref.watch(playbackStorageServiceProvider);
     _initStreams();
 
+    // Registramos la limpieza de recursos.
+    // En Riverpod 3, esto reemplaza al método dispose() de los StateNotifier.
     ref.onDispose(() {
       _positionSub?.cancel();
       _durationSub?.cancel();
@@ -51,11 +64,15 @@ class PlayerNotifier extends _$PlayerNotifier {
       _savePosition();
     });
 
+    // Retornamos el estado inicial.
     return const PlayerState();
   }
 
   void _initStreams() {
     _positionSub = _repository.positionStream.listen((pos) {
+      // Riverpod 3: 'state' es la propiedad que mantiene el estado actual.
+      // Es inmutable (en este caso), por lo que usamos copyWith para actualizarlo.
+      // Al asignar un nuevo valor a 'state', se notifica a los listeners.
       state = state.copyWith(position: pos);
     });
     _durationSub = _repository.durationStream.listen((dur) {
