@@ -8,12 +8,26 @@ import 'config/router/app_router.dart';
 import 'config/theme/app_theme.dart';
 import 'config/constants/app_constants.dart';
 import 'presentation/providers/theme_provider.dart';
+import 'infrastructure/services/player_settings_service.dart';
+import 'presentation/providers/video_repository_provider.dart';
+
+class _PreloadedBackendNotifier extends PlayerBackendNotifier {
+  final String initialBackend;
+  _PreloadedBackendNotifier(this.initialBackend);
+
+  @override
+  String build() => initialBackend;
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Initialize MediaKit
   MediaKit.ensureInitialized();
+
+  // Load Player Settings
+  final settingsService = PlayerSettingsService();
+  final backend = await settingsService.getPlayerEngine();
 
   // Initialize Window Manager
   await windowManager.ensureInitialized();
@@ -35,7 +49,16 @@ void main() async {
     await windowManager.setResizable(true);
   });
 
-  runApp(const ProviderScope(child: VideoPlayerApp()));
+  runApp(
+    ProviderScope(
+      overrides: [
+        playerBackendProvider.overrideWith(
+          () => _PreloadedBackendNotifier(backend),
+        ),
+      ],
+      child: const VideoPlayerApp(),
+    ),
+  );
 }
 
 class VideoPlayerApp extends ConsumerWidget {

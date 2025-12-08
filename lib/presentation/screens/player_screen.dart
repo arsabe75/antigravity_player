@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:video_player/video_player.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../config/constants/app_constants.dart';
@@ -15,6 +16,7 @@ import '../../domain/entities/player_error.dart';
 import '../providers/player_notifier.dart';
 import '../providers/player_state.dart';
 import '../providers/playlist_notifier.dart';
+import '../providers/video_repository_provider.dart';
 import '../widgets/player/player_widgets.dart';
 import '../widgets/player/track_selection_sheet.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
@@ -183,7 +185,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   Widget build(BuildContext context) {
     final state = ref.watch(playerProvider);
     final notifier = ref.read(playerProvider.notifier);
-    final controller = ref.read(videoRepositoryProvider).controller;
+    final controller = ref.read(videoRepositoryProvider).platformController;
     final playlist = ref.watch(playlistProvider);
     final playlistNotifier = ref.read(playlistProvider.notifier);
 
@@ -301,13 +303,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         onToggleAlwaysOnTop: notifier.toggleAlwaysOnTop,
                         onTogglePlaylist: () =>
                             setState(() => _showPlaylist = !_showPlaylist),
-                        onToggleTracks: () {
-                          showModalBottomSheet(
-                            context: context,
-                            backgroundColor: Colors.transparent,
-                            builder: (context) => const TrackSelectionSheet(),
-                          );
-                        },
+                        // Only show tracks for MediaKit
+                        onToggleTracks: state.playerBackend == 'media_kit'
+                            ? () {
+                                showModalBottomSheet(
+                                  context: context,
+                                  backgroundColor: Colors.transparent,
+                                  builder: (context) =>
+                                      const TrackSelectionSheet(),
+                                );
+                              }
+                            : null,
                       ),
                     ],
                   ),
@@ -439,18 +445,39 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   }
 
   Widget _buildVideoLayer(
-    VideoController? controller,
+    Object? controller,
     PlayerState state,
     PlayerNotifier notifier,
   ) {
+    if (_isDisposing || controller == null) {
+      return const Center(
+        child: CircularProgressIndicator(color: Colors.white),
+      );
+    }
+
+    Widget videoWidget;
+    if (state.playerBackend == 'fvp') {
+      // FVP / VideoPlayer
+      // Dynamic cast or check type if strictly needed, but Object? is passed
+      // We assume controller is VideoPlayerController if backend is fvp
+      // Import video_player package in file if needed, or use dynamic
+      final videoPlayerController = controller as VideoPlayerController;
+      videoWidget = AspectRatio(
+        aspectRatio: videoPlayerController.value.aspectRatio,
+        child: VideoPlayer(videoPlayerController),
+      );
+    } else {
+      // MediaKit
+      videoWidget = Video(
+        controller: (controller as VideoController),
+        controls: NoVideoControls,
+      );
+    }
+
     return GestureDetector(
       onTap: notifier.togglePlay,
       onDoubleTap: _handleToggleFullscreen,
-      child: Center(
-        child: !_isDisposing && controller != null
-            ? Video(controller: controller, controls: NoVideoControls)
-            : const CircularProgressIndicator(color: Colors.white),
-      ),
+      child: Center(child: videoWidget),
     );
   }
 

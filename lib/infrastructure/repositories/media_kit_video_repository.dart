@@ -4,7 +4,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
 
-class VideoRepositoryImpl implements VideoRepository {
+class MediaKitVideoRepository implements VideoRepository {
   Player? _player;
   VideoController? _controller;
 
@@ -114,7 +114,7 @@ class VideoRepositoryImpl implements VideoRepository {
   bool get isPlaying => _isPlaying;
 
   @override
-  VideoController? get controller => _controller;
+  Object? get platformController => _controller;
 
   @override
   Future<void> setPlaybackSpeed(double speed) async {

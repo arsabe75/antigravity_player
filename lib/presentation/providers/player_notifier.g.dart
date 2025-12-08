@@ -9,48 +9,6 @@ part of 'player_notifier.dart';
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
 
-@ProviderFor(videoRepository)
-const videoRepositoryProvider = VideoRepositoryProvider._();
-
-final class VideoRepositoryProvider
-    extends
-        $FunctionalProvider<VideoRepository, VideoRepository, VideoRepository>
-    with $Provider<VideoRepository> {
-  const VideoRepositoryProvider._()
-    : super(
-        from: null,
-        argument: null,
-        retry: null,
-        name: r'videoRepositoryProvider',
-        isAutoDispose: true,
-        dependencies: null,
-        $allTransitiveDependencies: null,
-      );
-
-  @override
-  String debugGetCreateSourceHash() => _$videoRepositoryHash();
-
-  @$internal
-  @override
-  $ProviderElement<VideoRepository> $createElement($ProviderPointer pointer) =>
-      $ProviderElement(pointer);
-
-  @override
-  VideoRepository create(Ref ref) {
-    return videoRepository(ref);
-  }
-
-  /// {@macro riverpod.override_with_value}
-  Override overrideWithValue(VideoRepository value) {
-    return $ProviderOverride(
-      origin: this,
-      providerOverride: $SyncValueProvider<VideoRepository>(value),
-    );
-  }
-}
-
-String _$videoRepositoryHash() => r'ded075264c12680b239f7f4d81f3cf985eee6190';
-
 @ProviderFor(playbackStorageService)
 const playbackStorageServiceProvider = PlaybackStorageServiceProvider._();
 
@@ -131,7 +89,7 @@ final class PlayerNotifierProvider
   }
 }
 
-String _$playerNotifierHash() => r'fb0eced58cd39ec7baa5ba26d723c43db412b7a1';
+String _$playerNotifierHash() => r'8938f24a59f1046b62a4801f6f4b9fa95af2698d';
 
 abstract class _$PlayerNotifier extends $Notifier<PlayerState> {
   PlayerState build();

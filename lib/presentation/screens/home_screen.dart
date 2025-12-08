@@ -10,6 +10,7 @@ import '../providers/playlist_notifier.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/dialogs/url_input_dialog.dart';
 import '../widgets/home/recent_videos_widget.dart';
+import '../widgets/settings_dialog.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -164,6 +165,20 @@ class HomeScreen extends ConsumerWidget {
                       tooltip: isDarkMode
                           ? 'Switch to Light Mode'
                           : 'Switch to Dark Mode',
+                    ),
+                    IconButton(
+                      icon: Icon(
+                        LucideIcons.settings,
+                        color: Theme.of(context).colorScheme.onSurface,
+                        size: 20,
+                      ),
+                      onPressed: () {
+                        showDialog(
+                          context: context,
+                          builder: (context) => const SettingsDialog(),
+                        );
+                      },
+                      tooltip: 'Settings',
                     ),
                     IconButton(
                       icon: Icon(

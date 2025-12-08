@@ -1,5 +1,3 @@
-import 'package:media_kit_video/media_kit_video.dart';
-
 import '../entities/video_entity.dart';
 
 abstract class VideoRepository {
@@ -19,7 +17,8 @@ abstract class VideoRepository {
   bool get isPlaying;
 
   /// Exposes the underlying VideoController for the Video widget
-  VideoController? get controller;
+  /// Return type is dynamic/Object to support both MediaKit and VideoPlayer controllers
+  Object? get platformController;
 
   /// Sets the playback speed
   Future<void> setPlaybackSpeed(double speed);

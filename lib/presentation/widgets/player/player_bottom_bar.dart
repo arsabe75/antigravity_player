@@ -31,7 +31,7 @@ class PlayerBottomBar extends StatelessWidget {
   final VoidCallback onToggleFullscreen;
   final VoidCallback onToggleAlwaysOnTop;
   final VoidCallback onTogglePlaylist;
-  final VoidCallback onToggleTracks;
+  final VoidCallback? onToggleTracks;
 
   const PlayerBottomBar({
     super.key,
@@ -56,7 +56,7 @@ class PlayerBottomBar extends StatelessWidget {
     required this.onToggleFullscreen,
     required this.onToggleAlwaysOnTop,
     required this.onTogglePlaylist,
-    required this.onToggleTracks,
+    this.onToggleTracks,
   });
 
   String _formatDuration(Duration duration) {
@@ -142,11 +142,15 @@ class PlayerBottomBar extends StatelessWidget {
                   onToggleMute: onToggleMute,
                 ),
                 // Tracks button
-                IconButton(
-                  icon: const Icon(LucideIcons.subtitles, color: Colors.white),
-                  onPressed: onToggleTracks,
-                  tooltip: 'Audio & Subtitles',
-                ),
+                if (onToggleTracks != null)
+                  IconButton(
+                    icon: const Icon(
+                      LucideIcons.subtitles,
+                      color: Colors.white,
+                    ),
+                    onPressed: onToggleTracks!,
+                    tooltip: 'Audio & Subtitles',
+                  ),
                 // Always on top button
                 IconButton(
                   icon: Icon(

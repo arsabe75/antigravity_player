@@ -4,7 +4,7 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:window_manager/window_manager.dart';
 import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
-import '../../infrastructure/repositories/video_repository_impl.dart';
+import 'video_repository_provider.dart';
 import '../../infrastructure/services/playback_storage_service.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
 import 'player_state.dart';
@@ -12,17 +12,6 @@ import 'player_state.dart';
 part 'player_notifier.g.dart';
 
 // Repository Provider
-// Riverpod 3: Esta es una función "provider" generada.
-// La anotación @riverpod le dice al generador que cree un provider (AutoDisposeProvider por defecto).
-// 'Ref' es el objeto que nos permite interactuar con otros providers y el ciclo de vida.
-@riverpod
-VideoRepository videoRepository(Ref ref) {
-  final repo = VideoRepositoryImpl();
-  // ref.onDispose registra una función que se ejecuta cuando el provider es destruido.
-  // Es crucial para limpiar recursos (streams, controladores, etc.).
-  ref.onDispose(() => repo.dispose());
-  return repo;
-}
 
 @riverpod
 PlaybackStorageService playbackStorageService(Ref ref) {
@@ -65,7 +54,9 @@ class PlayerNotifier extends _$PlayerNotifier {
     });
 
     // Retornamos el estado inicial.
-    return const PlayerState();
+    // Sync backend state
+    final backend = ref.read(playerBackendProvider);
+    return PlayerState(playerBackend: backend);
   }
 
   void _initStreams() {
