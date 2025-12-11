@@ -87,24 +87,39 @@ class HomeScreen extends ConsumerWidget {
                           ),
                         ),
                         const SizedBox(height: 48),
-                        SizedBox(
-                          width: 250,
-                          height: 50,
-                          child: ElevatedButton.icon(
-                            onPressed: () => _pickFile(context, ref),
-                            icon: const Icon(LucideIcons.folderOpen),
-                            label: const Text('Open Local File(s)'),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        SizedBox(
-                          width: 250,
-                          height: 50,
-                          child: OutlinedButton.icon(
-                            onPressed: () => _enterUrl(context),
-                            icon: const Icon(LucideIcons.globe),
-                            label: const Text('Open Network URL'),
-                          ),
+                        Wrap(
+                          spacing: 16,
+                          runSpacing: 16,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            SizedBox(
+                              width: 200,
+                              height: 50,
+                              child: ElevatedButton.icon(
+                                onPressed: () => _pickFile(context, ref),
+                                icon: const Icon(LucideIcons.folderOpen),
+                                label: const Text('Open Local File(s)'),
+                              ),
+                            ),
+                            SizedBox(
+                              width: 200,
+                              height: 50,
+                              child: OutlinedButton.icon(
+                                onPressed: () => _enterUrl(context),
+                                icon: const Icon(LucideIcons.globe),
+                                label: const Text('Open Network URL'),
+                              ),
+                            ),
+                            SizedBox(
+                              width: 200,
+                              height: 50,
+                              child: OutlinedButton.icon(
+                                onPressed: () => context.push('/telegram'),
+                                icon: const Icon(LucideIcons.send),
+                                label: const Text('Telegram'),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
