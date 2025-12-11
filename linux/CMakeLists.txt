@@ -126,3 +126,23 @@ if(NOT CMAKE_BUILD_TYPE MATCHES "Debug")
   install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 endif()
+
+# --- INICIO CONFIGURACION TDLYB ---
+# Definir la ruta de la librería
+set(TDLIB_LIBS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tdlib_libs")
+set(TDLIB_SO "${TDLIB_LIBS_DIR}/libtdjson.so")
+
+# 1. Copiar al directorio del ejecutable al compilar (para desarrollo)
+# Nota: Se asume que el target principal se llama ${BINARY_NAME} o 'runner'
+# Si tu proyecto es antiguo, verifica el nombre del target en add_executable()
+add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${TDLIB_SO}"
+    "$<TARGET_FILE_DIR:${BINARY_NAME}>"
+    COMMENT "Copiando libtdjson.so al directorio de salida"
+)
+
+# 2. Instalar en la carpeta 'lib' del bundle para distribución
+# Esto permite que RPATH ($ORIGIN/lib) lo encuentre automáticamente
+install(FILES "${TDLIB_SO}" DESTINATION "${CMAKE_INSTALL_PREFIX}/lib")
+# --- FIN CONFIGURACION TDLYB ---

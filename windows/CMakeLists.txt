@@ -106,3 +106,28 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# --- INICIO CONFIGURACION TDLYB (Versión OpenSSL 3.0) ---
+set(TDLIB_LIBS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tdlib_libs")
+
+# Lista de archivos requeridos para TDLib (Ajustado a OpenSSL 3)
+set(TDLIB_BINARIES
+    "${TDLIB_LIBS_DIR}/tdjson.dll"
+    "${TDLIB_LIBS_DIR}/libcrypto-3-x64.dll"  # <-- Nombre actualizado
+    "${TDLIB_LIBS_DIR}/libssl-3-x64.dll"     # <-- Nombre actualizado
+    "${TDLIB_LIBS_DIR}/zlib1.dll"             # <-- No olvides este
+)
+
+# 1. Copiar archivos al directorio de salida (Debug/Run)
+foreach(BINARY_FILE ${TDLIB_BINARIES})
+    add_custom_command(TARGET ${BINARY_NAME} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${BINARY_FILE}"
+        "$<TARGET_FILE_DIR:${BINARY_NAME}>"
+        COMMENT "Copiando dependencia de TDLib: ${BINARY_FILE}"
+    )
+endforeach()
+
+# 2. Incluir archivos en el instalador final (Release)
+install(FILES ${TDLIB_BINARIES} DESTINATION "${CMAKE_INSTALL_PREFIX}")
+# --- FIN CONFIGURACION TDLYB ---
