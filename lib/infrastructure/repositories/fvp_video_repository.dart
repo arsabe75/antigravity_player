@@ -22,7 +22,8 @@ class FvpVideoRepository implements VideoRepository {
   @override
   Future<void> initialize() async {
     // Register FVP
-    fvp.registerWith();
+    // Register FVP with HW acceleration
+    fvp.registerWith(options: {'hwdec': 'auto'});
   }
 
   @override

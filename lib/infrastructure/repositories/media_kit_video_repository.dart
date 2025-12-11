@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import '../../domain/entities/video_entity.dart';
@@ -44,7 +45,20 @@ class MediaKitVideoRepository implements VideoRepository {
     }
 
     _player = Player();
-    _controller = VideoController(_player!);
+
+    String? hwdec;
+    if (Platform.isWindows) {
+      hwdec = 'd3d11';
+    } else if (Platform.isLinux) {
+      hwdec = 'vaapi';
+    } else {
+      hwdec = 'auto'; // Fallback
+    }
+
+    _controller = VideoController(
+      _player!,
+      configuration: VideoControllerConfiguration(hwdec: hwdec),
+    );
 
     // Listen to streams
     _playerSub = _player!.stream.position.listen((pos) {
