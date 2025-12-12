@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../infrastructure/services/telegram_service.dart';
@@ -49,8 +50,9 @@ class TelegramAuthNotifier extends Notifier<TelegramAuthState> {
 
   @override
   TelegramAuthState build() {
-    // ignore: avoid_print
-    print('TelegramAuthNotifier: API_ID=$_apiId, API_HASH=$_apiHash'); // DEBUG
+    debugPrint(
+      'TelegramAuthNotifier: API_ID=$_apiId, API_HASH=$_apiHash',
+    ); // DEBUG
     _service = TelegramService();
     // Defer initialization to avoid modifying provider during build
     Future.microtask(() => _init());
@@ -93,7 +95,7 @@ class TelegramAuthNotifier extends Notifier<TelegramAuthState> {
         final tdlibPath = p.join(appDir.path, 'antigravity_tdlib');
         await Directory(tdlibPath).create(recursive: true);
 
-        print(
+        debugPrint(
           'Sending setTdlibParameters with API_ID=$_apiId, API_HASH=$_apiHash',
         ); // DEBUG
 
@@ -152,8 +154,7 @@ class TelegramAuthNotifier extends Notifier<TelegramAuthState> {
   }
 
   void setPhoneNumber(String phoneNumber) {
-    // ignore: avoid_print
-    print('Setting Phone Number: $phoneNumber');
+    debugPrint('Setting Phone Number: $phoneNumber');
     state = state.copyWith(isLoading: true, error: null);
     _service.send({
       '@type': 'setAuthenticationPhoneNumber',

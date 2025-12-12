@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../providers/telegram_auth_notifier.dart';
 
+import 'package:window_manager/window_manager.dart';
+
 class TelegramLoginScreen extends ConsumerStatefulWidget {
   const TelegramLoginScreen({super.key});
 
@@ -34,6 +36,10 @@ class _TelegramLoginScreenState extends ConsumerState<TelegramLoginScreen> {
         centerTitle: true,
         backgroundColor: Colors.transparent,
         elevation: 0,
+        flexibleSpace: GestureDetector(
+          onPanStart: (_) => windowManager.startDragging(),
+          behavior: HitTestBehavior.translucent,
+        ),
       ),
       body: Center(
         child: Container(
@@ -54,7 +60,7 @@ class _TelegramLoginScreenState extends ConsumerState<TelegramLoginScreen> {
                   padding: const EdgeInsets.all(12),
                   margin: const EdgeInsets.only(bottom: 16),
                   decoration: BoxDecoration(
-                    color: Colors.red.withOpacity(0.1),
+                    color: Colors.red.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(color: Colors.red),
                   ),
