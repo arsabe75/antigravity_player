@@ -59,6 +59,11 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
   Widget build(BuildContext context) {
     final authState = ref.watch(telegramAuthProvider);
 
+    // If checking auth state, show loading
+    if (authState.list == AuthState.initial) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
     // If not authenticated, show login
     if (authState.list != AuthState.ready) {
       // If initial, it might briefly show login before checking params,

@@ -31,6 +31,7 @@ class PlayerNotifier extends _$PlayerNotifier {
   StreamSubscription? _playingSub;
   StreamSubscription? _bufferingSub;
   Timer? _saveTimer;
+  int? _currentProxyFileId;
 
   @override
   PlayerState build() {
@@ -89,6 +90,18 @@ class PlayerNotifier extends _$PlayerNotifier {
         duration: Duration.zero,
         isPlaying: false,
       );
+
+      // Extract and store proxy file ID safely for disposal
+      _currentProxyFileId = null;
+      if (path.contains('/stream?file_id=')) {
+        try {
+          final uri = Uri.parse(path);
+          final fileIdStr = uri.queryParameters['file_id'];
+          if (fileIdStr != null) {
+            _currentProxyFileId = int.tryParse(fileIdStr);
+          }
+        } catch (_) {}
+      }
 
       if (!isNetwork) {
         final file = File(path);
@@ -228,18 +241,9 @@ class PlayerNotifier extends _$PlayerNotifier {
   }
 
   void _abortCurrentProxyRequest() {
-    final path = state.currentVideoPath;
-    if (path != null && path.contains('/stream?file_id=')) {
-      try {
-        final uri = Uri.parse(path);
-        final fileIdStr = uri.queryParameters['file_id'];
-        if (fileIdStr != null) {
-          final fileId = int.tryParse(fileIdStr);
-          if (fileId != null) {
-            LocalStreamingProxy().abortRequest(fileId);
-          }
-        }
-      } catch (_) {}
+    if (_currentProxyFileId != null) {
+      LocalStreamingProxy().abortRequest(_currentProxyFileId!);
+      _currentProxyFileId = null;
     }
   }
 }
