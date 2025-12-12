@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:window_manager/window_manager.dart';
 import '../../domain/entities/video_entity.dart';
@@ -32,6 +33,7 @@ class PlayerNotifier extends _$PlayerNotifier {
   StreamSubscription? _bufferingSub;
   Timer? _saveTimer;
   int? _currentProxyFileId;
+  bool _mounted = true;
 
   @override
   PlayerState build() {
@@ -46,6 +48,7 @@ class PlayerNotifier extends _$PlayerNotifier {
     // Registramos la limpieza de recursos.
     // En Riverpod 3, esto reemplaza al método dispose() de los StateNotifier.
     ref.onDispose(() {
+      _mounted = false;
       _positionSub?.cancel();
       _durationSub?.cancel();
       _playingSub?.cancel();
@@ -80,7 +83,11 @@ class PlayerNotifier extends _$PlayerNotifier {
     });
   }
 
-  Future<void> loadVideo(String path, {bool isNetwork = false}) async {
+  Future<void> loadVideo(
+    String path, {
+    bool isNetwork = false,
+    String? title,
+  }) async {
     _abortCurrentProxyRequest();
     try {
       state = state.copyWith(
@@ -91,6 +98,11 @@ class PlayerNotifier extends _$PlayerNotifier {
         isPlaying: false,
       );
 
+      // ... (existing code for proxy fix) ...
+      // I will use replace_file_content so I don't need to copy 80 lines.
+      // Wait, replacement content must match target content exactly.
+      // I will use multi_replace.
+
       // Extract and store proxy file ID safely for disposal
       _currentProxyFileId = null;
       if (path.contains('/stream?file_id=')) {
@@ -99,6 +111,25 @@ class PlayerNotifier extends _$PlayerNotifier {
           final fileIdStr = uri.queryParameters['file_id'];
           if (fileIdStr != null) {
             _currentProxyFileId = int.tryParse(fileIdStr);
+          }
+
+          // FIX: Correct the port if this is a local proxy URL to ensure we use the active port
+          // This fixes "Recent Videos" failing after restart because they point to dead ports
+          if (uri.authority.contains('127.0.0.1') ||
+              uri.authority.contains('localhost')) {
+            final activePort = LocalStreamingProxy().port;
+            if (activePort > 0 && uri.port != activePort) {
+              final newPath = path.replaceFirst(
+                ':${uri.port}/',
+                ':$activePort/',
+              );
+              debugPrint(
+                'PlayerNotifier: Corrected port from ${uri.port} to $activePort',
+              );
+              path = newPath;
+              // Update current video path in state immediately so UI/Logic uses the working URL
+              state = state.copyWith(currentVideoPath: path);
+            }
           }
         } catch (_) {}
       }
@@ -119,14 +150,48 @@ class PlayerNotifier extends _$PlayerNotifier {
 
       // Save to recent videos history
       final recentVideosService = RecentVideosService();
-      await recentVideosService.addVideo(path, isNetwork: isNetwork);
+      await recentVideosService.addVideo(
+        path,
+        isNetwork: isNetwork,
+        title: title,
+      );
 
-      final savedPositionMs = await _storageService.getPosition(path);
+      // Use file_id as stable key if available, otherwise path
+      final storageKey = _currentProxyFileId != null
+          ? 'file_${_currentProxyFileId}'
+          : path;
+      final savedPositionMs = await _storageService.getPosition(storageKey);
       if (savedPositionMs != null && savedPositionMs > 0) {
         final position = Duration(milliseconds: savedPositionMs);
-        // Wait a bit to ensure player is ready to seek
-        await Future.delayed(const Duration(milliseconds: 500));
-        await seekTo(position);
+
+        // Wait for duration to be known (metadata loaded) before seeking
+        // This prevents seeking to a valid position while duration is 0 (which often fails or resets)
+        int waitAttempts = 0;
+        const maxWaitAttempts = 100; // 10 seconds (100 * 100ms)
+
+        // Modified loop to check _mounted to avoid crash on dispose
+        while (_mounted &&
+            state.duration == Duration.zero &&
+            waitAttempts < maxWaitAttempts) {
+          await Future.delayed(const Duration(milliseconds: 100));
+          if (!_mounted) return; // Exit if disposed
+          waitAttempts++;
+        }
+
+        if (!_mounted) return; // Safety check
+
+        // Only seek if we have a valid duration or just try your best if timed out
+        if (state.duration > Duration.zero) {
+          debugPrint(
+            'PlayerNotifier: Resuming to $position (Duration: ${state.duration})',
+          );
+          await seekTo(position);
+        } else {
+          debugPrint(
+            'PlayerNotifier: Resume timed out waiting for duration. Attempting seek anyway...',
+          );
+          await seekTo(position);
+        }
       }
 
       _startSaveTimer();
@@ -191,8 +256,12 @@ class PlayerNotifier extends _$PlayerNotifier {
   Future<void> _savePosition() async {
     try {
       if (state.currentVideoPath != null) {
+        // Use file_id as stable key for proxy videos to persist across restarts (ephemeral ports)
+        final storageKey = _currentProxyFileId != null
+            ? 'file_${_currentProxyFileId}'
+            : state.currentVideoPath!;
         await _storageService.savePosition(
-          state.currentVideoPath!,
+          storageKey,
           state.position.inMilliseconds,
         );
       }

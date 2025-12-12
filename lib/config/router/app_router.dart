@@ -10,8 +10,18 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/player',
       builder: (context, state) {
-        final url = state.extra as String?;
-        return PlayerScreen(videoUrl: url);
+        String? url;
+        String? title;
+
+        if (state.extra is Map) {
+          final map = state.extra as Map;
+          url = map['url'] as String?;
+          title = map['title'] as String?;
+        } else if (state.extra is String) {
+          url = state.extra as String?;
+        }
+
+        return PlayerScreen(videoUrl: url, title: title);
       },
     ),
     GoRoute(

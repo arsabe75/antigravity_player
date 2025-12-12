@@ -48,6 +48,10 @@ class TelegramService {
 
   Stream<Map<String, dynamic>> get updates => _updateController.stream;
 
+  // Request-Response correlation
+  final Map<int, Completer<Map<String, dynamic>>> _pendingRequests = {};
+  int _requestIdCounter = 0;
+
   // FFI Functions
   late final ffi.DynamicLibrary _lib;
   late final TdJsonClientCreate _createClient;
@@ -95,6 +99,16 @@ class TelegramService {
 
     receivePort.listen((message) {
       if (message is Map<String, dynamic>) {
+        // Check for request correlation ID
+        if (message.containsKey('@extra')) {
+          final extra = message['@extra'];
+          if (extra is int && _pendingRequests.containsKey(extra)) {
+            _pendingRequests.remove(extra)?.complete(message);
+            return; // Don't broadcast responses to general stream if specific requester exists?
+            // Actually, keep it just in case, or remove?
+            // Better to consume it to avoid noise.
+          }
+        }
         _updateController.add(message);
       }
     });
@@ -128,13 +142,36 @@ class TelegramService {
 
   void send(Map<String, dynamic> request) {
     if (_client == null) return;
-
-    debugPrint('TDLib Send: $request');
+    // debugPrint('TDLib Send: $request'); // Too verbose
 
     final requestJson = jsonEncode(request);
     final requestPtr = requestJson.toNativeUtf8().cast<ffi.Int8>();
     _sendRequest(_client!, requestPtr);
     calloc.free(requestPtr);
+  }
+
+  /// Sends a request and waits for the response using @extra for correlation
+  Future<Map<String, dynamic>> sendWithResult(Map<String, dynamic> request) {
+    if (_client == null) return Future.error('Client not initialized');
+
+    final completer = Completer<Map<String, dynamic>>();
+    final requestId = ++_requestIdCounter;
+
+    _pendingRequests[requestId] = completer;
+
+    final requestWithId = Map<String, dynamic>.from(request);
+    requestWithId['@extra'] = requestId;
+
+    send(requestWithId);
+
+    // Timeout safety
+    return completer.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () {
+        _pendingRequests.remove(requestId);
+        throw TimeoutException('TDLib request timed out');
+      },
+    );
   }
 
   // Executes a synchronous request
