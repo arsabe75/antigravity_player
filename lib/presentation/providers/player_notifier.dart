@@ -7,6 +7,7 @@ import '../../domain/repositories/video_repository.dart';
 import 'video_repository_provider.dart';
 import '../../infrastructure/services/playback_storage_service.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
+import '../../infrastructure/services/local_streaming_proxy.dart';
 import 'player_state.dart';
 
 part 'player_notifier.g.dart';
@@ -51,6 +52,7 @@ class PlayerNotifier extends _$PlayerNotifier {
       _bufferingSub?.cancel();
       _saveTimer?.cancel();
       _savePosition();
+      _abortCurrentProxyRequest();
     });
 
     // Retornamos el estado inicial.
@@ -78,6 +80,7 @@ class PlayerNotifier extends _$PlayerNotifier {
   }
 
   Future<void> loadVideo(String path, {bool isNetwork = false}) async {
+    _abortCurrentProxyRequest();
     try {
       state = state.copyWith(
         currentVideoPath: path,
@@ -208,6 +211,7 @@ class PlayerNotifier extends _$PlayerNotifier {
   }
 
   Future<void> stop() async {
+    _abortCurrentProxyRequest();
     _saveTimer?.cancel();
     await _savePosition();
     // We manually dispose the repo here to ensure resources are freed before window close
@@ -221,5 +225,21 @@ class PlayerNotifier extends _$PlayerNotifier {
         _savePosition();
       }
     });
+  }
+
+  void _abortCurrentProxyRequest() {
+    final path = state.currentVideoPath;
+    if (path != null && path.contains('/stream?file_id=')) {
+      try {
+        final uri = Uri.parse(path);
+        final fileIdStr = uri.queryParameters['file_id'];
+        if (fileIdStr != null) {
+          final fileId = int.tryParse(fileIdStr);
+          if (fileId != null) {
+            LocalStreamingProxy().abortRequest(fileId);
+          }
+        }
+      } catch (_) {}
+    }
   }
 }
