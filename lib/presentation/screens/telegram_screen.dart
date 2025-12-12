@@ -4,6 +4,8 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
+import 'package:window_manager/window_manager.dart';
+
 import '../providers/telegram_auth_notifier.dart';
 import '../../infrastructure/services/local_streaming_proxy.dart';
 import 'telegram_login_screen.dart';
@@ -71,6 +73,10 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
           onPressed: () => context.pop(),
         ),
         title: const Text('Telegram Channels'),
+        flexibleSpace: GestureDetector(
+          onPanStart: (_) => windowManager.startDragging(),
+          behavior: HitTestBehavior.translucent,
+        ),
         actions: [
           IconButton(
             icon: const Icon(LucideIcons.plus),

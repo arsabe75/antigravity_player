@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../infrastructure/services/telegram_service.dart';
+import '../../infrastructure/services/local_streaming_proxy.dart';
 
 class TelegramContentState {
   final List<Map<String, dynamic>> chats;
@@ -47,51 +49,59 @@ class TelegramContentNotifier extends Notifier<TelegramContentState> {
   }
 
   void _handleUpdate(Map<String, dynamic> update) {
-    if (update['@type'] == 'updateNewChat') {
-      final chat = update['chat'];
-      final chatId = chat['id'];
+    try {
+      if (update['@type'] == 'updateNewChat') {
+        final chat = update['chat'];
+        final chatId = chat['id'];
 
-      // Add to buffer
-      _bufferedChats[chatId] = chat;
+        // Add to buffer
+        _bufferedChats[chatId] = chat;
 
-      // Schedule update if not already scheduled
-      _scheduleFlush();
-    } else if (update['@type'] == 'updateChatPosition') {
-      final chatId = update['chat_id'];
-      final newPosition = update['position'];
+        // Schedule update if not already scheduled
+        _scheduleFlush();
+      } else if (update['@type'] == 'updateChatPosition') {
+        final chatId = update['chat_id'];
+        final newPosition = update['position'];
 
-      Map<String, dynamic>? chatToUpdate;
+        Map<String, dynamic>? chatToUpdate;
 
-      // Check buffer first
-      if (_bufferedChats.containsKey(chatId)) {
-        chatToUpdate = Map<String, dynamic>.from(_bufferedChats[chatId]!);
-      } else {
-        // Check current state
-        try {
-          final existing = state.chats.firstWhere((c) => c['id'] == chatId);
-          chatToUpdate = Map<String, dynamic>.from(existing);
-        } catch (_) {}
-      }
-
-      if (chatToUpdate != null) {
-        // Update positions
-        List<dynamic> positions = List.from(chatToUpdate['positions'] ?? []);
-        // Remove old entry for this list type
-        positions.removeWhere(
-          (p) => p['list']['@type'] == newPosition['list']['@type'],
-        );
-
-        // Add new position if order is not 0 (0 means removed from list)
-        // order can be string or int from JSON
-        final order = newPosition['order'];
-        if (order != "0" && order != 0) {
-          positions.add(newPosition);
+        // Check buffer first
+        if (_bufferedChats.containsKey(chatId)) {
+          chatToUpdate = Map<String, dynamic>.from(_bufferedChats[chatId]!);
+        } else {
+          // Check current state
+          try {
+            final existing = state.chats.firstWhere((c) => c['id'] == chatId);
+            chatToUpdate = Map<String, dynamic>.from(existing);
+          } catch (_) {}
         }
 
-        chatToUpdate['positions'] = positions;
-        _bufferedChats[chatId] = chatToUpdate;
-        _scheduleFlush();
+        if (chatToUpdate != null) {
+          // Update positions
+          List<dynamic> positions = List.from(chatToUpdate['positions'] ?? []);
+
+          if (newPosition['list'] != null) {
+            // Remove old entry for this list type
+            positions.removeWhere(
+              (p) =>
+                  p['list'] != null &&
+                  p['list']['@type'] == newPosition['list']['@type'],
+            );
+
+            // Add new position if order is not 0
+            final order = newPosition['order'];
+            if (order != "0" && order != 0 && order != null) {
+              positions.add(newPosition);
+            }
+
+            chatToUpdate['positions'] = positions;
+            _bufferedChats[chatId] = chatToUpdate;
+            _scheduleFlush();
+          }
+        }
       }
+    } catch (e, st) {
+      debugPrint('TelegramContentNotifier Error: $e\n$st');
     }
   }
 
@@ -102,7 +112,11 @@ class TelegramContentNotifier extends Notifier<TelegramContentState> {
   }
 
   void _flushUpdates() {
-    if (_bufferedChats.isEmpty) return;
+    if (_bufferedChats.isEmpty) {
+      // Even if no updates, if we were loading and time passed, maybe stop loading?
+      // But usually flush is only called if buffered chats exist.
+      return;
+    }
 
     final currentChats = List<Map<String, dynamic>>.from(state.chats);
 
@@ -116,35 +130,50 @@ class TelegramContentNotifier extends Notifier<TelegramContentState> {
     }
 
     // Sort chats by order in Main List
-    currentChats.sort((a, b) {
-      return _getChatOrder(b).compareTo(_getChatOrder(a));
-    });
+    try {
+      currentChats.sort((a, b) {
+        return _getChatOrder(b).compareTo(_getChatOrder(a));
+      });
+    } catch (_) {}
 
-    state = state.copyWith(chats: currentChats);
+    state = state.copyWith(chats: currentChats, isLoading: false);
     _bufferedChats.clear();
   }
 
   BigInt _getChatOrder(Map<String, dynamic> chat) {
-    final positions = chat['positions'] as List<dynamic>? ?? [];
-    for (final pos in positions) {
-      if (pos['list']['@type'] == 'chatListMain') {
-        final order = pos['order'];
-        if (order is String) return BigInt.tryParse(order) ?? BigInt.zero;
-        if (order is int) return BigInt.from(order);
+    try {
+      final positions = chat['positions'] as List<dynamic>? ?? [];
+      for (final pos in positions) {
+        if (pos['list'] != null && pos['list']['@type'] == 'chatListMain') {
+          final order = pos['order'];
+          if (order is String) return BigInt.tryParse(order) ?? BigInt.zero;
+          if (order is int) return BigInt.from(order);
+        }
       }
-    }
+    } catch (_) {}
     return BigInt.zero;
   }
 
   void loadChats() {
     state = state.copyWith(isLoading: true);
-    print('TelegramContentNotifier: Loading chats...'); // DEBUG
+    debugPrint('TelegramContentNotifier: Loading chats...'); // DEBUG
     // Request getting chats. TDLib will send updates.
     // limiting to 50 for now
     _service.send({
       '@type': 'getChats',
       'chat_list': {'@type': 'chatListMain'}, // Main list object
       'limit': 50,
+    });
+
+    // Safety timeout to prevent infinite loading if no updates arrive
+    Future.delayed(const Duration(seconds: 5), () {
+      try {
+        if (state.isLoading) {
+          state = state.copyWith(isLoading: false);
+        }
+      } catch (_) {
+        // Notifier likely disposed
+      }
     });
   }
 
@@ -156,7 +185,7 @@ class TelegramContentNotifier extends Notifier<TelegramContentState> {
     // But we need to make sure the file is "known" to TDLib (download started or at least file info loaded)
     // The Proxy calls downloadFile which triggers it.
 
-    return 'http://127.0.0.1:0/stream?file_id=$fileId&size=$size'; // Port is dynamic, need access to Proxy singleton
+    return LocalStreamingProxy().getUrl(fileId, size);
   }
 }
 

@@ -5,6 +5,7 @@ import 'dart:isolate';
 import 'dart:async';
 import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as p;
+import 'package:flutter/foundation.dart'; // For debugPrint
 
 typedef TdJsonClientCreate = ffi.Pointer<ffi.Void> Function();
 typedef TdJsonClientReceive =
@@ -128,8 +129,7 @@ class TelegramService {
   void send(Map<String, dynamic> request) {
     if (_client == null) return;
 
-    // ignore: avoid_print
-    print('TDLib Send: $request');
+    debugPrint('TDLib Send: $request');
 
     final requestJson = jsonEncode(request);
     final requestPtr = requestJson.toNativeUtf8().cast<ffi.Int8>();
@@ -169,7 +169,7 @@ class TelegramService {
       try {
         lib = ffi.DynamicLibrary.open('libtdjson.so');
       } catch (_) {
-        print('Isolate failed to load lib: $e');
+        debugPrint('Isolate failed to load lib: $e');
         return;
       }
     }

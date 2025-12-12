@@ -167,7 +167,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     });
     await Future.delayed(AppConstants.disposeDelay);
     await ref.read(playerProvider.notifier).stop();
-    if (mounted) context.go('/');
+    if (mounted) {
+      if (context.canPop()) {
+        context.pop();
+      } else {
+        context.go('/');
+      }
+    }
   }
 
   void _handleToggleFullscreen() {

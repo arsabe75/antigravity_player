@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../providers/telegram_content_notifier.dart';
 
+import 'package:window_manager/window_manager.dart';
+
 class TelegramSelectionScreen extends ConsumerStatefulWidget {
   const TelegramSelectionScreen({super.key});
 
@@ -16,11 +18,11 @@ class _TelegramSelectionScreenState
   @override
   void initState() {
     super.initState();
-    print('TelegramSelectionScreen: initState');
+    debugPrint('TelegramSelectionScreen: initState');
     // Load chats on init, deferred to avoid navigation jank or race conditions
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) {
-        print('TelegramSelectionScreen: Calling loadChats()');
+        debugPrint('TelegramSelectionScreen: Calling loadChats()');
         ref.read(telegramContentProvider.notifier).loadChats();
       }
     });
@@ -31,7 +33,13 @@ class _TelegramSelectionScreenState
     final state = ref.watch(telegramContentProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Select Chats')),
+      appBar: AppBar(
+        title: const Text('Select Chats'),
+        flexibleSpace: GestureDetector(
+          onPanStart: (_) => windowManager.startDragging(),
+          behavior: HitTestBehavior.translucent,
+        ),
+      ),
       body: state.isLoading && state.chats.isEmpty
           ? const Center(child: CircularProgressIndicator())
           : ListView.builder(
