@@ -97,7 +97,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                       gridDelegate:
                           const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 3,
-                            childAspectRatio: 16 / 9,
+                            childAspectRatio: 0.8, // Taller for title
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                           ),
@@ -107,6 +107,9 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                         final fileId = video['video']['id'];
                         final size = video['video']['size'];
                         // final thumbnail = ... (handle thumbnail later)
+
+                        final fileName =
+                            video['file_name'] as String? ?? 'Video sin título';
 
                         return Card(
                           clipBehavior: Clip.antiAlias,
@@ -118,38 +121,67 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                   .getStreamUrl(fileId, size);
 
                               if (context.mounted) {
-                                context.push('/player', extra: url);
+                                context.push(
+                                  '/player',
+                                  extra: {'url': url, 'title': fileName},
+                                );
                               }
                             },
-                            child: Stack(
-                              fit: StackFit.expand,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                Container(color: Colors.black12), // Placeholder
-                                const Center(
-                                  child: Icon(
-                                    LucideIcons.playCircle,
-                                    size: 48,
-                                    color: Colors.white70,
+                                Expanded(
+                                  child: Stack(
+                                    fit: StackFit.expand,
+                                    children: [
+                                      Container(
+                                        color: Colors.black12,
+                                      ), // Placeholder
+                                      const Center(
+                                        child: Icon(
+                                          LucideIcons.playCircle,
+                                          size: 48,
+                                          color: Colors.white70,
+                                        ),
+                                      ),
+                                      Positioned(
+                                        bottom: 8,
+                                        right: 8,
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(
+                                            horizontal: 4,
+                                            vertical: 2,
+                                          ),
+                                          decoration: BoxDecoration(
+                                            color: Colors.black54,
+                                            borderRadius: BorderRadius.circular(
+                                              4,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            _formatDuration(
+                                              video['duration'] ?? 0,
+                                            ),
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                                Positioned(
-                                  bottom: 8,
-                                  right: 8,
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 4,
-                                      vertical: 2,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: Colors.black54,
-                                      borderRadius: BorderRadius.circular(4),
-                                    ),
-                                    child: Text(
-                                      _formatDuration(video['duration'] ?? 0),
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                      ),
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  color: Theme.of(context).cardColor,
+                                  child: Text(
+                                    fileName,
+                                    maxLines: 2,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w500,
                                     ),
                                   ),
                                 ),

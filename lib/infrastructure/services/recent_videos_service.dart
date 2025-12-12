@@ -4,12 +4,14 @@ import 'package:shared_preferences/shared_preferences.dart';
 /// Representa un video en el historial
 class RecentVideo {
   final String path;
+  final String? title;
   final bool isNetwork;
   final DateTime playedAt;
   final Duration? lastPosition;
 
   RecentVideo({
     required this.path,
+    this.title,
     required this.isNetwork,
     required this.playedAt,
     this.lastPosition,
@@ -17,6 +19,9 @@ class RecentVideo {
 
   /// Obtiene el nombre del archivo o dominio
   String get displayName {
+    if (title != null && title!.isNotEmpty) {
+      return title!;
+    }
     if (isNetwork) {
       try {
         final uri = Uri.parse(path);
@@ -30,6 +35,7 @@ class RecentVideo {
 
   Map<String, dynamic> toJson() => {
     'path': path,
+    'title': title,
     'isNetwork': isNetwork,
     'playedAt': playedAt.toIso8601String(),
     'lastPosition': lastPosition?.inMilliseconds,
@@ -37,6 +43,7 @@ class RecentVideo {
 
   factory RecentVideo.fromJson(Map<String, dynamic> json) => RecentVideo(
     path: json['path'] as String,
+    title: json['title'] as String?,
     isNetwork: json['isNetwork'] as bool,
     playedAt: DateTime.parse(json['playedAt'] as String),
     lastPosition: json['lastPosition'] != null
@@ -70,20 +77,28 @@ class RecentVideosService {
   /// Añade o actualiza un video en el historial
   Future<void> addVideo(
     String path, {
+    String? title,
     bool isNetwork = false,
     Duration? position,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final videos = await getRecentVideos();
 
-    // Remove if already exists
-    videos.removeWhere((v) => v.path == path);
+    // Remove if already exists to update it (move to top)
+    // Preserve title if new title is null
+    String? existingTitle;
+    final existingIndex = videos.indexWhere((v) => v.path == path);
+    if (existingIndex != -1) {
+      existingTitle = videos[existingIndex].title;
+      videos.removeAt(existingIndex);
+    }
 
     // Add to beginning
     videos.insert(
       0,
       RecentVideo(
         path: path,
+        title: title ?? existingTitle,
         isNetwork: isNetwork,
         playedAt: DateTime.now(),
         lastPosition: position,
@@ -110,6 +125,7 @@ class RecentVideosService {
       final video = videos[index];
       videos[index] = RecentVideo(
         path: video.path,
+        title: video.title, // Preserve title
         isNetwork: video.isNetwork,
         playedAt: video.playedAt,
         lastPosition: position,
