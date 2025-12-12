@@ -290,8 +290,16 @@ class LocalStreamingProxy {
           final available = currentSize - readPosition;
 
           if (available > 0) {
+            final remaining = targetLength - bytesSent;
             // Read in larger chunks (512KB) to reduce I/O overhead and context switching
-            final chunkSize = min(available, 512 * 1024);
+            // IMPORTANT: Cap chunk size by remaining bytes to avoid "Content size exceeds specified contentLength"
+            final chunkSize = min(min(available, 512 * 1024), remaining);
+
+            if (chunkSize <= 0) {
+              // Should not happen if available > 0 and bytesSent < targetLength
+              break;
+            }
+
             final data = await raf.read(chunkSize);
 
             if (data.isNotEmpty) {
@@ -327,7 +335,14 @@ class LocalStreamingProxy {
           }
         }
       } catch (e) {
-        debugPrint('Proxy: Streaming error: $e');
+        // Suppress logs for normal disconnections or when 'Broken pipe' occurs
+        if (e is SocketException ||
+            e.toString().contains('Connection closed') ||
+            e.toString().contains('Broken pipe')) {
+          // debugPrint('Proxy: Client disconnected (normal)');
+        } else {
+          debugPrint('Proxy: Streaming error: $e');
+        }
       } finally {
         await raf.close();
       }
