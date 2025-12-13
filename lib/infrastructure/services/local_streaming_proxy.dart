@@ -72,7 +72,10 @@ class LocalStreamingProxy {
   // Re-trigger throttling to prevent ping-pong between offsets
   final Map<int, DateTime> _lastRetriggerTime = {};
   static const int _retriggerCooldownMs =
-      3000; // 3 second cooldown between re-triggers
+      1500; // 1.5 second cooldown between re-triggers (reduced for faster seeking)
+
+  // Threshold for re-triggering download at new offset (increased to reduce jumps)
+  static const int _retriggerThresholdBytes = 100 * 1024 * 1024; // 100MB
 
   // Size of moov region to download at end of file (16MB should be enough for most files)
   static const int _moovRegionSize = 16 * 1024 * 1024;
@@ -459,15 +462,19 @@ class LocalStreamingProxy {
           'downloading: $isDownloadingActive, prefix: $downloadedPrefixSize, canDownload: $canBeDownloaded',
         );
 
-        // CRITICAL: Detect potentially corrupted partial downloads
-        // If file has a path (was allocated) but is not complete and not currently downloading,
-        // it may have corrupted partial data. Delete it to start fresh.
-        if (path.isNotEmpty &&
+        // OPTIMIZATION: Only delete partial downloads if very little data exists
+        // Keep files with significant downloaded data to avoid re-downloading
+        final minUsableData = 5 * 1024 * 1024; // 5MB threshold
+        final isStaleWithLittleData =
+            path.isNotEmpty &&
             !isCompleted &&
             !isDownloadingActive &&
-            downloadedPrefixSize > 0) {
+            downloadedPrefixSize > 0 &&
+            downloadedPrefixSize < minUsableData;
+
+        if (isStaleWithLittleData) {
           debugPrint(
-            'Proxy: Detected stale partial download for $fileId, cleaning up...',
+            'Proxy: Detected stale partial download for $fileId (only ${downloadedPrefixSize ~/ 1024}KB), cleaning up...',
           );
 
           // Delete the local file to reset TDLib's state
@@ -625,7 +632,7 @@ class LocalStreamingProxy {
       // Check if TDLib offset is far from what we need - we may need to restart
       final currentOffset = cached?.downloadOffset ?? 0;
       final distanceFromCurrent = (currentOffset - requestedOffset).abs();
-      final needsRestart = distanceFromCurrent > 50 * 1024 * 1024; // 50MB apart
+      final needsRestart = distanceFromCurrent > _retriggerThresholdBytes;
 
       // Throttling: Check if we've re-triggered recently (prevent ping-pong)
       final now = DateTime.now();
