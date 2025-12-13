@@ -6,9 +6,9 @@ import 'package:window_manager/window_manager.dart';
 import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
 import 'video_repository_provider.dart';
+import '../../domain/repositories/streaming_repository.dart';
 import '../../infrastructure/services/playback_storage_service.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
-import '../../infrastructure/services/local_streaming_proxy.dart';
 import 'player_state.dart';
 
 part 'player_notifier.g.dart';
@@ -27,6 +27,7 @@ PlaybackStorageService playbackStorageService(Ref ref) {
 class PlayerNotifier extends _$PlayerNotifier {
   late final VideoRepository _repository;
   late final PlaybackStorageService _storageService;
+  late final StreamingRepository _streamingRepository;
   StreamSubscription? _positionSub;
   StreamSubscription? _durationSub;
   StreamSubscription? _playingSub;
@@ -43,6 +44,7 @@ class PlayerNotifier extends _$PlayerNotifier {
     // Si videoRepositoryProvider cambia, este provider se reconstruirá.
     _repository = ref.watch(videoRepositoryProvider);
     _storageService = ref.watch(playbackStorageServiceProvider);
+    _streamingRepository = ref.watch(streamingRepositoryProvider);
     _initStreams();
 
     // Registramos la limpieza de recursos.
@@ -117,7 +119,7 @@ class PlayerNotifier extends _$PlayerNotifier {
           // This fixes "Recent Videos" failing after restart because they point to dead ports
           if (uri.authority.contains('127.0.0.1') ||
               uri.authority.contains('localhost')) {
-            final activePort = LocalStreamingProxy().port;
+            final activePort = _streamingRepository.port;
             if (activePort > 0 && uri.port != activePort) {
               final newPath = path.replaceFirst(
                 ':${uri.port}/',
@@ -158,7 +160,7 @@ class PlayerNotifier extends _$PlayerNotifier {
 
       // Use file_id as stable key if available, otherwise path
       final storageKey = _currentProxyFileId != null
-          ? 'file_${_currentProxyFileId}'
+          ? 'file_$_currentProxyFileId'
           : path;
       final savedPositionMs = await _storageService.getPosition(storageKey);
       if (savedPositionMs != null && savedPositionMs > 0) {
@@ -258,7 +260,7 @@ class PlayerNotifier extends _$PlayerNotifier {
       if (state.currentVideoPath != null) {
         // Use file_id as stable key for proxy videos to persist across restarts (ephemeral ports)
         final storageKey = _currentProxyFileId != null
-            ? 'file_${_currentProxyFileId}'
+            ? 'file_$_currentProxyFileId'
             : state.currentVideoPath!;
         await _storageService.savePosition(
           storageKey,
@@ -311,7 +313,7 @@ class PlayerNotifier extends _$PlayerNotifier {
 
   void _abortCurrentProxyRequest() {
     if (_currentProxyFileId != null) {
-      LocalStreamingProxy().abortRequest(_currentProxyFileId!);
+      _streamingRepository.abortRequest(_currentProxyFileId!);
       _currentProxyFileId = null;
     }
   }
