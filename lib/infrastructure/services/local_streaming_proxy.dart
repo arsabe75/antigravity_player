@@ -7,15 +7,37 @@ import 'telegram_service.dart';
 class ProxyFileInfo {
   final String path;
   final int totalSize;
+  final int downloadOffset;
   final int downloadedPrefixSize;
-  bool isCompleted;
+  final bool isDownloadingActive;
+  final bool isCompleted;
 
   ProxyFileInfo({
     required this.path,
     required this.totalSize,
+    this.downloadOffset = 0,
     this.downloadedPrefixSize = 0,
+    this.isDownloadingActive = false,
     this.isCompleted = false,
   });
+
+  /// Check if data is available at the given offset
+  /// Returns the number of available bytes from offset, or 0 if not available
+  int availableBytesFrom(int offset) {
+    if (isCompleted) {
+      return totalSize > offset ? totalSize - offset : 0;
+    }
+
+    final begin = downloadOffset;
+    final end = downloadOffset + downloadedPrefixSize;
+
+    // Check if offset is within the downloaded range
+    if (offset >= begin && offset < end) {
+      return end - offset;
+    }
+
+    return 0;
+  }
 }
 
 class LocalStreamingProxy {
@@ -27,95 +49,53 @@ class LocalStreamingProxy {
   int _port = 0;
 
   // Cache of file_id -> ProxyFileInfo
-  final Map<int, ProxyFileInfo> _filePaths = {}; // ID -> Info
+  final Map<int, ProxyFileInfo> _filePaths = {};
+
+  // Active download requests
   final Set<int> _activeDownloadRequests = {};
 
-  // Buffering Logic
-  final Set<int> _activeFileIds = {};
-  Timer? _bufferingTimer;
-  // Map to track the "playback position" roughly by the last requested range start for each file
-  // This helps us know where to buffer FROM.
-  final Map<int, int> _lastReadPositions = {};
-
-  void _startBufferingLoop() {
-    if (_bufferingTimer != null && _bufferingTimer!.isActive) return;
-    debugPrint('Proxy: Starting active buffering loop...');
-    _bufferingTimer = Timer.periodic(const Duration(seconds: 1), (timer) async {
-      if (_activeFileIds.isEmpty) {
-        timer.cancel();
-        _bufferingTimer = null;
-        debugPrint('Proxy: Buffering loop stopped (no active files).');
-        return;
-      }
-
-      for (final fileId in _activeFileIds.toList()) {
-        try {
-          // Query file status
-          final fileJson = await TelegramService().sendWithResult({
-            '@type': 'getFile',
-            'file_id': fileId,
-          });
-
-          if (fileJson['@type'] == 'file') {
-            final local = fileJson['local'];
-            final size = fileJson['size'] ?? 0;
-            final downloadedSize = local?['downloaded_prefix_size'] ?? 0;
-            final isCompleted = local?['is_downloading_completed'] ?? false;
-
-            // Update cache
-            _filePaths[fileId] = ProxyFileInfo(
-              path: local?['path'] ?? '',
-              totalSize: size,
-              downloadedPrefixSize: downloadedSize,
-              isCompleted: isCompleted,
-            );
-
-            if (isCompleted) {
-              _activeFileIds.remove(fileId); // Done
-              continue;
-            }
-
-            final lastRead = _lastReadPositions[fileId] ?? 0;
-            const bufferAmount = 30 * 1024 * 1024; // 30MB
-            final targetOffset = lastRead + bufferAmount;
-
-            // CRITICAL FIX: Don't request past file size
-            if (targetOffset >= size) {
-              // Optional: check if we need to fill the gap to the end?
-              // If lastRead < size, we might need [lastRead, size]
-              // But active buffering is 'lookahead'.
-              // Let's just stop if lookahead is out of bounds.
-              continue;
-            }
-
-            // Trigger download ahead
-            TelegramService().send({
-              '@type': 'downloadFile',
-              'file_id': fileId,
-              'priority': 5, // Backgound
-              'offset': targetOffset,
-              'limit': bufferAmount, // Ask for next chunk
-              'synchronous': false,
-            });
-          }
-        } catch (e) {
-          // Ignore errors
-        }
-      }
-    });
-  }
+  // File update notifiers for blocking waits
+  final Map<int, StreamController<void>> _fileUpdateNotifiers = {};
 
   // Track aborted requests to cancel waiting loops
   final Set<int> _abortedRequests = {};
 
+  // TWO-PHASE DOWNLOAD TRACKING:
+  // Phase 1: Download end of file for moov atom (MP4 metadata)
+  // Phase 2: Download from playback position
+  // We allow exactly TWO downloadFile calls per file - one for each phase
+  final Set<int> _moovDownloadInitiated = {};
+  final Set<int> _moovCompleted =
+      {}; // Track when moov region is fully downloaded
+  final Set<int> _playbackDownloadInitiated = {};
+
+  // Re-trigger throttling to prevent ping-pong between offsets
+  final Map<int, DateTime> _lastRetriggerTime = {};
+  static const int _retriggerCooldownMs =
+      3000; // 3 second cooldown between re-triggers
+
+  // Size of moov region to download at end of file (16MB should be enough for most files)
+  static const int _moovRegionSize = 16 * 1024 * 1024;
+
   int get port => _port;
 
   void abortRequest(int fileId) {
+    // Prevent duplicate abort calls
+    if (_abortedRequests.contains(fileId)) {
+      return;
+    }
+
     debugPrint('Proxy: Aborting request for fileId $fileId');
     _abortedRequests.add(fileId);
-    // Also remove from active so we can retry later if user returns
     _activeDownloadRequests.remove(fileId);
-    _activeFileIds.remove(fileId); // Remove from active buffering
+
+    // NOTE: Following Unigram's pattern - we do NOT call cancelDownloadFile here.
+    // Unigram intentionally lets downloads continue in the background.
+    // Calling cancelDownloadFile while TDLib is mid-operation can cause
+    // PartsManager crashes. Instead, we just stop serving data to the player.
+
+    // Notify any waiting loops to wake up and check abort status
+    _fileUpdateNotifiers[fileId]?.add(null);
   }
 
   Future<void> start() async {
@@ -127,68 +107,108 @@ class LocalStreamingProxy {
 
     _server!.listen(_handleRequest);
 
-    // Listen to TDLib updates to track file paths
-    // Listen to TDLib updates to track file paths
-    // Ensure we don't stack listeners (simple check, though single start() prevents this usually)
-    TelegramService().updates.listen((update) {
-      if (update['@type'] == 'updateFile') {
-        final file = update['file'];
-        final id = file['id'];
-        final path = file['local']?['path'];
-        final isDownloadingActive = file['local']?['is_downloading_active'];
-        final isDownloadingCompleted =
-            file['local']?['is_downloading_completed'];
+    TelegramService().updates.listen(_onUpdate);
+  }
 
-        // Debug Log
-        // Debug Log - Only log specific IDs or significant events (e.g. valid path but not complete)
-        // Removed active=true check to prevent flood.
-        if (id == 1326 || id == 1504) {
-          debugPrint(
-            'Proxy Trace: updateFile id=$id, path=$path, active=$isDownloadingActive, completed=$isDownloadingCompleted',
-          );
-        }
+  void _onUpdate(Map<String, dynamic> update) {
+    if (update['@type'] == 'updateFile') {
+      final file = update['file'];
+      final id = file['id'] as int?;
+      if (id == null) return;
 
-        if (path != null && path.toString().isNotEmpty) {
-          final size = file['size'] ?? 0;
-          if (!_filePaths.containsKey(id)) {
-            debugPrint(
-              'Proxy: Path resolved for $id -> $path (Size: $size, Complete: $isDownloadingCompleted)',
-            );
-          } else {
-            // Update existing info
-            if (_filePaths[id]!.isCompleted != isDownloadingCompleted) {
-              debugPrint(
-                'Proxy: File $id completed status changed to $isDownloadingCompleted',
-              );
-            }
-          }
-          _filePaths[id] = ProxyFileInfo(
-            path: path,
-            totalSize: size,
-            isCompleted: isDownloadingCompleted,
-          );
-        }
-      }
-    });
+      final local = file['local'] as Map<String, dynamic>?;
+      final path = local?['path'] as String? ?? '';
+      final isCompleted = local?['is_downloading_completed'] as bool? ?? false;
+      final size = file['size'] as int? ?? 0;
+      final downloadOffset = local?['download_offset'] as int? ?? 0;
+      final downloadedPrefixSize =
+          local?['downloaded_prefix_size'] as int? ?? 0;
+      final isDownloadingActive =
+          local?['is_downloading_active'] as bool? ?? false;
+
+      // Always update the cache, even if path is empty (file not yet allocated)
+      _filePaths[id] = ProxyFileInfo(
+        path: path,
+        totalSize: size,
+        downloadOffset: downloadOffset,
+        downloadedPrefixSize: downloadedPrefixSize,
+        isDownloadingActive: isDownloadingActive,
+        isCompleted: isCompleted,
+      );
+
+      // Notify anyone waiting for updates on this file
+      _fileUpdateNotifiers[id]?.add(null);
+    }
   }
 
   Future<void> stop() async {
     await _server?.close();
     _server = null;
-    _bufferingTimer?.cancel();
-    _bufferingTimer = null;
-    _activeFileIds.clear();
-    _lastReadPositions.clear();
+
+    for (var c in _fileUpdateNotifiers.values) {
+      await c.close();
+    }
+    _fileUpdateNotifiers.clear();
+    _activeDownloadRequests.clear();
+    _filePaths.clear();
+    _abortedRequests.clear();
   }
 
   String getUrl(int fileId, int size) {
     return 'http://127.0.0.1:$_port/stream?file_id=$fileId&size=$size';
   }
 
-  Future<void> _handleRequest(HttpRequest request) async {
+  // Helper to get available bytes from the given offset
+  // Uses local cache first (like Unigram), then queries TDLib if needed
+  Future<int> _getDownloadedPrefixSize(int fileId, int offset) async {
+    // 1. Check local cache first (Unigram pattern)
+    final cached = _filePaths[fileId];
+    if (cached != null && cached.path.isNotEmpty) {
+      final available = cached.availableBytesFrom(offset);
+      if (available > 0) {
+        return available;
+      }
+    }
+
+    // 2. If no cached data available, query TDLib
     try {
-      final fileIdStr = request.uri.queryParameters['file_id'];
-      final totalSizeStr = request.uri.queryParameters['size'];
+      final result = await TelegramService().sendWithResult({
+        '@type': 'getFileDownloadedPrefixSize',
+        'file_id': fileId,
+        'offset': offset,
+      });
+
+      if (result['@type'] == 'error') {
+        debugPrint(
+          'Proxy: getFileDownloadedPrefixSize error: ${result['message']}',
+        );
+        return 0;
+      }
+
+      if (result['@type'] == 'fileDownloadedPrefixSize') {
+        // TDLib returns 'size' not 'count' in this response
+        final size = result['size'];
+        if (size is int) {
+          return size;
+        }
+        // Fallback: some versions might use 'count'
+        final count = result['count'];
+        if (count is int) {
+          return count;
+        }
+        return 0;
+      }
+    } catch (e) {
+      debugPrint('Proxy: Error getting prefix size: $e');
+    }
+    return 0;
+  }
+
+  Future<void> _handleRequest(HttpRequest request) async {
+    String? fileIdStr;
+    try {
+      fileIdStr = request.uri.queryParameters['file_id'];
+      final sizeStr = request.uri.queryParameters['size'];
 
       if (fileIdStr == null) {
         request.response.statusCode = HttpStatus.badRequest;
@@ -197,14 +217,33 @@ class LocalStreamingProxy {
       }
 
       final fileId = int.parse(fileIdStr);
-      final totalSize = int.tryParse(totalSizeStr ?? '') ?? 0;
+      final totalSize = int.tryParse(sizeStr ?? '') ?? 0;
 
-      // CRITICAL FIX: Reset abort status for new requests
-      // This ensures re-entry works even if previously aborted
-      _abortedRequests.remove(fileId);
+      // If ANY files were recently aborted, give TDLib time to clean up
+      // This is crucial - TDLib can crash if we start new downloads while
+      // it's still processing cancellations internally
+      if (_abortedRequests.isNotEmpty) {
+        debugPrint(
+          'Proxy: Waiting for TDLib to stabilize (${_abortedRequests.length} aborted files)...',
+        );
+        // Clear our abort tracking - we're about to start fresh
+        _abortedRequests.clear();
+        // Give TDLib substantial time to clean up internal state
+        await Future.delayed(const Duration(milliseconds: 500));
+        debugPrint('Proxy: TDLib stabilization wait complete');
+      }
 
-      // START HOISTED RANGE PARSING
-      // Handle Range Header early to get 'start' offset for download priority
+      // Also clear stale cache for this specific file if it exists
+      if (_filePaths.containsKey(fileId)) {
+        final cached = _filePaths[fileId]!;
+        // If the cached file was actively downloading but we're re-requesting,
+        // clear it to get fresh state
+        if (cached.isDownloadingActive) {
+          _filePaths.remove(fileId);
+        }
+      }
+
+      // 1. Parse Range Header
       final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
       int start = 0;
       int? end;
@@ -216,122 +255,33 @@ class LocalStreamingProxy {
           end = int.parse(parts[1]);
         }
       }
-      // END HOISTED RANGE PARSING
 
-      // Track read position for buffering
-      _lastReadPositions[fileId] = start;
-      debugPrint(
-        'Proxy: Handle request for fileId $fileId (Range: $rangeHeader, Start: $start)',
-      );
-
-      if (!_activeFileIds.contains(fileId)) {
-        _activeFileIds.add(fileId);
-        _startBufferingLoop(); // Ensure loop is running
-      }
-
-      // Ensure we have the file info.
-      // CRITICAL FIX: Use sendWithResult to explicitly get file info
+      // 2. Ensure File Info is available
       if (!_filePaths.containsKey(fileId) || _filePaths[fileId]!.path.isEmpty) {
-        try {
-          final fileJson = await TelegramService().sendWithResult({
-            '@type': 'getFile',
-            'file_id': fileId,
-          });
-
-          if (fileJson['@type'] == 'file') {
-            final path = fileJson['local']?['path'];
-            final isCompleted =
-                fileJson['local']?['is_downloading_completed'] ?? false;
-            final size = fileJson['size'] ?? 0;
-
-            if (path != null && path.toString().isNotEmpty) {
-              _filePaths[fileId] = ProxyFileInfo(
-                path: path,
-                totalSize: size,
-                isCompleted: isCompleted,
-              );
-              debugPrint(
-                'Proxy: Path resolved via getFile for $fileId -> $path',
-              );
-            }
-          }
-        } catch (e) {
-          debugPrint('Proxy: Error getting file info: $e');
-        }
+        await _fetchFileInfo(fileId);
       }
 
-      int waitAttempts = 0;
-      // Wait for file path to be available (from getFile or updateFile)
-      while ((_filePaths[fileId] == null || _filePaths[fileId]!.path.isEmpty) &&
-          waitAttempts < 30) {
-        // Reduced wait
-        waitAttempts++;
-        if (waitAttempts % 10 == 0) {
-          debugPrint('Proxy: Waiting... attempt $waitAttempts/30');
-        }
-        await Future.delayed(const Duration(milliseconds: 100));
-        if (_filePaths[fileId] != null && _filePaths[fileId]!.path.isNotEmpty) {
-          break;
-        }
-      }
-
-      final fileInfo = _filePaths[fileId]; // Type is ProxyFileInfo?
-      if (fileInfo == null) {
-        // Should not happen due to loop above
-        debugPrint('Proxy: File info not found after timeout for $fileId');
+      final fileInfo = _filePaths[fileId];
+      if (fileInfo == null || fileInfo.path.isEmpty) {
         request.response.statusCode = HttpStatus.notFound;
         await request.response.close();
         return;
       }
-      final filePath = fileInfo.path;
-      // debugPrint('Proxy: File path found: $filePath');
 
-      var file = File(filePath);
+      final file = File(fileInfo.path);
 
-      // Handle Range Header - ALREADY PARSED ABOVE
-      // int start = 0;
-      // int? end;
-      // ... (Removed redundant parsing logic)
+      final effectiveTotalSize = totalSize > 0
+          ? totalSize
+          : (await file.length());
+      final effectiveEnd =
+          end ?? (effectiveTotalSize > 0 ? effectiveTotalSize - 1 : 0);
 
-      // Check available file size
-      var currentFileSize = await file.length();
-
-      // If requested start is beyond current size, we need to wait for data (buffering)
-      if (currentFileSize <= start) {
-        int waitAttempts = 0;
-        while (waitAttempts < 300) {
-          // 30s wait for initial byte
-          if (_abortedRequests.contains(fileId)) {
-            await request.response.close();
-            return;
-          }
-          await Future.delayed(const Duration(milliseconds: 100));
-          currentFileSize = await file.length();
-          if (currentFileSize > start) break;
-          waitAttempts++;
-          // Kick download if stuck waiting for initial byte
-          if (waitAttempts % 50 == 0) {
-            TelegramService().send({
-              '@type': 'downloadFile',
-              'file_id': fileId,
-              'priority': 32,
-              'offset': start,
-              'limit': 0,
-              'synchronous': false,
-            });
-          }
-        }
-      }
-
-      final availableEnd = (await file.length()) - 1;
-      final effectiveEnd = end != null ? min(end, availableEnd) : availableEnd;
-
-      if (start > availableEnd) {
-        // Still not enough data
+      // Validate Range
+      if (start > effectiveEnd) {
         request.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
         request.response.headers.set(
           HttpHeaders.contentRangeHeader,
-          'bytes */$totalSize',
+          'bytes */$effectiveTotalSize',
         );
         await request.response.close();
         return;
@@ -339,260 +289,437 @@ class LocalStreamingProxy {
 
       final contentLength = effectiveEnd - start + 1;
 
+      // 3. Send Headers
       request.response.statusCode = HttpStatus.partialContent;
       request.response.headers.set(
         HttpHeaders.contentRangeHeader,
-        'bytes $start-$effectiveEnd/$totalSize',
+        'bytes $start-$effectiveEnd/$effectiveTotalSize',
       );
       request.response.headers.set(
         HttpHeaders.contentLengthHeader,
         contentLength,
       );
-      request.response.headers.contentType = ContentType.parse(
-        'video/mp4',
-      ); // Generic, or detect?
+      request.response.headers.contentType = ContentType.parse('video/mp4');
       request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
 
-      // Use RandomAccessFile for manual tailing of growing files
-      var raf = await file.open(mode: FileMode.read);
+      // 4. Stream Data Loop
+      RandomAccessFile? raf;
       try {
-        await raf.setPosition(start);
-        int bytesSent = 0;
-        final targetLength = effectiveEnd - start + 1;
-        int noDataRetries = 0;
-        int holePersistenceCount = 0;
-        int lastHolePosition = -1;
+        raf = await file.open(mode: FileMode.read);
 
-        while (bytesSent < targetLength) {
+        int currentReadOffset = start;
+        int remainingToSend = contentLength;
+
+        // Ensure notifier exists
+        if (!_fileUpdateNotifiers.containsKey(fileId)) {
+          _fileUpdateNotifiers[fileId] = StreamController.broadcast();
+        }
+        final updateStream = _fileUpdateNotifiers[fileId]!.stream;
+
+        while (remainingToSend > 0) {
           if (_abortedRequests.contains(fileId)) {
-            debugPrint('Proxy: Stream aborted by user for $fileId');
+            debugPrint('Proxy: Request aborted for $fileId');
             break;
           }
 
-          // Check file size dynamically
-          int currentSize = 0;
-          try {
-            currentSize = await file.length();
-          } catch (e) {
-            if (e is FileSystemException && e.osError?.errorCode == 2) {
-              // ENOENT - Moved?
-              final newInfo = _filePaths[fileId];
-              if (newInfo != null && newInfo.path != file.path) {
-                debugPrint(
-                  'Proxy: File moved from ${file.path} to ${newInfo.path}, restarting stream...',
-                );
-                // Close current RAF and switch
-                await raf.close();
-                file = File(newInfo.path);
-                raf = await file.open(mode: FileMode.read);
-                await raf.setPosition(start + bytesSent); // Resume
-                continue;
-              }
-            }
-            debugPrint('Proxy: Error checking file length: $e');
-            break;
-          }
-
-          final readPosition = start + bytesSent;
-          final available = currentSize - readPosition;
+          // Check direct availability on disk via TDLib
+          final available = await _getDownloadedPrefixSize(
+            fileId,
+            currentReadOffset,
+          );
 
           if (available > 0) {
-            final remaining = targetLength - bytesSent;
-            // Read in larger chunks (512KB) to reduce I/O overhead and context switching
-            // IMPORTANT: Cap chunk size by remaining bytes to avoid "Content size exceeds specified contentLength"
-            final chunkSize = min(min(available, 512 * 1024), remaining);
+            // Data is available!
+            final chunkToRead = min(
+              available,
+              min(remainingToSend, 512 * 1024),
+            );
 
-            if (chunkSize <= 0) {
-              // Should not happen if available > 0 and bytesSent < targetLength
-              break;
+            await raf.setPosition(currentReadOffset);
+            final data = await raf.read(chunkToRead);
+
+            if (data.isEmpty) {
+              await Future.delayed(const Duration(milliseconds: 50));
+              continue;
             }
 
-            final data = await raf.read(chunkSize);
+            request.response.add(data);
+            await request.response.flush();
 
-            if (data.isNotEmpty) {
-              // HOLE DETECTION: If we read a block of zeros and file is not complete, it's likely a hole.
-              // We check a small sample to avoid iterating 512KB
-              bool isHole = false;
-              // Only check for holes if file is not complete
-              final currentInfo = _filePaths[fileId];
-              if (currentInfo != null && !currentInfo.isCompleted) {
-                // Check if the chunk is all zeros
-                // Optimization: Check first, middle, last byte + random sample?
-                // Or just check all since we are in memory now?
-                // 512KB is small enough to check quickly in Dart (~1ms)
-                isHole = true;
-                // Check every 8th byte (very sensitive) to avoid missing small data chunks
-                for (int i = 0; i < data.length; i += 8) {
-                  if (data[i] != 0) {
-                    isHole = false;
-                    break;
-                  }
-                }
+            currentReadOffset += data.length;
+            remainingToSend -= data.length;
 
-                // VALIDATION: Check if this "hole" is actually covered by the downloaded prefix
-                if (isHole && currentInfo != null) {
-                  final endOfChunk = readPosition + data.length;
-                  if (currentInfo.downloadedPrefixSize >= endOfChunk) {
-                    // The data is fully covered by what TDLib says it has downloaded.
-                    // Therefore, these zeros are REAL zeros (padding/empty space), not missing data.
-                    isHole = false;
-                    // debugPrint('Proxy: Valid zeros detected at $readPosition (Covered by prefix ${currentInfo.downloadedPrefixSize}). Ignored hole.');
-                  }
-                }
-
-                // If NOT a hole, log prefix to confirm we are getting real data
-                /*
-                 if (!isHole) {
-                     debugPrint('Proxy: Read VALID chunk at $readPosition (Length: ${data.length}). First bytes: ${data.take(10).toList()}');
-                 }
-                 */
-              }
-
-              if (isHole) {
-                // FALLBACK: If hole persists for > 10 seconds, give up and yield zeros
-                // PROTECT CRITICAL REGIONS: Never yield zeros in first 20MB or last 20MB
-                // yielding zeros there corrupts headers/indices (moov/ftyp) which is fatal.
-                if (readPosition == lastHolePosition) {
-                  holePersistenceCount++;
-                } else {
-                  holePersistenceCount = 0;
-                  lastHolePosition = readPosition;
-                }
-
-                if (holePersistenceCount > 100) {
-                  // 100 * 100ms = 10s
-                  // Only yield if safe
-                  final isSafeZone =
-                      readPosition > 20 * 1024 * 1024 &&
-                      readPosition < (currentSize - 20 * 1024 * 1024);
-
-                  if (isSafeZone) {
-                    debugPrint(
-                      'Proxy: Hole persisted at $readPosition (SAFE ZONE). Yielding zeros to unblock.',
-                    );
-                    isHole = false; // Treat as valid data (valid zeros)
-                    holePersistenceCount = 0;
-                  } else {
-                    debugPrint(
-                      'Proxy: Hole persisted at $readPosition (CRITICAL ZONE). Waiting indefinitely for valid data...',
-                    );
-                    // Reset count to log again later or just keep waiting
-                    holePersistenceCount = 90; // Warn every second
-                  }
-                }
-              }
-
-              if (isHole) {
-                // Treated as no data available
-                // debugPrint('Proxy: Detected hole at $readPosition, waiting...');
-                if (noDataRetries % 20 == 0) {
-                  debugPrint(
-                    'Proxy: Hole detected at $readPosition. Waiting/Retrying...',
-                  );
-                }
-                // Don't send data. Treat as if 'if (available > 0)' failed or returned nothing useful.
-                // Fallthrough to 'else' waiting block?
-                // We need to undo the read?
-                // RAF position advanced by data.length. We must seek back.
-                await raf.setPosition(readPosition);
-
-                // Force wait
-                await Future.delayed(
-                  const Duration(milliseconds: 100),
-                ); // Wait a bit more
-                noDataRetries++;
-
-                // KICK THE DOWNLOADER
-                if (noDataRetries % 10 == 0) {
-                  // Force download a specific chunk (1MB) to prioritize filling this hole
-                  // rather than "rest of file" which TDLib might deprioritize or ignore
-                  final remaining = currentSize - readPosition;
-                  final limit = min(1024 * 1024, remaining);
-
-                  debugPrint(
-                    'Proxy: Requesting hole fill at $readPosition (limit: $limit)',
-                  );
-                  TelegramService()
-                      .sendWithResult({
-                        '@type': 'downloadFile',
-                        'file_id': fileId,
-                        'priority': 1, // CRITICAL PRIORITY (1-32, 1 is highest)
-                        'offset': readPosition,
-                        'limit': limit,
-                        'synchronous': false,
-                      })
-                      .then((result) {
-                        if (result['@type'] == 'error') {
-                          debugPrint(
-                            'Proxy: Hole fill ERROR: ${result['message']}',
-                          );
-                        } else {
-                          // debugPrint('Proxy: Hole fill requested successfully');
-                        }
-                      })
-                      .catchError((e) {
-                        debugPrint('Proxy: Hole fill request failed: $e');
-                      });
-                }
-                if (noDataRetries > 2400) break; // Timeout
-                continue; // Continue loop, will re-read
-              }
-
-              request.response.add(data);
-              await request.response
-                  .flush(); // Flush to keep connection alive logic happy?
-              bytesSent += data.length;
-              noDataRetries = 0; // Reset timeout
-            }
+            // PREFETCH: Ensure download is initiated using two-phase approach
+            _ensureDownloadInitiated(fileId, currentReadOffset);
           } else {
-            // Waiting for more data to be downloaded
-            if (noDataRetries > 2400) {
-              // 120 seconds timeout (2400 * 50ms)
-              debugPrint('Proxy: Timeout waiting for data at $readPosition');
-              break;
+            // NO DATA AVAILABLE -> BLOCKING WAIT
+            final cached = _filePaths[fileId];
+            debugPrint(
+              'Proxy: Waiting for data at $currentReadOffset for $fileId '
+              '(CachedOffset: ${cached?.downloadOffset}, CachedPrefix: ${cached?.downloadedPrefixSize})...',
+            );
+
+            // Ensure download is initiated using two-phase approach
+            _ensureDownloadInitiated(fileId, currentReadOffset);
+
+            // Wait for updateFile that provides the data we need
+            // This is more like Unigram's event-based waiting
+            int waitAttempts = 0;
+            const maxWaitAttempts =
+                25; // 25 * 200ms = 5 seconds per chunk max wait
+
+            while (waitAttempts < maxWaitAttempts) {
+              if (_abortedRequests.contains(fileId)) {
+                debugPrint('Proxy: Wait aborted for $fileId');
+                break;
+              }
+
+              // Check if data became available in cache (from updateFile)
+              final updatedCache = _filePaths[fileId];
+              if (updatedCache != null) {
+                final nowAvailable = updatedCache.availableBytesFrom(
+                  currentReadOffset,
+                );
+                if (nowAvailable > 0) {
+                  break; // Data is now available, exit wait loop
+                }
+              }
+
+              try {
+                await updateStream.first.timeout(
+                  const Duration(milliseconds: 200),
+                );
+              } catch (_) {
+                // Timeout, check again
+              }
+              waitAttempts++;
             }
-
-            // Kick download periodically if we are waiting for data
-            if (noDataRetries % 100 == 0) {
-              final remaining = currentSize - readPosition;
-              final limit = min(1024 * 1024, remaining);
-
-              // Every 5s
-              TelegramService().send({
-                '@type': 'downloadFile',
-                'file_id': fileId,
-                'priority': 32,
-                'offset':
-                    readPosition, // Request specifically what we need next
-                'limit': limit, // 1MB explicit limit
-                'synchronous': false,
-              });
-            }
-
-            await Future.delayed(const Duration(milliseconds: 50));
-            noDataRetries++;
           }
         }
       } catch (e) {
-        // Suppress logs for normal disconnections or when 'Broken pipe' occurs
-        if (e is SocketException ||
-            e.toString().contains('Connection closed') ||
-            e.toString().contains('Broken pipe')) {
-          // debugPrint('Proxy: Client disconnected (normal)');
-        } else {
-          debugPrint('Proxy: Streaming error: $e');
+        if (e is! SocketException && e is! HttpException) {
+          debugPrint('Proxy: Error streaming: $e');
         }
       } finally {
-        await raf.close();
+        await raf?.close();
       }
 
-      await request.response.close();
-    } catch (e) {
-      debugPrint('Proxy Error: $e');
-      try {
-        request.response.statusCode = HttpStatus.internalServerError;
+      // Close response, handling aborts logic
+      if (_abortedRequests.contains(fileId)) {
+        // Destroy to act as forced close
+        // request.response.destroy(); // Not exposed/safe?
+        // Just let it close or fail.
+        // Note: Dart HttpServer responses don't have destroy() easily.
+        // We can just exit without close(), or try close and ignore error.
+        try {
+          await request.response.close();
+        } catch (_) {}
+      } else {
         await request.response.close();
+      }
+    } catch (e) {
+      if (e is HttpException) {
+        // Ignore expected HttpExceptions on abort/close
+      } else {
+        debugPrint('Proxy: Top-level error: $e');
+      }
+      try {
+        if (!_abortedRequests.contains(
+          fileIdStr != null ? int.tryParse(fileIdStr) : -1,
+        )) {
+          request.response.statusCode = HttpStatus.internalServerError;
+          await request.response.close();
+        }
       } catch (_) {}
+    }
+  }
+
+  Future<void> _fetchFileInfo(int fileId) async {
+    try {
+      final fileJson = await TelegramService().sendWithResult({
+        '@type': 'getFile',
+        'file_id': fileId,
+      });
+
+      if (fileJson['@type'] == 'file') {
+        final local = fileJson['local'] as Map<String, dynamic>?;
+        final path = local?['path'] as String? ?? '';
+        final isCompleted =
+            local?['is_downloading_completed'] as bool? ?? false;
+        final totalSize = fileJson['size'] as int? ?? 0;
+        final downloadOffset = local?['download_offset'] as int? ?? 0;
+        final downloadedPrefixSize =
+            local?['downloaded_prefix_size'] as int? ?? 0;
+        final isDownloadingActive =
+            local?['is_downloading_active'] as bool? ?? false;
+        final canBeDownloaded = local?['can_be_downloaded'] as bool? ?? true;
+
+        debugPrint(
+          'Proxy: File $fileId - path: ${path.isNotEmpty}, completed: $isCompleted, '
+          'downloading: $isDownloadingActive, prefix: $downloadedPrefixSize, canDownload: $canBeDownloaded',
+        );
+
+        // CRITICAL: Detect potentially corrupted partial downloads
+        // If file has a path (was allocated) but is not complete and not currently downloading,
+        // it may have corrupted partial data. Delete it to start fresh.
+        if (path.isNotEmpty &&
+            !isCompleted &&
+            !isDownloadingActive &&
+            downloadedPrefixSize > 0) {
+          debugPrint(
+            'Proxy: Detected stale partial download for $fileId, cleaning up...',
+          );
+
+          // Delete the local file to reset TDLib's state
+          final deleteResult = await TelegramService().sendWithResult({
+            '@type': 'deleteFile',
+            'file_id': fileId,
+          });
+
+          if (deleteResult['@type'] == 'ok') {
+            debugPrint('Proxy: Successfully deleted partial file $fileId');
+          } else {
+            debugPrint('Proxy: Delete file result: ${deleteResult['@type']}');
+          }
+
+          // Clear our cache
+          _filePaths.remove(fileId);
+
+          // Wait a bit for TDLib to process
+          await Future.delayed(const Duration(milliseconds: 200));
+
+          // Re-fetch file info after deletion
+          final newFileJson = await TelegramService().sendWithResult({
+            '@type': 'getFile',
+            'file_id': fileId,
+          });
+
+          if (newFileJson['@type'] == 'file') {
+            final newLocal = newFileJson['local'] as Map<String, dynamic>?;
+            _filePaths[fileId] = ProxyFileInfo(
+              path: newLocal?['path'] as String? ?? '',
+              totalSize: newFileJson['size'] as int? ?? 0,
+              downloadOffset: newLocal?['download_offset'] as int? ?? 0,
+              downloadedPrefixSize:
+                  newLocal?['downloaded_prefix_size'] as int? ?? 0,
+              isDownloadingActive:
+                  newLocal?['is_downloading_active'] as bool? ?? false,
+              isCompleted:
+                  newLocal?['is_downloading_completed'] as bool? ?? false,
+            );
+          }
+        } else {
+          _filePaths[fileId] = ProxyFileInfo(
+            path: path,
+            totalSize: totalSize,
+            downloadOffset: downloadOffset,
+            downloadedPrefixSize: downloadedPrefixSize,
+            isDownloadingActive: isDownloadingActive,
+            isCompleted: isCompleted,
+          );
+        }
+
+        // If path is empty, trigger download to allocate the file
+        final currentInfo = _filePaths[fileId];
+        if (currentInfo == null ||
+            (currentInfo.path.isEmpty && !currentInfo.isCompleted)) {
+          debugPrint(
+            'Proxy: File path empty, triggering initial download for $fileId',
+          );
+
+          // Ensure notifier exists for waiting
+          if (!_fileUpdateNotifiers.containsKey(fileId)) {
+            _fileUpdateNotifiers[fileId] = StreamController.broadcast();
+          }
+
+          // Trigger download to allocate the file - use synchronous mode
+          // to download sequentially and avoid PartsManager issues
+          TelegramService().send({
+            '@type': 'downloadFile',
+            'file_id': fileId,
+            'priority': 32,
+            'offset': 0,
+            'limit': 0, // Download entire file
+            'synchronous': true, // Sequential download, no file parts
+          });
+
+          // Wait for updateFile with a valid path (max 10 seconds)
+          final updateStream = _fileUpdateNotifiers[fileId]!.stream;
+          int attempts = 0;
+          const maxAttempts = 50; // 50 * 200ms = 10 seconds
+
+          while (attempts < maxAttempts) {
+            if (_abortedRequests.contains(fileId)) {
+              debugPrint('Proxy: Fetch aborted for $fileId');
+              return;
+            }
+
+            final cached = _filePaths[fileId];
+            if (cached != null && cached.path.isNotEmpty) {
+              debugPrint('Proxy: File path obtained: ${cached.path}');
+              return;
+            }
+
+            try {
+              await updateStream.first.timeout(
+                const Duration(milliseconds: 200),
+              );
+            } catch (_) {
+              // Timeout, continue loop
+            }
+            attempts++;
+          }
+
+          debugPrint(
+            'Proxy: Timed out waiting for file allocation for $fileId',
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Proxy: Error fetching file info: $e');
+    }
+  }
+
+  /// Ensure download is initiated using TWO-PHASE approach for MP4 compatibility
+  /// Phase 1: Download end of file (moov atom / metadata)
+  /// Phase 2: Download from playback position
+  /// This prevents PartsManager crashes while allowing MP4 files to play
+  void _ensureDownloadInitiated(int fileId, int requestedOffset) {
+    // Check if file is already complete - no download needed
+    final cached = _filePaths[fileId];
+    if (cached != null && cached.isCompleted) {
+      return;
+    }
+
+    final totalSize = cached?.totalSize ?? 0;
+
+    // Determine if this is a request for the end of file (moov atom area)
+    // MP4 files often have metadata at the end, and the player needs to read it first
+    final isEndOfFileRequest =
+        totalSize > 0 &&
+        requestedOffset > totalSize - _moovRegionSize - (1024 * 1024);
+
+    if (isEndOfFileRequest && !_moovDownloadInitiated.contains(fileId)) {
+      // PHASE 1: Download end of file for moov atom
+      final moovOffset = totalSize > _moovRegionSize
+          ? totalSize - _moovRegionSize
+          : 0;
+
+      debugPrint(
+        'Proxy: Phase 1 - Downloading moov region for $fileId from offset $moovOffset',
+      );
+      _moovDownloadInitiated.add(fileId);
+
+      TelegramService().send({
+        '@type': 'downloadFile',
+        'file_id': fileId,
+        'priority': 32,
+        'offset': moovOffset,
+        'limit': _moovRegionSize,
+        'synchronous': false,
+      });
+    } else if (!isEndOfFileRequest) {
+      // PHASE 2: Download from playback position
+      // Only do this if moov is already complete (or not needed)
+
+      // Check if TDLib offset is far from what we need - we may need to restart
+      final currentOffset = cached?.downloadOffset ?? 0;
+      final distanceFromCurrent = (currentOffset - requestedOffset).abs();
+      final needsRestart = distanceFromCurrent > 50 * 1024 * 1024; // 50MB apart
+
+      // Throttling: Check if we've re-triggered recently (prevent ping-pong)
+      final now = DateTime.now();
+      final lastRetrigger = _lastRetriggerTime[fileId];
+      final canRetrigger =
+          lastRetrigger == null ||
+          now.difference(lastRetrigger).inMilliseconds >= _retriggerCooldownMs;
+
+      // Check if we've already confirmed moov completion
+      if (_moovCompleted.contains(fileId)) {
+        // Moov is confirmed complete
+        // Check if we need to restart at a different position (e.g., resume from saved position)
+        if (!_playbackDownloadInitiated.contains(fileId) ||
+            (needsRestart && canRetrigger)) {
+          if (needsRestart) {
+            debugPrint(
+              'Proxy: Re-triggering playback for $fileId (TDLib at $currentOffset, player needs $requestedOffset)',
+            );
+            _lastRetriggerTime[fileId] = now; // Record re-trigger time
+          } else {
+            debugPrint(
+              'Proxy: Phase 2 - Downloading playback region for $fileId from offset $requestedOffset',
+            );
+          }
+          _playbackDownloadInitiated.add(fileId);
+
+          TelegramService().send({
+            '@type': 'downloadFile',
+            'file_id': fileId,
+            'priority': 32,
+            'offset': requestedOffset,
+            'limit': 0,
+            'synchronous': false,
+          });
+        }
+        return;
+      }
+
+      // Check if moov has been downloaded - we need the last 16MB of the file
+      final moovOffset = totalSize > _moovRegionSize
+          ? totalSize - _moovRegionSize
+          : 0;
+      final downloadedFromMoov = cached?.downloadOffset ?? 0;
+      final downloadedPrefixAtMoov = cached?.downloadedPrefixSize ?? 0;
+
+      // Check if moov region is complete: we have data at moov offset with sufficient prefix
+      final moovIsComplete =
+          totalSize == 0 || // No size info, assume ok
+          (downloadedFromMoov >= moovOffset &&
+              downloadedPrefixAtMoov >= _moovRegionSize) ||
+          (downloadedFromMoov == 0 &&
+              downloadedPrefixAtMoov >=
+                  totalSize - moovOffset); // Downloaded from start past moov
+
+      // Also check if moov download hasn't started - then we can start playback
+      final moovNotStarted = !_moovDownloadInitiated.contains(fileId);
+
+      // Only trigger playback if moov is complete OR moov hasn't started
+      final canStartPlayback = moovIsComplete || moovNotStarted;
+
+      if (moovIsComplete) {
+        _moovCompleted.add(fileId); // Remember this for future calls
+      }
+
+      // Use the variables already calculated above for needsRestart check
+
+      if (canStartPlayback &&
+          (!_playbackDownloadInitiated.contains(fileId) ||
+              (needsRestart && canRetrigger))) {
+        if (needsRestart && moovIsComplete) {
+          debugPrint(
+            'Proxy: Re-triggering playback download for $fileId (moov complete, TDLib at $currentOffset, need $requestedOffset)',
+          );
+          _lastRetriggerTime[fileId] = now; // Record re-trigger time
+        } else if (!_playbackDownloadInitiated.contains(fileId)) {
+          debugPrint(
+            'Proxy: Phase 2 - Downloading playback region for $fileId from offset $requestedOffset',
+          );
+        }
+        _playbackDownloadInitiated.add(fileId);
+
+        TelegramService().send({
+          '@type': 'downloadFile',
+          'file_id': fileId,
+          'priority': 32,
+          'offset': requestedOffset,
+          'limit': 0, // Download rest of file from this point
+          'synchronous': false,
+        });
+      } else if (!canStartPlayback) {
+        debugPrint(
+          'Proxy: Waiting for moov download to complete for $fileId (moovOffset: $moovOffset, currentOffset: $downloadedFromMoov, prefix: $downloadedPrefixAtMoov)',
+        );
+      }
     }
   }
 }
