@@ -68,10 +68,8 @@ class MediaKitVideoRepository implements VideoRepository {
     if (Platform.isWindows) {
       hwdec = 'd3d11';
     } else if (Platform.isLinux) {
-      // 'auto' was falling back to S/W rendering. forcing 'vaapi' (common for Intel/AMD) or 'nvdec' (Nvidia) might help.
-      // safely try 'vaapi' first, as S/W is too slow for HD.
-      hwdec =
-          'auto'; // Reverting to auto but will add specific mpv options below
+      // Explictly use 'vaapi' to offload CPU for TDLib
+      hwdec = 'vaapi';
     } else {
       hwdec = 'auto'; // Fallback
     }
