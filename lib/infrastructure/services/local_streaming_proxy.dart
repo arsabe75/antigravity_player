@@ -60,25 +60,14 @@ class LocalStreamingProxy {
   // Track aborted requests to cancel waiting loops
   final Set<int> _abortedRequests = {};
 
-  // TWO-PHASE DOWNLOAD TRACKING:
-  // Phase 1: Download end of file for moov atom (MP4 metadata)
-  // Phase 2: Download from playback position
-  // We allow exactly TWO downloadFile calls per file - one for each phase
-  final Set<int> _moovDownloadInitiated = {};
-  final Set<int> _moovCompleted =
-      {}; // Track when moov region is fully downloaded
-  final Set<int> _playbackDownloadInitiated = {};
+  // DIRECT 1:1 MAPPING: Track the current download offset per file
+  // No predictive/two-phase logic - we serve exactly what the player requests
+  final Map<int, int> _activeDownloadOffset = {};
 
-  // Re-trigger throttling to prevent ping-pong between offsets
-  final Map<int, DateTime> _lastRetriggerTime = {};
-  static const int _retriggerCooldownMs =
-      1500; // 1.5 second cooldown between re-triggers (reduced for faster seeking)
-
-  // Threshold for re-triggering download at new offset (increased to reduce jumps)
-  static const int _retriggerThresholdBytes = 100 * 1024 * 1024; // 100MB
-
-  // Size of moov region to download at end of file (16MB should be enough for most files)
-  static const int _moovRegionSize = 16 * 1024 * 1024;
+  // Throttle offset changes to avoid excessive downloadFile calls
+  final Map<int, DateTime> _lastOffsetChangeTime = {};
+  static const int _offsetChangeCooldownMs =
+      500; // 500ms cooldown between offset changes
 
   int get port => _port;
 
@@ -352,8 +341,8 @@ class LocalStreamingProxy {
             currentReadOffset += data.length;
             remainingToSend -= data.length;
 
-            // PREFETCH: Ensure download is initiated using two-phase approach
-            _ensureDownloadInitiated(fileId, currentReadOffset);
+            // Ensure download is started at the exact offset the player needs
+            _startDownloadAtOffset(fileId, currentReadOffset);
           } else {
             // NO DATA AVAILABLE -> BLOCKING WAIT
             final cached = _filePaths[fileId];
@@ -362,8 +351,8 @@ class LocalStreamingProxy {
               '(CachedOffset: ${cached?.downloadOffset}, CachedPrefix: ${cached?.downloadedPrefixSize})...',
             );
 
-            // Ensure download is initiated using two-phase approach
-            _ensureDownloadInitiated(fileId, currentReadOffset);
+            // Ensure download is started at the exact offset the player needs
+            _startDownloadAtOffset(fileId, currentReadOffset);
 
             // Wait for updateFile that provides the data we need
             // This is more like Unigram's event-based waiting
@@ -587,146 +576,63 @@ class LocalStreamingProxy {
     }
   }
 
-  /// Ensure download is initiated using TWO-PHASE approach for MP4 compatibility
-  /// Phase 1: Download end of file (moov atom / metadata)
-  /// Phase 2: Download from playback position
-  /// This prevents PartsManager crashes while allowing MP4 files to play
-  void _ensureDownloadInitiated(int fileId, int requestedOffset) {
+  /// Direct 1:1 mapping: player's Range request → TDLib downloadFile offset
+  /// No predictive logic - we trust the player to know what it needs.
+  /// Following Telegram Android's FileStreamLoadOperation pattern.
+  void _startDownloadAtOffset(int fileId, int requestedOffset) {
     // Check if file is already complete - no download needed
     final cached = _filePaths[fileId];
     if (cached != null && cached.isCompleted) {
       return;
     }
 
-    final totalSize = cached?.totalSize ?? 0;
+    // Check if we're already downloading from this offset (or very close)
+    final currentActiveOffset = _activeDownloadOffset[fileId];
+    final currentDownloadOffset = cached?.downloadOffset ?? 0;
+    final currentPrefix = cached?.downloadedPrefixSize ?? 0;
 
-    // Determine if this is a request for the end of file (moov atom area)
-    // MP4 files often have metadata at the end, and the player needs to read it first
-    final isEndOfFileRequest =
-        totalSize > 0 &&
-        requestedOffset > totalSize - _moovRegionSize - (1024 * 1024);
-
-    if (isEndOfFileRequest && !_moovDownloadInitiated.contains(fileId)) {
-      // PHASE 1: Download end of file for moov atom
-      final moovOffset = totalSize > _moovRegionSize
-          ? totalSize - _moovRegionSize
-          : 0;
-
-      debugPrint(
-        'Proxy: Phase 1 - Downloading moov region for $fileId from offset $moovOffset',
-      );
-      _moovDownloadInitiated.add(fileId);
-
-      TelegramService().send({
-        '@type': 'downloadFile',
-        'file_id': fileId,
-        'priority': 32,
-        'offset': moovOffset,
-        'limit': _moovRegionSize,
-        'synchronous': false,
-      });
-    } else if (!isEndOfFileRequest) {
-      // PHASE 2: Download from playback position
-      // Only do this if moov is already complete (or not needed)
-
-      // Check if TDLib offset is far from what we need - we may need to restart
-      final currentOffset = cached?.downloadOffset ?? 0;
-      final distanceFromCurrent = (currentOffset - requestedOffset).abs();
-      final needsRestart = distanceFromCurrent > _retriggerThresholdBytes;
-
-      // Throttling: Check if we've re-triggered recently (prevent ping-pong)
-      final now = DateTime.now();
-      final lastRetrigger = _lastRetriggerTime[fileId];
-      final canRetrigger =
-          lastRetrigger == null ||
-          now.difference(lastRetrigger).inMilliseconds >= _retriggerCooldownMs;
-
-      // Check if we've already confirmed moov completion
-      if (_moovCompleted.contains(fileId)) {
-        // Moov is confirmed complete
-        // Check if we need to restart at a different position (e.g., resume from saved position)
-        if (!_playbackDownloadInitiated.contains(fileId) ||
-            (needsRestart && canRetrigger)) {
-          if (needsRestart) {
-            debugPrint(
-              'Proxy: Re-triggering playback for $fileId (TDLib at $currentOffset, player needs $requestedOffset)',
-            );
-            _lastRetriggerTime[fileId] = now; // Record re-trigger time
-          } else {
-            debugPrint(
-              'Proxy: Phase 2 - Downloading playback region for $fileId from offset $requestedOffset',
-            );
-          }
-          _playbackDownloadInitiated.add(fileId);
-
-          TelegramService().send({
-            '@type': 'downloadFile',
-            'file_id': fileId,
-            'priority': 32,
-            'offset': requestedOffset,
-            'limit': 0,
-            'synchronous': false,
-          });
-        }
-        return;
-      }
-
-      // Check if moov has been downloaded - we need the last 16MB of the file
-      final moovOffset = totalSize > _moovRegionSize
-          ? totalSize - _moovRegionSize
-          : 0;
-      final downloadedFromMoov = cached?.downloadOffset ?? 0;
-      final downloadedPrefixAtMoov = cached?.downloadedPrefixSize ?? 0;
-
-      // Check if moov region is complete: we have data at moov offset with sufficient prefix
-      final moovIsComplete =
-          totalSize == 0 || // No size info, assume ok
-          (downloadedFromMoov >= moovOffset &&
-              downloadedPrefixAtMoov >= _moovRegionSize) ||
-          (downloadedFromMoov == 0 &&
-              downloadedPrefixAtMoov >=
-                  totalSize - moovOffset); // Downloaded from start past moov
-
-      // Also check if moov download hasn't started - then we can start playback
-      final moovNotStarted = !_moovDownloadInitiated.contains(fileId);
-
-      // Only trigger playback if moov is complete OR moov hasn't started
-      final canStartPlayback = moovIsComplete || moovNotStarted;
-
-      if (moovIsComplete) {
-        _moovCompleted.add(fileId); // Remember this for future calls
-      }
-
-      // Use the variables already calculated above for needsRestart check
-
-      if (canStartPlayback &&
-          (!_playbackDownloadInitiated.contains(fileId) ||
-              (needsRestart && canRetrigger))) {
-        if (needsRestart && moovIsComplete) {
-          debugPrint(
-            'Proxy: Re-triggering playback download for $fileId (moov complete, TDLib at $currentOffset, need $requestedOffset)',
-          );
-          _lastRetriggerTime[fileId] = now; // Record re-trigger time
-        } else if (!_playbackDownloadInitiated.contains(fileId)) {
-          debugPrint(
-            'Proxy: Phase 2 - Downloading playback region for $fileId from offset $requestedOffset',
-          );
-        }
-        _playbackDownloadInitiated.add(fileId);
-
-        TelegramService().send({
-          '@type': 'downloadFile',
-          'file_id': fileId,
-          'priority': 32,
-          'offset': requestedOffset,
-          'limit': 0, // Download rest of file from this point
-          'synchronous': false,
-        });
-      } else if (!canStartPlayback) {
-        debugPrint(
-          'Proxy: Waiting for moov download to complete for $fileId (moovOffset: $moovOffset, currentOffset: $downloadedFromMoov, prefix: $downloadedPrefixAtMoov)',
-        );
-      }
+    // If data is available at requested offset, no need to re-trigger
+    if (cached != null && cached.availableBytesFrom(requestedOffset) > 0) {
+      return;
     }
+
+    // Check if current download will soon provide the data we need
+    // (within 10MB of the download frontier)
+    final downloadFrontier = currentDownloadOffset + currentPrefix;
+    final distanceFromFrontier = requestedOffset - downloadFrontier;
+    if (distanceFromFrontier >= 0 && distanceFromFrontier < 10 * 1024 * 1024) {
+      // Current download will reach our offset soon, don't restart
+      return;
+    }
+
+    // Check if already targeting this offset
+    if (currentActiveOffset == requestedOffset) {
+      return;
+    }
+
+    // Throttle offset changes to avoid excessive downloadFile calls
+    final now = DateTime.now();
+    final lastChange = _lastOffsetChangeTime[fileId];
+    if (lastChange != null &&
+        now.difference(lastChange).inMilliseconds < _offsetChangeCooldownMs) {
+      return;
+    }
+
+    // Start download at exactly the offset the player requested
+    debugPrint(
+      'Proxy: Downloading from offset $requestedOffset for $fileId (priority 32)',
+    );
+
+    _activeDownloadOffset[fileId] = requestedOffset;
+    _lastOffsetChangeTime[fileId] = now;
+
+    TelegramService().send({
+      '@type': 'downloadFile',
+      'file_id': fileId,
+      'priority': 32, // Highest priority for player's current request
+      'offset': requestedOffset, // EXACT offset from player's Range header
+      'limit': 0, // Download from offset to end of file
+      'synchronous': false,
+    });
   }
 }
