@@ -3,6 +3,8 @@ import '../../domain/repositories/video_repository.dart';
 import '../../infrastructure/repositories/media_kit_video_repository.dart';
 import '../../infrastructure/repositories/fvp_video_repository.dart';
 import '../../infrastructure/services/player_settings_service.dart';
+import '../../domain/repositories/streaming_repository.dart';
+import '../../infrastructure/repositories/local_streaming_repository.dart';
 
 // Helper provider to read settings
 final playerSettingsServiceProvider = Provider(
@@ -45,4 +47,9 @@ final videoRepositoryProvider = Provider.autoDispose<VideoRepository>((ref) {
   });
 
   return repository;
+});
+
+// Provider for the streaming repository
+final streamingRepositoryProvider = Provider<StreamingRepository>((ref) {
+  return LocalStreamingRepository();
 });
