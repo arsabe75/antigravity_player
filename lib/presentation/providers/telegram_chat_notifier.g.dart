@@ -59,7 +59,7 @@ final class TelegramChatNotifierProvider
 }
 
 String _$telegramChatNotifierHash() =>
-    r'bc5875629407f439632401690420192b96185c13';
+    r'6b35c630ddd0ced8da093ec02743969c57cf60cf';
 
 final class TelegramChatNotifierFamily extends $Family
     with
