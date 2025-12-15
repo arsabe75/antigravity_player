@@ -5,6 +5,19 @@ import 'package:video_player/video_player.dart';
 import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
 
+/// FVP-based video repository using the video_player package with libmpv backend.
+///
+/// **WARNING: Streaming Limitation**
+/// FVP/video_player has issues with seeking in streaming videos (e.g., Telegram proxy):
+/// - Seeks create multiple parallel HTTP connections
+/// - Buffer options in registerWith() don't fully control seek behavior
+/// - Video may get stuck loading when seeking to unbuffered positions
+///
+/// **Recommendation:**
+/// - Use FVP for local/completed files where all data is available
+/// - Use MediaKitVideoRepository for streaming Telegram content
+///
+/// The buffer settings match media_kit for consistency when playback works correctly.
 class FvpVideoRepository implements VideoRepository {
   VideoPlayerController? _controller;
 
@@ -21,9 +34,21 @@ class FvpVideoRepository implements VideoRepository {
 
   @override
   Future<void> initialize() async {
-    // Register FVP
-    // Register FVP with HW acceleration
-    fvp.registerWith(options: {'hwdec': 'auto'});
+    // Register FVP with HW acceleration and buffer settings
+    // These match the media_kit configuration for consistent streaming
+    fvp.registerWith(
+      options: {
+        // Hardware decoding
+        'hwdec': 'auto',
+        // Buffer settings for streaming
+        'demuxer-max-bytes': '67108864', // 64MB demuxer buffer
+        'demuxer-max-back-bytes': '33554432', // 32MB back buffer
+        'cache': 'yes',
+        'cache-secs': '20', // Require 20 seconds of buffer
+        'cache-pause-initial': 'yes', // Pre-buffer before start
+        'stream-buffer-size': '16777216', // 16MB stream buffer
+      },
+    );
   }
 
   @override
