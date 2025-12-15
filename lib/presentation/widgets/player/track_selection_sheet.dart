@@ -1,12 +1,31 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lucide_icons/lucide_icons.dart';
 import '../../providers/player_notifier.dart';
 
-class TrackSelectionSheet extends ConsumerWidget {
+class TrackSelectionSheet extends ConsumerStatefulWidget {
   const TrackSelectionSheet({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TrackSelectionSheet> createState() =>
+      _TrackSelectionSheetState();
+}
+
+class _TrackSelectionSheetState extends ConsumerState<TrackSelectionSheet> {
+  bool _isRefreshing = false;
+
+  Future<void> _onRefresh() async {
+    setState(() => _isRefreshing = true);
+    await ref.read(playerProvider.notifier).refreshTracks();
+    // Brief delay to show feedback
+    await Future.delayed(const Duration(milliseconds: 300));
+    if (mounted) {
+      setState(() => _isRefreshing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final state = ref.watch(playerProvider);
     final notifier = ref.read(playerProvider.notifier);
 
@@ -22,16 +41,46 @@ class TrackSelectionSheet extends ConsumerWidget {
       ),
       child: Column(
         children: [
-          // Drag handle or subtle indicator
-          Center(
-            child: Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: Colors.white24,
-                borderRadius: BorderRadius.circular(2),
+          // Header with drag handle and refresh button
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Spacer(),
+              // Drag handle
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
+                ),
               ),
-            ),
+              const Spacer(),
+              // Refresh button
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: _isRefreshing
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white54,
+                        ),
+                      )
+                    : IconButton(
+                        icon: const Icon(
+                          LucideIcons.refreshCw,
+                          color: Colors.white54,
+                          size: 20,
+                        ),
+                        onPressed: _onRefresh,
+                        tooltip: 'Refresh tracks',
+                        padding: EdgeInsets.zero,
+                        constraints: const BoxConstraints(),
+                      ),
+              ),
+            ],
           ),
           const SizedBox(height: 20),
           Expanded(

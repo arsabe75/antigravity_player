@@ -15,8 +15,10 @@ class MediaKitVideoRepository implements VideoRepository {
   final _durationController = StreamController<Duration>.broadcast();
   final _isPlayingController = StreamController<bool>.broadcast();
   final _isBufferingController = StreamController<bool>.broadcast();
+  final _tracksChangedController = StreamController<void>.broadcast();
 
   StreamSubscription? _playerSub;
+  StreamSubscription? _tracksSub;
   Duration _currentPosition = Duration.zero;
   Duration _totalDuration = Duration.zero;
   bool _isPlaying = false;
@@ -43,6 +45,7 @@ class MediaKitVideoRepository implements VideoRepository {
     }
 
     _playerSub?.cancel();
+    _tracksSub?.cancel();
     await _player?.dispose();
     _player = null;
     _controller = null;
@@ -50,6 +53,7 @@ class MediaKitVideoRepository implements VideoRepository {
     await _durationController.close();
     await _isPlayingController.close();
     await _isBufferingController.close();
+    await _tracksChangedController.close();
   }
 
   @override
@@ -136,14 +140,15 @@ class MediaKitVideoRepository implements VideoRepository {
     // Force Unmute & Volume 100
     await _player!.setVolume(100);
 
-    // Auto-select first audio track if "no" is selected or silent.
-    // We listen to tracks changes
-    _player!.stream.tracks.listen((tracks) {
+    // Listen to track changes and notify (for streaming videos where tracks arrive late)
+    _tracksSub?.cancel();
+    _tracksSub = _player!.stream.tracks.listen((tracks) {
+      // Notify listeners that tracks have changed
+      _tracksChangedController.add(null);
+
+      // Auto-select first audio track if "no" is selected
       if (tracks.audio.isNotEmpty) {
-        // If current is 'no', switch to first available
         if (_player!.state.track.audio.id == 'no' && tracks.audio.length > 2) {
-          // tracks usually has [no, auto, track1...]
-          // Try to find the first real track
           final realTrack = tracks.audio.firstWhere(
             (t) => t.id != 'no' && t.id != 'auto',
             orElse: () => tracks.audio.last,
@@ -289,4 +294,7 @@ class MediaKitVideoRepository implements VideoRepository {
       await _player!.setSubtitleTrack(tracks[trackId]);
     }
   }
+
+  @override
+  Stream<void> get tracksChangedStream => _tracksChangedController.stream;
 }
