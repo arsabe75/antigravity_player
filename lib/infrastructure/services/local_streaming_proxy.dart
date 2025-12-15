@@ -67,7 +67,7 @@ class LocalStreamingProxy {
   // Throttle offset changes to avoid excessive downloadFile calls
   final Map<int, DateTime> _lastOffsetChangeTime = {};
   static const int _offsetChangeCooldownMs =
-      500; // 500ms cooldown between offset changes
+      300; // 300ms cooldown between offset changes
 
   // Lookahead buffer: keep TDLib downloading ahead of playback position
   // 50MB is needed for high bitrate videos (>3GB files)
@@ -643,7 +643,7 @@ class LocalStreamingProxy {
             '@type': 'downloadFile',
             'file_id': fileId,
             'priority':
-                16, // Lower priority for lookahead (half of playback priority)
+                24, // Higher priority for lookahead (closer to playback priority)
             'offset': downloadFrontier,
             'limit': 0,
             'synchronous': false,
