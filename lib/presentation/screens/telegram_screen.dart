@@ -11,6 +11,7 @@ import '../../infrastructure/services/local_streaming_proxy.dart';
 import 'telegram_login_screen.dart';
 import 'telegram_selection_screen.dart';
 import 'telegram_chat_screen.dart';
+import 'telegram_storage_screen.dart';
 
 class TelegramScreen extends ConsumerStatefulWidget {
   const TelegramScreen({super.key});
@@ -100,6 +101,17 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                   }
                 });
               }
+            },
+          ),
+          IconButton(
+            icon: const Icon(LucideIcons.hardDrive),
+            tooltip: 'Storage',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const TelegramStorageScreen(),
+                ),
+              );
             },
           ),
           IconButton(
