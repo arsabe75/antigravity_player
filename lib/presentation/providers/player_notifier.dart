@@ -91,6 +91,7 @@ class PlayerNotifier extends _$PlayerNotifier {
     String? title,
   }) async {
     _abortCurrentProxyRequest();
+
     try {
       state = state.copyWith(
         currentVideoPath: path,
