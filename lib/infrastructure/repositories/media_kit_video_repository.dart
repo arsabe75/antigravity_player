@@ -106,10 +106,11 @@ class MediaKitVideoRepository implements VideoRepository {
       'cache-pause-initial',
       'yes',
     ); // Pre-buffer before start
-    // Require 10 seconds of buffered content - prevents frame drops at start
-    await (_player!.platform as dynamic).setProperty('cache-secs', '10');
-
-    // Listen to streams
+    // Require 20 seconds of buffered content - prevents frame drops at start
+    await (_player!.platform as dynamic).setProperty(
+      'cache-secs',
+      '20',
+    ); // Listen to streams
     _playerSub = _player!.stream.position.listen((pos) {
       _currentPosition = pos;
       _positionController.add(pos);
