@@ -32,6 +32,7 @@ class PlayerNotifier extends _$PlayerNotifier {
   StreamSubscription? _durationSub;
   StreamSubscription? _playingSub;
   StreamSubscription? _bufferingSub;
+  StreamSubscription? _tracksSub;
   Timer? _saveTimer;
   int? _currentProxyFileId;
   bool _mounted = true;
@@ -54,8 +55,8 @@ class PlayerNotifier extends _$PlayerNotifier {
       _positionSub?.cancel();
       _durationSub?.cancel();
       _playingSub?.cancel();
-      _playingSub?.cancel();
       _bufferingSub?.cancel();
+      _tracksSub?.cancel();
       _saveTimer?.cancel();
       _savePosition();
       _abortCurrentProxyRequest();
@@ -82,6 +83,10 @@ class PlayerNotifier extends _$PlayerNotifier {
     });
     _bufferingSub = _repository.isBufferingStream.listen((buffering) {
       state = state.copyWith(isBuffering: buffering);
+    });
+    // Listen for track changes (for streaming videos where tracks arrive late)
+    _tracksSub = _repository.tracksChangedStream.listen((_) {
+      _loadTracks();
     });
   }
 
@@ -147,8 +152,8 @@ class PlayerNotifier extends _$PlayerNotifier {
       final video = VideoEntity(path: path, isNetwork: isNetwork);
       await _repository.play(video);
 
-      // Give player a moment to load tracks
-      await Future.delayed(const Duration(milliseconds: 500));
+      // Give player a moment to load initial tracks (for local files)
+      await Future.delayed(const Duration(milliseconds: 300));
       await _loadTracks();
 
       // Save to recent videos history
@@ -293,6 +298,11 @@ class PlayerNotifier extends _$PlayerNotifier {
   Future<void> setSubtitleTrack(int trackId) async {
     await _repository.setSubtitleTrack(trackId);
     state = state.copyWith(currentSubtitleTrack: trackId);
+  }
+
+  /// Manually refresh available tracks (useful for streaming videos)
+  Future<void> refreshTracks() async {
+    await _loadTracks();
   }
 
   Future<void> stop() async {

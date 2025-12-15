@@ -34,4 +34,7 @@ abstract class VideoRepository {
 
   /// Sets the subtitle track by ID
   Future<void> setSubtitleTrack(int trackId);
+
+  /// Stream that emits when available tracks change (for streaming videos)
+  Stream<void> get tracksChangedStream;
 }

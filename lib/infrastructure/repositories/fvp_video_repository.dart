@@ -187,4 +187,8 @@ class FvpVideoRepository implements VideoRepository {
   Future<void> setSubtitleTrack(int trackId) async {
     // No-op
   }
+
+  // FVP doesn't support track detection - return empty stream
+  @override
+  Stream<void> get tracksChangedStream => const Stream.empty();
 }
