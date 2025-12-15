@@ -313,8 +313,11 @@ class PlayerNotifier extends _$PlayerNotifier {
 
   void _abortCurrentProxyRequest() {
     if (_currentProxyFileId != null) {
+      debugPrint('PlayerNotifier: Aborting proxy file $_currentProxyFileId');
       _streamingRepository.abortRequest(_currentProxyFileId!);
       _currentProxyFileId = null;
+    } else {
+      debugPrint('PlayerNotifier: No proxy file to abort');
     }
   }
 }

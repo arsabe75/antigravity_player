@@ -69,17 +69,27 @@ class LocalStreamingProxy {
   static const int _offsetChangeCooldownMs =
       500; // 500ms cooldown between offset changes
 
+  // Lookahead buffer: keep TDLib downloading ahead of playback position
+  // 50MB is needed for high bitrate videos (>3GB files)
+  static const int _lookAheadBytes = 50 * 1024 * 1024; // 50MB lookahead
+
+  // Stall recovery: restart download after this many wait attempts (10 seconds)
+  static const int _stallRecoveryAttempts = 50; // 50 * 200ms = 10 seconds
+
   int get port => _port;
 
   void abortRequest(int fileId) {
     // Prevent duplicate abort calls
     if (_abortedRequests.contains(fileId)) {
+      debugPrint('Proxy: Already aborted fileId $fileId, skipping');
       return;
     }
 
-    debugPrint('Proxy: Aborting request for fileId $fileId');
+    debugPrint('Proxy: ===== ABORTING REQUEST for fileId $fileId =====');
     _abortedRequests.add(fileId);
     _activeDownloadRequests.remove(fileId);
+    _activeDownloadOffset.remove(fileId);
+    _lastOffsetChangeTime.remove(fileId);
 
     // NOTE: Following Unigram's pattern - we do NOT call cancelDownloadFile here.
     // Unigram intentionally lets downloads continue in the background.
@@ -355,10 +365,11 @@ class LocalStreamingProxy {
             _startDownloadAtOffset(fileId, currentReadOffset);
 
             // Wait for updateFile that provides the data we need
-            // This is more like Unigram's event-based waiting
+            // Extended timeout for large files (60 seconds total)
             int waitAttempts = 0;
             const maxWaitAttempts =
-                25; // 25 * 200ms = 5 seconds per chunk max wait
+                300; // 300 * 200ms = 60 seconds per chunk max wait
+            bool stallRecoveryTriggered = false;
 
             while (waitAttempts < maxWaitAttempts) {
               if (_abortedRequests.contains(fileId)) {
@@ -375,6 +386,26 @@ class LocalStreamingProxy {
                 if (nowAvailable > 0) {
                   break; // Data is now available, exit wait loop
                 }
+              }
+
+              // Stall recovery: after 10 seconds, restart download with max priority
+              if (waitAttempts == _stallRecoveryAttempts &&
+                  !stallRecoveryTriggered) {
+                stallRecoveryTriggered = true;
+                debugPrint(
+                  'Proxy: Stall recovery triggered for $fileId at offset $currentReadOffset',
+                );
+                // Force restart download at exact offset
+                _activeDownloadOffset.remove(fileId);
+                _lastOffsetChangeTime.remove(fileId);
+                TelegramService().send({
+                  '@type': 'downloadFile',
+                  'file_id': fileId,
+                  'priority': 32,
+                  'offset': currentReadOffset,
+                  'limit': 0,
+                  'synchronous': false,
+                });
               }
 
               try {
@@ -591,16 +622,42 @@ class LocalStreamingProxy {
     final currentDownloadOffset = cached?.downloadOffset ?? 0;
     final currentPrefix = cached?.downloadedPrefixSize ?? 0;
 
-    // If data is available at requested offset, no need to re-trigger
+    // If data is available at requested offset, check if we need lookahead
     if (cached != null && cached.availableBytesFrom(requestedOffset) > 0) {
+      // Data available - but ensure lookahead download is active
+      final downloadFrontier = currentDownloadOffset + currentPrefix;
+      final lookaheadTarget = requestedOffset + _lookAheadBytes;
+
+      // If download frontier is behind our lookahead target, trigger download ahead
+      if (downloadFrontier < lookaheadTarget &&
+          downloadFrontier < cached.totalSize) {
+        final now = DateTime.now();
+        final lastChange = _lastOffsetChangeTime[fileId];
+        if (lastChange == null ||
+            now.difference(lastChange).inMilliseconds >=
+                _offsetChangeCooldownMs) {
+          // Trigger lookahead download at current frontier
+          _activeDownloadOffset[fileId] = downloadFrontier;
+          _lastOffsetChangeTime[fileId] = now;
+          TelegramService().send({
+            '@type': 'downloadFile',
+            'file_id': fileId,
+            'priority':
+                16, // Lower priority for lookahead (half of playback priority)
+            'offset': downloadFrontier,
+            'limit': 0,
+            'synchronous': false,
+          });
+        }
+      }
       return;
     }
 
     // Check if current download will soon provide the data we need
-    // (within 10MB of the download frontier)
+    // (within lookahead range of the download frontier)
     final downloadFrontier = currentDownloadOffset + currentPrefix;
     final distanceFromFrontier = requestedOffset - downloadFrontier;
-    if (distanceFromFrontier >= 0 && distanceFromFrontier < 10 * 1024 * 1024) {
+    if (distanceFromFrontier >= 0 && distanceFromFrontier < _lookAheadBytes) {
       // Current download will reach our offset soon, don't restart
       return;
     }

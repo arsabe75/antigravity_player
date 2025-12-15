@@ -80,6 +80,11 @@ class MediaKitVideoRepository implements VideoRepository {
     );
     // Set properties directly on player for network caching
     await (_player!.platform as dynamic).setProperty('cache', 'yes');
+    // Critical: Increase low-level stream buffer for TDLib proxy streaming
+    await (_player!.platform as dynamic).setProperty(
+      'stream-buffer-size',
+      (16 * 1024 * 1024).toString(),
+    ); // 16MB stream buffer
     // Increase demuxer buffer to handle high-bitrate hiccups
     await (_player!.platform as dynamic).setProperty(
       'demuxer-max-bytes',
@@ -101,6 +106,8 @@ class MediaKitVideoRepository implements VideoRepository {
       'cache-pause-initial',
       'yes',
     ); // Pre-buffer before start
+    // Require 10 seconds of buffered content - prevents frame drops at start
+    await (_player!.platform as dynamic).setProperty('cache-secs', '10');
 
     // Listen to streams
     _playerSub = _player!.stream.position.listen((pos) {
