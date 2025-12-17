@@ -61,6 +61,15 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
           onPanStart: (_) => windowManager.startDragging(),
           behavior: HitTestBehavior.translucent,
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(LucideIcons.refreshCw),
+            tooltip: 'Refresh',
+            onPressed: () => ref
+                .read(telegramChatProvider(widget.chatId).notifier)
+                .refreshMessages(),
+          ),
+        ],
       ),
       body: state.isLoading && state.messages.isEmpty
           ? const Center(child: CircularProgressIndicator())

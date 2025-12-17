@@ -20,7 +20,7 @@ final class TelegramChatNotifierProvider
   }) : super(
          retry: null,
          name: r'telegramChatProvider',
-         isAutoDispose: true,
+         isAutoDispose: false,
          dependencies: null,
          $allTransitiveDependencies: null,
        );
@@ -59,7 +59,7 @@ final class TelegramChatNotifierProvider
 }
 
 String _$telegramChatNotifierHash() =>
-    r'6b35c630ddd0ced8da093ec02743969c57cf60cf';
+    r'73430daf310448a4e8156cd3ec612990f111d227';
 
 final class TelegramChatNotifierFamily extends $Family
     with
@@ -76,7 +76,7 @@ final class TelegramChatNotifierFamily extends $Family
         name: r'telegramChatProvider',
         dependencies: null,
         $allTransitiveDependencies: null,
-        isAutoDispose: true,
+        isAutoDispose: false,
       );
 
   TelegramChatNotifierProvider call(int chatId) =>
