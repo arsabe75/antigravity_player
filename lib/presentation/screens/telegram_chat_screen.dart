@@ -120,10 +120,19 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                   .read(telegramContentProvider.notifier)
                                   .getStreamUrl(fileId, size);
 
+                              // Get message ID for stable progress persistence
+                              final messageId = msg['id'] as int?;
+
                               if (context.mounted) {
                                 context.push(
                                   '/player',
-                                  extra: {'url': url, 'title': fileName},
+                                  extra: {
+                                    'url': url,
+                                    'title': fileName,
+                                    'telegramChatId': widget.chatId,
+                                    'telegramMessageId': messageId,
+                                    'telegramFileSize': size,
+                                  },
                                 );
                               }
                             },

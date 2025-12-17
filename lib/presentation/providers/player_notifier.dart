@@ -37,6 +37,11 @@ class PlayerNotifier extends _$PlayerNotifier {
   int? _currentProxyFileId;
   bool _mounted = true;
 
+  // Stable Telegram identifiers for progress persistence
+  int? _telegramChatId;
+  int? _telegramMessageId;
+  int? _telegramFileSize;
+
   @override
   PlayerState build() {
     // Riverpod 3: El método build() reemplaza al constructor.
@@ -90,10 +95,17 @@ class PlayerNotifier extends _$PlayerNotifier {
     });
   }
 
+  /// Load and play a video.
+  ///
+  /// For Telegram videos, provide [telegramChatId], [telegramMessageId], and
+  /// [telegramFileSize] for stable progress persistence that survives cache clears.
   Future<void> loadVideo(
     String path, {
     bool isNetwork = false,
     String? title,
+    int? telegramChatId,
+    int? telegramMessageId,
+    int? telegramFileSize,
   }) async {
     _abortCurrentProxyRequest();
 
@@ -110,6 +122,11 @@ class PlayerNotifier extends _$PlayerNotifier {
       // I will use replace_file_content so I don't need to copy 80 lines.
       // Wait, replacement content must match target content exactly.
       // I will use multi_replace.
+
+      // Store Telegram context for stable progress persistence
+      _telegramChatId = telegramChatId;
+      _telegramMessageId = telegramMessageId;
+      _telegramFileSize = telegramFileSize;
 
       // Extract and store proxy file ID safely for disposal
       _currentProxyFileId = null;
@@ -156,18 +173,20 @@ class PlayerNotifier extends _$PlayerNotifier {
       await Future.delayed(const Duration(milliseconds: 300));
       await _loadTracks();
 
-      // Save to recent videos history
+      // Save to recent videos history with stable Telegram identifiers
       final recentVideosService = RecentVideosService();
       await recentVideosService.addVideo(
         path,
         isNetwork: isNetwork,
         title: title,
+        telegramChatId: _telegramChatId,
+        telegramMessageId: _telegramMessageId,
+        telegramFileSize: _telegramFileSize,
       );
 
-      // Use file_id as stable key if available, otherwise path
-      final storageKey = _currentProxyFileId != null
-          ? 'file_$_currentProxyFileId'
-          : path;
+      // Use stable Telegram message ID for progress key (survives cache clears)
+      // Falls back to file_id for legacy, then path for local files
+      final storageKey = _getStableStorageKey(path);
       final savedPositionMs = await _storageService.getPosition(storageKey);
       if (savedPositionMs != null && savedPositionMs > 0) {
         final position = Duration(milliseconds: savedPositionMs);
@@ -261,13 +280,25 @@ class PlayerNotifier extends _$PlayerNotifier {
     state = state.copyWith(areControlsVisible: visible);
   }
 
+  /// Returns a stable storage key for progress persistence.
+  /// Priority: Telegram message ID > file_id > path
+  String _getStableStorageKey(String path) {
+    // Best: Use stable Telegram message ID (survives cache clears)
+    if (_telegramChatId != null && _telegramMessageId != null) {
+      return 'telegram_${_telegramChatId}_$_telegramMessageId';
+    }
+    // Fallback: Use file_id (may change after cache clear, but works for session)
+    if (_currentProxyFileId != null) {
+      return 'file_$_currentProxyFileId';
+    }
+    // Default: Use path for local files
+    return path;
+  }
+
   Future<void> _savePosition() async {
     try {
       if (state.currentVideoPath != null) {
-        // Use file_id as stable key for proxy videos to persist across restarts (ephemeral ports)
-        final storageKey = _currentProxyFileId != null
-            ? 'file_$_currentProxyFileId'
-            : state.currentVideoPath!;
+        final storageKey = _getStableStorageKey(state.currentVideoPath!);
         await _storageService.savePosition(
           storageKey,
           state.position.inMilliseconds,
