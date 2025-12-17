@@ -36,7 +36,7 @@ class TelegramChatState {
   }
 }
 
-@riverpod
+@Riverpod(keepAlive: true)
 class TelegramChatNotifier extends _$TelegramChatNotifier {
   late final TelegramService _service;
   int _retryCount = 0;
@@ -149,18 +149,22 @@ class TelegramChatNotifier extends _$TelegramChatNotifier {
     return l.any((m) => m['id'] == id);
   }
 
-  Future<void> loadMessages() async {
+  /// Loads messages from chat history.
+  /// Set [forceRefresh] to true to clear existing messages before loading.
+  Future<void> loadMessages({bool forceRefresh = false}) async {
     try {
-      // Only clear if explicitly reloading manually, but for initial load
-      // the build method sets isLoading=true.
-      // If we call this from microtask, it's safe to set state.
-      state = state.copyWith(isLoading: true, messages: []);
+      // Only clear messages if explicitly requested (manual refresh)
+      if (forceRefresh) {
+        state = state.copyWith(isLoading: true, messages: []);
+      } else {
+        state = state.copyWith(isLoading: true);
+      }
       _service.send({
         '@type': 'getChatHistory',
         'chat_id': chatId,
         'from_message_id': 0,
         'offset': 0,
-        'limit': 100, // Increased limit
+        'limit': 100,
         'only_local': false,
       });
     } catch (e) {
@@ -171,6 +175,12 @@ class TelegramChatNotifier extends _$TelegramChatNotifier {
       }
       debugPrint('TelegramChatNotifier: Error loading messages: $e');
     }
+  }
+
+  /// Forces a full refresh, clearing cached messages first.
+  Future<void> refreshMessages() async {
+    _retryCount = 0;
+    await loadMessages(forceRefresh: true);
   }
 
   Future<void> loadMoreMessages() async {
