@@ -1,6 +1,7 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../domain/entities/storage_statistics.dart';
 import '../../infrastructure/services/telegram_cache_service.dart';
+import '../../infrastructure/services/local_streaming_proxy.dart';
 
 part 'telegram_cache_notifier.g.dart';
 
@@ -79,6 +80,9 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
       final success = await _service.clearCache(forceAll: true);
 
       if (success) {
+        // Invalidate streaming proxy cache to ensure fresh file info
+        LocalStreamingProxy().invalidateAllFiles();
+
         // Reload statistics after clearing
         final stats = await _service.getStorageStatistics();
         state = state.copyWith(statistics: stats, isClearing: false);

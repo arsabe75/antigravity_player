@@ -25,8 +25,18 @@ import '../../infrastructure/services/media_control_service.dart';
 class PlayerScreen extends ConsumerStatefulWidget {
   final String? videoUrl;
   final String? title;
+  final int? telegramChatId;
+  final int? telegramMessageId;
+  final int? telegramFileSize;
 
-  const PlayerScreen({super.key, this.videoUrl, this.title});
+  const PlayerScreen({
+    super.key,
+    this.videoUrl,
+    this.title,
+    this.telegramChatId,
+    this.telegramMessageId,
+    this.telegramFileSize,
+  });
 
   @override
   ConsumerState<PlayerScreen> createState() => _PlayerScreenState();
@@ -53,6 +63,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               widget.videoUrl!,
               isNetwork: isNetwork,
               title: widget.title,
+              telegramChatId: widget.telegramChatId,
+              telegramMessageId: widget.telegramMessageId,
+              telegramFileSize: widget.telegramFileSize,
             ),
       );
     }

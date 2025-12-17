@@ -9,13 +9,36 @@ class RecentVideo {
   final DateTime playedAt;
   final Duration? lastPosition;
 
+  /// Telegram-specific stable identifiers (survive cache clears)
+  /// These are used to reconstruct proxy URLs and persist progress.
+  final int? telegramChatId;
+  final int? telegramMessageId;
+  final int? telegramFileSize;
+
   RecentVideo({
     required this.path,
     this.title,
     required this.isNetwork,
     required this.playedAt,
     this.lastPosition,
+    this.telegramChatId,
+    this.telegramMessageId,
+    this.telegramFileSize,
   });
+
+  /// Returns a stable key for progress storage.
+  /// For Telegram videos, uses chatId:messageId which survives cache clears.
+  /// For local files, uses the file path.
+  String get stableProgressKey {
+    if (telegramChatId != null && telegramMessageId != null) {
+      return 'telegram_${telegramChatId}_$telegramMessageId';
+    }
+    return path;
+  }
+
+  /// Returns true if this is a Telegram video with stable identifiers.
+  bool get isTelegramVideo =>
+      telegramChatId != null && telegramMessageId != null;
 
   /// Obtiene el nombre del archivo o dominio
   String get displayName {
@@ -39,6 +62,9 @@ class RecentVideo {
     'isNetwork': isNetwork,
     'playedAt': playedAt.toIso8601String(),
     'lastPosition': lastPosition?.inMilliseconds,
+    'telegramChatId': telegramChatId,
+    'telegramMessageId': telegramMessageId,
+    'telegramFileSize': telegramFileSize,
   };
 
   factory RecentVideo.fromJson(Map<String, dynamic> json) => RecentVideo(
@@ -49,6 +75,9 @@ class RecentVideo {
     lastPosition: json['lastPosition'] != null
         ? Duration(milliseconds: json['lastPosition'] as int)
         : null,
+    telegramChatId: json['telegramChatId'] as int?,
+    telegramMessageId: json['telegramMessageId'] as int?,
+    telegramFileSize: json['telegramFileSize'] as int?,
   );
 }
 
@@ -75,21 +104,48 @@ class RecentVideosService {
   }
 
   /// Añade o actualiza un video en el historial
+  ///
+  /// For Telegram videos, provide [telegramChatId], [telegramMessageId], and
+  /// [telegramFileSize] for stable identification that survives cache clears.
   Future<void> addVideo(
     String path, {
     String? title,
     bool isNetwork = false,
     Duration? position,
+    int? telegramChatId,
+    int? telegramMessageId,
+    int? telegramFileSize,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final videos = await getRecentVideos();
 
     // Remove if already exists to update it (move to top)
-    // Preserve title if new title is null
+    // Match by stable Telegram ID when available, otherwise by path
     String? existingTitle;
-    final existingIndex = videos.indexWhere((v) => v.path == path);
+    int? existingChatId;
+    int? existingMessageId;
+    int? existingFileSize;
+
+    int existingIndex = -1;
+    if (telegramChatId != null && telegramMessageId != null) {
+      // Match by stable Telegram message ID (survives cache clears)
+      existingIndex = videos.indexWhere(
+        (v) =>
+            v.telegramChatId == telegramChatId &&
+            v.telegramMessageId == telegramMessageId,
+      );
+    }
+    if (existingIndex == -1) {
+      // Fallback to path match
+      existingIndex = videos.indexWhere((v) => v.path == path);
+    }
+
     if (existingIndex != -1) {
-      existingTitle = videos[existingIndex].title;
+      final existing = videos[existingIndex];
+      existingTitle = existing.title;
+      existingChatId = existing.telegramChatId;
+      existingMessageId = existing.telegramMessageId;
+      existingFileSize = existing.telegramFileSize;
       videos.removeAt(existingIndex);
     }
 
@@ -102,6 +158,9 @@ class RecentVideosService {
         isNetwork: isNetwork,
         playedAt: DateTime.now(),
         lastPosition: position,
+        telegramChatId: telegramChatId ?? existingChatId,
+        telegramMessageId: telegramMessageId ?? existingMessageId,
+        telegramFileSize: telegramFileSize ?? existingFileSize,
       ),
     );
 
@@ -125,10 +184,13 @@ class RecentVideosService {
       final video = videos[index];
       videos[index] = RecentVideo(
         path: video.path,
-        title: video.title, // Preserve title
+        title: video.title,
         isNetwork: video.isNetwork,
         playedAt: video.playedAt,
         lastPosition: position,
+        telegramChatId: video.telegramChatId,
+        telegramMessageId: video.telegramMessageId,
+        telegramFileSize: video.telegramFileSize,
       );
 
       final jsonList = videos.map((v) => jsonEncode(v.toJson())).toList();

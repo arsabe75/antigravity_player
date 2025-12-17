@@ -64,17 +64,27 @@ class LocalStreamingProxy {
   // No predictive/two-phase logic - we serve exactly what the player requests
   final Map<int, int> _activeDownloadOffset = {};
 
-  // Throttle offset changes to avoid excessive downloadFile calls
-  final Map<int, DateTime> _lastOffsetChangeTime = {};
-  static const int _offsetChangeCooldownMs =
-      300; // 300ms cooldown between offset changes
-
   // Lookahead buffer: keep TDLib downloading ahead of playback position
   // 50MB is needed for high bitrate videos (>3GB files)
   static const int _lookAheadBytes = 50 * 1024 * 1024; // 50MB lookahead
 
-  // Stall recovery: restart download after this many wait attempts (10 seconds)
-  static const int _stallRecoveryAttempts = 50; // 50 * 200ms = 10 seconds
+  // Stall recovery: restart download after this many wait attempts (5 seconds)
+  static const int _stallRecoveryAttempts = 25; // 25 * 200ms = 5 seconds
+
+  // Track all active HTTP request offsets per file for cleanup on close
+  final Map<int, Set<int>> _activeHttpRequestOffsets = {};
+
+  // Throttle download requests to avoid spam
+  static const int _downloadThrottleMs = 300; // 300ms between download calls
+  final Map<int, DateTime> _lastDownloadRequestTime = {};
+
+  // Debounce timers per file to prevent ping-ponging
+  final Map<int, Timer> _debounceTimers = {};
+
+  // PRIMARY PLAYBACK TRACKING: Track the lowest requested offset as the "primary playback" position.
+  // This helps distinguish actual playback from metadata probes at end-of-file (moov atom).
+  // Stall recovery should only act on the primary playback position, not on metadata probes.
+  final Map<int, int> _primaryPlaybackOffset = {};
 
   int get port => _port;
 
@@ -89,7 +99,8 @@ class LocalStreamingProxy {
     _abortedRequests.add(fileId);
     _activeDownloadRequests.remove(fileId);
     _activeDownloadOffset.remove(fileId);
-    _lastOffsetChangeTime.remove(fileId);
+    _lastDownloadRequestTime.remove(fileId);
+    _primaryPlaybackOffset.remove(fileId);
 
     // NOTE: Following Unigram's pattern - we do NOT call cancelDownloadFile here.
     // Unigram intentionally lets downloads continue in the background.
@@ -98,6 +109,35 @@ class LocalStreamingProxy {
 
     // Notify any waiting loops to wake up and check abort status
     _fileUpdateNotifiers[fileId]?.add(null);
+  }
+
+  /// Invalidates all cached file information.
+  /// Call this when Telegram cache is cleared to ensure fresh file info is fetched.
+  void invalidateAllFiles() {
+    debugPrint('Proxy: Invalidating all cached file info');
+    _filePaths.clear();
+    _activeDownloadOffset.clear();
+    _lastDownloadRequestTime.clear();
+    _activeHttpRequestOffsets.clear();
+    _primaryPlaybackOffset.clear();
+    // Cancel all debounce timers
+    for (var timer in _debounceTimers.values) {
+      timer.cancel();
+    }
+    _debounceTimers.clear();
+  }
+
+  /// Invalidates cached info for a specific file.
+  /// Call this when a specific file is deleted from cache.
+  void invalidateFile(int fileId) {
+    debugPrint('Proxy: Invalidating cached info for file $fileId');
+    _filePaths.remove(fileId);
+    _activeDownloadOffset.remove(fileId);
+    _lastDownloadRequestTime.remove(fileId);
+    _activeHttpRequestOffsets.remove(fileId);
+    _primaryPlaybackOffset.remove(fileId);
+    _debounceTimers[fileId]?.cancel();
+    _debounceTimers.remove(fileId);
   }
 
   Future<void> start() async {
@@ -154,6 +194,10 @@ class LocalStreamingProxy {
     _activeDownloadRequests.clear();
     _filePaths.clear();
     _abortedRequests.clear();
+    for (var timer in _debounceTimers.values) {
+      timer.cancel();
+    }
+    _debounceTimers.clear();
   }
 
   String getUrl(int fileId, int size) {
@@ -208,6 +252,8 @@ class LocalStreamingProxy {
 
   Future<void> _handleRequest(HttpRequest request) async {
     String? fileIdStr;
+    int? fileId;
+    int start = 0;
     try {
       fileIdStr = request.uri.queryParameters['file_id'];
       final sizeStr = request.uri.queryParameters['size'];
@@ -218,7 +264,7 @@ class LocalStreamingProxy {
         return;
       }
 
-      final fileId = int.parse(fileIdStr);
+      fileId = int.parse(fileIdStr);
       final totalSize = int.tryParse(sizeStr ?? '') ?? 0;
 
       // If ANY files were recently aborted, give TDLib time to clean up
@@ -247,7 +293,6 @@ class LocalStreamingProxy {
 
       // 1. Parse Range Header
       final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
-      int start = 0;
       int? end;
 
       if (rangeHeader != null) {
@@ -258,19 +303,72 @@ class LocalStreamingProxy {
         }
       }
 
+      // Register this HTTP request offset for cleanup on close
+      _activeHttpRequestOffsets.putIfAbsent(fileId, () => {});
+      _activeHttpRequestOffsets[fileId]!.add(start);
+
+      // PRIMARY PLAYBACK TRACKING: Track the lowest offset as the "primary playback" position.
+      // This helps stall recovery prioritize actual playback over metadata probes (moov atom at EOF).
+      // Only update if this offset is earlier than the current primary, or if no primary is set.
+      final existingPrimary = _primaryPlaybackOffset[fileId];
+      if (existingPrimary == null || start < existingPrimary) {
+        _primaryPlaybackOffset[fileId] = start;
+      }
+
       // 2. Ensure File Info is available
       if (!_filePaths.containsKey(fileId) || _filePaths[fileId]!.path.isEmpty) {
         await _fetchFileInfo(fileId);
       }
 
-      final fileInfo = _filePaths[fileId];
+      var fileInfo = _filePaths[fileId];
       if (fileInfo == null || fileInfo.path.isEmpty) {
         request.response.statusCode = HttpStatus.notFound;
         await request.response.close();
         return;
       }
 
-      final file = File(fileInfo.path);
+      var file = File(fileInfo.path);
+
+      // CRITICAL: Verify the file actually exists on disk
+      // TDLib may report a path for a file that was deleted by cache cleanup
+      if (!await file.exists()) {
+        debugPrint(
+          'Proxy: File does not exist on disk: ${fileInfo.path}, re-fetching...',
+        );
+
+        // Clear stale cache entry
+        _filePaths.remove(fileId);
+
+        // Tell TDLib to delete its reference to the missing file
+        await TelegramService().sendWithResult({
+          '@type': 'deleteFile',
+          'file_id': fileId,
+        });
+
+        // Wait for TDLib to process
+        await Future.delayed(const Duration(milliseconds: 300));
+
+        // Re-fetch file info (this will trigger a new download)
+        await _fetchFileInfo(fileId);
+
+        fileInfo = _filePaths[fileId];
+        if (fileInfo == null || fileInfo.path.isEmpty) {
+          debugPrint('Proxy: Failed to re-allocate file $fileId');
+          request.response.statusCode = HttpStatus.notFound;
+          await request.response.close();
+          return;
+        }
+
+        file = File(fileInfo.path);
+
+        // Verify the new file exists
+        if (!await file.exists()) {
+          debugPrint('Proxy: New file still does not exist: ${fileInfo.path}');
+          request.response.statusCode = HttpStatus.notFound;
+          await request.response.close();
+          return;
+        }
+      }
 
       final effectiveTotalSize = totalSize > 0
           ? totalSize
@@ -388,24 +486,51 @@ class LocalStreamingProxy {
                 }
               }
 
-              // Stall recovery: after 10 seconds, restart download with max priority
+              // Stall recovery: after 5 seconds, restart download with max priority
+              // CRITICAL: Only trigger stall recovery if THIS request is the PRIMARY PLAYBACK request.
+              // Metadata probes (moov atom at EOF) should NOT hijack the download.
+              final primaryOffset = _primaryPlaybackOffset[fileId];
+              final isThisPrimaryPlayback =
+                  primaryOffset == null ||
+                  currentReadOffset <=
+                      primaryOffset + (4 * 1024 * 1024); // Allow 4MB tolerance
+
               if (waitAttempts == _stallRecoveryAttempts &&
-                  !stallRecoveryTriggered) {
+                  !stallRecoveryTriggered &&
+                  isThisPrimaryPlayback) {
                 stallRecoveryTriggered = true;
+
+                // Stall recovery: simple and robust.
+                // If THIS request has been waiting for 5 seconds and is still alive (checked implicitly by running this code),
+                // we force the download to switch to us.
+                // This breaks deadlocks where the Proxy is "stuck" on a metadata request that isn't completing.
                 debugPrint(
-                  'Proxy: Stall recovery triggered for $fileId at offset $currentReadOffset',
+                  'Proxy: Stall recovery triggered for $fileId at offset $currentReadOffset (Primary: $primaryOffset, Active was: ${_activeDownloadOffset[fileId]})',
                 );
+
                 // Force restart download at exact offset
                 _activeDownloadOffset.remove(fileId);
-                _lastOffsetChangeTime.remove(fileId);
+                _lastDownloadRequestTime.remove(fileId);
+
+                // Start fresh with synchronous mode to force TDLib to prioritize
                 TelegramService().send({
                   '@type': 'downloadFile',
                   'file_id': fileId,
                   'priority': 32,
                   'offset': currentReadOffset,
                   'limit': 0,
-                  'synchronous': false,
+                  'synchronous':
+                      true, // Force sequential download from this offset
                 });
+              } else if (waitAttempts == _stallRecoveryAttempts &&
+                  !stallRecoveryTriggered &&
+                  !isThisPrimaryPlayback) {
+                // Log that we're skipping stall recovery for a metadata probe
+                debugPrint(
+                  'Proxy: Skipping stall recovery for metadata probe at $currentReadOffset (Primary: $primaryOffset)',
+                );
+                stallRecoveryTriggered =
+                    true; // Mark to prevent repeated logging
               }
 
               try {
@@ -425,6 +550,11 @@ class LocalStreamingProxy {
         }
       } finally {
         await raf?.close();
+        // Clean up this request's offset tracking
+        _activeHttpRequestOffsets[fileId]?.remove(start);
+        if (_activeHttpRequestOffsets[fileId]?.isEmpty ?? false) {
+          _activeHttpRequestOffsets.remove(fileId);
+        }
       }
 
       // Close response, handling aborts logic
@@ -445,6 +575,13 @@ class LocalStreamingProxy {
         // Ignore expected HttpExceptions on abort/close
       } else {
         debugPrint('Proxy: Top-level error: $e');
+      }
+      // Clean up on error too
+      if (fileId != null) {
+        _activeHttpRequestOffsets[fileId]?.remove(start);
+        if (_activeHttpRequestOffsets[fileId]?.isEmpty ?? false) {
+          _activeHttpRequestOffsets.remove(fileId);
+        }
       }
       try {
         if (!_abortedRequests.contains(
@@ -607,43 +744,35 @@ class LocalStreamingProxy {
     }
   }
 
-  /// Direct 1:1 mapping: player's Range request → TDLib downloadFile offset
-  /// No predictive logic - we trust the player to know what it needs.
-  /// Following Telegram Android's FileStreamLoadOperation pattern.
+  /// SIMPLIFIED with OFFSET LOCKING: Once a download starts at an offset,
+  /// don't switch to a different offset for a minimum duration.
+  /// This prevents TDLib from constantly switching between downloads.
   void _startDownloadAtOffset(int fileId, int requestedOffset) {
-    // Check if file is already complete - no download needed
+    // 1. Check if file is already complete - no download needed
     final cached = _filePaths[fileId];
     if (cached != null && cached.isCompleted) {
       return;
     }
 
-    // Check if we're already downloading from this offset (or very close)
-    final currentActiveOffset = _activeDownloadOffset[fileId];
-    final currentDownloadOffset = cached?.downloadOffset ?? 0;
-    final currentPrefix = cached?.downloadedPrefixSize ?? 0;
-
-    // If data is available at requested offset, check if we need lookahead
+    // 2. Check if data is already available at this offset
     if (cached != null && cached.availableBytesFrom(requestedOffset) > 0) {
-      // Data available - but ensure lookahead download is active
-      final downloadFrontier = currentDownloadOffset + currentPrefix;
+      // Data available - optionally trigger lookahead download
+      final downloadFrontier =
+          cached.downloadOffset + cached.downloadedPrefixSize;
       final lookaheadTarget = requestedOffset + _lookAheadBytes;
 
-      // If download frontier is behind our lookahead target, trigger download ahead
       if (downloadFrontier < lookaheadTarget &&
           downloadFrontier < cached.totalSize) {
+        // Trigger lookahead download (low priority, throttled)
         final now = DateTime.now();
-        final lastChange = _lastOffsetChangeTime[fileId];
-        if (lastChange == null ||
-            now.difference(lastChange).inMilliseconds >=
-                _offsetChangeCooldownMs) {
-          // Trigger lookahead download at current frontier
-          _activeDownloadOffset[fileId] = downloadFrontier;
-          _lastOffsetChangeTime[fileId] = now;
+        final lastRequest = _lastDownloadRequestTime[fileId];
+        if (lastRequest == null ||
+            now.difference(lastRequest).inMilliseconds >= _downloadThrottleMs) {
+          _lastDownloadRequestTime[fileId] = now;
           TelegramService().send({
             '@type': 'downloadFile',
             'file_id': fileId,
-            'priority':
-                24, // Higher priority for lookahead (closer to playback priority)
+            'priority': 16, // Medium priority for lookahead
             'offset': downloadFrontier,
             'limit': 0,
             'synchronous': false,
@@ -653,43 +782,68 @@ class LocalStreamingProxy {
       return;
     }
 
-    // Check if current download will soon provide the data we need
-    // (within lookahead range of the download frontier)
-    final downloadFrontier = currentDownloadOffset + currentPrefix;
-    final distanceFromFrontier = requestedOffset - downloadFrontier;
-    if (distanceFromFrontier >= 0 && distanceFromFrontier < _lookAheadBytes) {
-      // Current download will reach our offset soon, don't restart
-      return;
+    // 2.5 Suppress redundant sequential requests
+    // If we are already downloading from an offset close to this one, don't re-trigger.
+    // This allows TDLib to maintain a continuous stream without interruption.
+    final currentActiveOffset = _activeDownloadOffset[fileId];
+    if (currentActiveOffset != null) {
+      final diff = requestedOffset - currentActiveOffset;
+      // If requested offset is ahead of current (but not too far, e.g. 32MB)
+      // AND we requested it recently (< 15 seconds)
+      if (diff >= 0 && diff < 32 * 1024 * 1024) {
+        final lastRequest = _lastDownloadRequestTime[fileId];
+        final now = DateTime.now();
+        if (lastRequest != null && now.difference(lastRequest).inSeconds < 15) {
+          // Ignore this redundant request
+          // debugPrint('Proxy: Suppressing redundant request at $requestedOffset (Active: $currentActiveOffset)');
+          return;
+        }
+      }
     }
 
-    // Check if already targeting this offset
-    if (currentActiveOffset == requestedOffset) {
-      return;
-    }
+    // 3. Debounce the download request
+    // This allows the player to "probe" offsets (like metadata at end of file)
+    // without immediately triggering a heavy TDLib download switch.
+    // If the player STAYS on this offset for >200ms, we switch.
 
-    // Throttle offset changes to avoid excessive downloadFile calls
-    final now = DateTime.now();
-    final lastChange = _lastOffsetChangeTime[fileId];
-    if (lastChange != null &&
-        now.difference(lastChange).inMilliseconds < _offsetChangeCooldownMs) {
-      return;
-    }
+    // Cancel any pending switch
+    _debounceTimers[fileId]?.cancel();
 
-    // Start download at exactly the offset the player requested
-    debugPrint(
-      'Proxy: Downloading from offset $requestedOffset for $fileId (priority 32)',
-    );
+    // Start new debounce timer
+    _debounceTimers[fileId] = Timer(const Duration(milliseconds: 200), () {
+      if (_abortedRequests.contains(fileId)) return;
 
-    _activeDownloadOffset[fileId] = requestedOffset;
-    _lastOffsetChangeTime[fileId] = now;
+      final now = DateTime.now();
+      final lastRequest = _lastDownloadRequestTime[fileId];
 
-    TelegramService().send({
-      '@type': 'downloadFile',
-      'file_id': fileId,
-      'priority': 32, // Highest priority for player's current request
-      'offset': requestedOffset, // EXACT offset from player's Range header
-      'limit': 0, // Download from offset to end of file
-      'synchronous': false,
+      // Simple throttle for identical repeated requests
+      if (_activeDownloadOffset[fileId] == requestedOffset &&
+          lastRequest != null &&
+          now.difference(lastRequest).inMilliseconds < _downloadThrottleMs) {
+        return;
+      }
+
+      // Check existence again effectively inside the closure before acting
+      if (_filePaths[fileId]?.isCompleted ?? false) return;
+
+      _lastDownloadRequestTime[fileId] = now;
+      _activeDownloadOffset[fileId] = requestedOffset;
+
+      debugPrint(
+        'Proxy: Debounce triggered - Downloading from offset $requestedOffset for $fileId',
+      );
+
+      TelegramService().send({
+        '@type': 'downloadFile',
+        'file_id': fileId,
+        'priority': 32, // Maximum priority
+        'offset': requestedOffset,
+        'limit': 0, // Download from offset to end
+        'synchronous': false,
+      });
+
+      // Clean up timer reference
+      _debounceTimers.remove(fileId);
     });
   }
 }
