@@ -59,6 +59,29 @@ class TelegramContentNotifier extends Notifier<TelegramContentState> {
 
         // Schedule update if not already scheduled
         _scheduleFlush();
+      } else if (update['@type'] == 'chats') {
+        // Response from getChats - contains list of chat_ids
+        final chatIds = update['chat_ids'] as List? ?? [];
+        debugPrint(
+          'TelegramContentNotifier: getChats returned ${chatIds.length} chat IDs',
+        );
+
+        if (chatIds.isEmpty) {
+          // No chats, stop loading
+          state = state.copyWith(isLoading: false);
+          _loadRetryCount = 0;
+          return;
+        }
+
+        // Request full info for each chat
+        for (final chatId in chatIds) {
+          _service.send({'@type': 'getChat', 'chat_id': chatId});
+        }
+      } else if (update['@type'] == 'chat') {
+        // Response from getChat - full chat object
+        final chatId = update['id'];
+        _bufferedChats[chatId] = update;
+        _scheduleFlush();
       } else if (update['@type'] == 'updateChatPosition') {
         final chatId = update['chat_id'];
         final newPosition = update['position'];
@@ -154,27 +177,51 @@ class TelegramContentNotifier extends Notifier<TelegramContentState> {
     return BigInt.zero;
   }
 
+  int _loadRetryCount = 0;
+  static const int _maxLoadRetries = 3;
+
   void loadChats() {
     state = state.copyWith(isLoading: true);
-    debugPrint('TelegramContentNotifier: Loading chats...'); // DEBUG
-    // Request getting chats. TDLib will send updates.
-    // limiting to 50 for now
+    debugPrint(
+      'TelegramContentNotifier: Loading chats (attempt ${_loadRetryCount + 1})...',
+    );
+
+    // Request getting chats with higher limit
+    // TDLib will send updates via updateNewChat for each chat
     _service.send({
       '@type': 'getChats',
-      'chat_list': {'@type': 'chatListMain'}, // Main list object
-      'limit': 50,
+      'chat_list': {'@type': 'chatListMain'},
+      'limit': 200, // Increased limit to get more chats
     });
 
-    // Safety timeout to prevent infinite loading if no updates arrive
+    // Safety timeout - if no chats arrived, retry
     Future.delayed(const Duration(seconds: 5), () {
       try {
-        if (state.isLoading) {
+        if (state.isLoading &&
+            state.chats.isEmpty &&
+            _loadRetryCount < _maxLoadRetries) {
+          _loadRetryCount++;
+          debugPrint(
+            'TelegramContentNotifier: No chats received, retrying ($_loadRetryCount/$_maxLoadRetries)...',
+          );
+          loadChats();
+        } else if (state.isLoading) {
+          // Final timeout - stop loading even if no chats
           state = state.copyWith(isLoading: false);
+          _loadRetryCount = 0;
         }
       } catch (_) {
         // Notifier likely disposed
       }
     });
+  }
+
+  /// Force reload chats from server, clearing the current state
+  void reloadChats() {
+    _loadRetryCount = 0;
+    _bufferedChats.clear();
+    state = TelegramContentState(isLoading: true);
+    loadChats();
   }
 
   // Method to start streaming a file

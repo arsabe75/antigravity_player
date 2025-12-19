@@ -11,7 +11,7 @@ class TelegramChatState {
   final bool hasMore;
   final String? error;
 
-  TelegramChatState({
+  const TelegramChatState({
     this.messages = const [],
     this.isLoading = false,
     this.isLoadingMore = false,
@@ -36,34 +36,83 @@ class TelegramChatState {
   }
 }
 
-@Riverpod(keepAlive: true)
-class TelegramChatNotifier extends _$TelegramChatNotifier {
-  late final TelegramService _service;
-  int _retryCount = 0;
-  // Track the last request to avoid race conditions or interpret responses correctly?
-  // Since we rely on the stream, we just assume incoming 'messages' for this chat are relevant.
+/// Parameters for TelegramChatNotifier
+/// Supports both regular chats and forum topic threads
+class TelegramChatParams {
+  final int chatId;
+  final int? messageThreadId; // For forum topics
+
+  const TelegramChatParams({required this.chatId, this.messageThreadId});
 
   @override
-  TelegramChatState build(int chatId) {
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is TelegramChatParams &&
+        other.chatId == chatId &&
+        other.messageThreadId == messageThreadId;
+  }
+
+  @override
+  int get hashCode => Object.hash(chatId, messageThreadId);
+
+  @override
+  String toString() =>
+      'TelegramChatParams(chatId: $chatId, threadId: $messageThreadId)';
+}
+
+@Riverpod(keepAlive: true)
+class TelegramChat extends _$TelegramChat {
+  late final TelegramService _service;
+  int _retryCount = 0;
+
+  @override
+  TelegramChatState build(TelegramChatParams params) {
     _service = TelegramService();
-    // subscription is managed by Riverpod's ref.onDispose if we returned a stream,
-    // but here we listen manually. We should cancel it.
     final sub = _service.updates.listen(_handleUpdate);
     ref.onDispose(() => sub.cancel());
 
     // Defer loading to avoid modifying state during build
     Future.microtask(() => loadMessages());
 
-    return TelegramChatState(isLoading: true);
+    return const TelegramChatState(isLoading: true);
   }
 
+  int get chatId => params.chatId;
+  int? get messageThreadId => params.messageThreadId;
+
   void _handleUpdate(Map<String, dynamic> update) {
-    // Trace update type for debugging flow
-    // debugPrint('TelegramChatNotifier: Update received: ${update['@type']}');
     try {
-      if (update['@type'] == 'updateNewMessage') {
+      final updateType = update['@type'];
+
+      // Debug: log updates for topic providers
+      if (messageThreadId != null) {
+        debugPrint(
+          'TelegramChat[$chatId/topic:$messageThreadId]: Update: $updateType',
+        );
+      }
+
+      // Handle TDLib errors
+      if (updateType == 'error') {
+        debugPrint(
+          'TelegramChat: TDLib error: ${update['code']} - ${update['message']}',
+        );
+        state = state.copyWith(
+          isLoading: false,
+          isLoadingMore: false,
+          error: update['message'] as String?,
+        );
+        return;
+      }
+
+      if (updateType == 'updateNewMessage') {
         final message = update['message'];
         if (message['chat_id'] == chatId) {
+          // For thread messages, check message_thread_id
+          if (messageThreadId != null) {
+            final msgThreadId = message['message_thread_id'] as int?;
+            if (msgThreadId != messageThreadId) return;
+          }
+
           if (_isMessageExists(message['id'])) {
             return;
           }
@@ -75,39 +124,39 @@ class TelegramChatNotifier extends _$TelegramChatNotifier {
           currentMessages.insert(0, message);
           state = state.copyWith(messages: currentMessages);
         }
-      } else if (update['@type'] == 'messages') {
+      } else if (updateType == 'messages') {
         final msgs = (update['messages'] as List).cast<Map<String, dynamic>>();
+        debugPrint(
+          'TelegramChat[$chatId/${messageThreadId ?? "main"}]: Received ${msgs.length} messages',
+        );
         if (msgs.isEmpty || msgs.length <= 1) {
-          // If we were loading more and got 0 (or just 1 dummy), then no more messages.
           if (state.isLoadingMore) {
             state = state.copyWith(isLoadingMore: false, hasMore: false);
           } else if (state.isLoading) {
-            // Initial load empty OR very few messages (likely just "created" date or service message)
-            // This might be because TDLib hasn't synced yet.
-            // We'll try up to 3 retries (2s, 4s, 6s)
             if (_retryCount < 3) {
               _retryCount++;
               final delay = _retryCount * 2;
               debugPrint(
-                'TelegramChatNotifier: Initial load empty, retry $_retryCount/3 in ${delay}s...',
+                'TelegramChat: Initial load empty, retry $_retryCount/3 in ${delay}s...',
               );
               Future.delayed(Duration(seconds: delay), () {
                 loadMessages();
               });
-              return; // Maintain loading state
+              return;
             }
             state = state.copyWith(isLoading: false, hasMore: false);
           }
           return;
         }
 
-        // If we got messages, reset retry count
         _retryCount = 0;
 
-        // Check if these messages belong to this chat
         if (msgs.first['chat_id'] != chatId) {
           return;
         }
+
+        // Note: For forum topics, messages come via foundChatMessages response
+        // This handler is for regular chats using getChatHistory
 
         // Merge messages
         final currentMessages = List<Map<String, dynamic>>.from(state.messages);
@@ -118,9 +167,6 @@ class TelegramChatNotifier extends _$TelegramChatNotifier {
           }
         }
 
-        // Sort by id descending (assuming larger ID is newer, which is generally true for TG,
-        // but date is safer. However, standard TG id is sortable).
-        // Actually, let's sort by date then ID to be safe.
         currentMessages.sort((a, b) {
           final dateA = a['date'] as int;
           final dateB = b['date'] as int;
@@ -129,18 +175,61 @@ class TelegramChatNotifier extends _$TelegramChatNotifier {
         });
 
         debugPrint(
-          'TelegramChatNotifier: Loaded ${currentMessages.length} messages (hasMore: ${msgs.length >= 20})',
+          'TelegramChat: Loaded ${currentMessages.length} messages (hasMore: ${msgs.length >= 20})',
         );
         state = state.copyWith(
           messages: currentMessages,
           isLoading: false,
           isLoadingMore: false,
-          hasMore:
-              msgs.length >= 20, // If we got fewer than limit, probably end.
+          hasMore: msgs.length >= 20,
+        );
+      } else if (updateType == 'foundChatMessages') {
+        // Response from searchChatMessages
+        final msgsList = update['messages'] as List?;
+        debugPrint(
+          'TelegramChat: Received foundChatMessages with ${msgsList?.length ?? 0} messages',
+        );
+
+        if (msgsList == null || msgsList.isEmpty) {
+          state = state.copyWith(
+            isLoading: false,
+            isLoadingMore: false,
+            hasMore: false,
+          );
+          return;
+        }
+
+        final msgs = msgsList.cast<Map<String, dynamic>>();
+        _retryCount = 0;
+
+        // No need to filter since searchChatMessages already filtered by topic
+        final currentMessages = List<Map<String, dynamic>>.from(state.messages);
+
+        for (final msg in msgs) {
+          if (!_isMessageExists(msg['id'], list: currentMessages)) {
+            currentMessages.add(msg);
+          }
+        }
+
+        currentMessages.sort((a, b) {
+          final dateA = a['date'] as int;
+          final dateB = b['date'] as int;
+          if (dateB != dateA) return dateB.compareTo(dateA);
+          return (b['id'] as int).compareTo(a['id'] as int);
+        });
+
+        debugPrint(
+          'TelegramChat: Forum topic loaded ${currentMessages.length} messages',
+        );
+        state = state.copyWith(
+          messages: currentMessages,
+          isLoading: false,
+          isLoadingMore: false,
+          hasMore: msgs.length >= 20,
         );
       }
     } catch (e) {
-      debugPrint('TelegramChatNotifier Error: $e');
+      debugPrint('TelegramChat Error: $e');
     }
   }
 
@@ -149,35 +238,53 @@ class TelegramChatNotifier extends _$TelegramChatNotifier {
     return l.any((m) => m['id'] == id);
   }
 
-  /// Loads messages from chat history.
-  /// Set [forceRefresh] to true to clear existing messages before loading.
   Future<void> loadMessages({bool forceRefresh = false}) async {
     try {
-      // Only clear messages if explicitly requested (manual refresh)
       if (forceRefresh) {
         state = state.copyWith(isLoading: true, messages: []);
       } else {
         state = state.copyWith(isLoading: true);
       }
-      _service.send({
-        '@type': 'getChatHistory',
-        'chat_id': chatId,
-        'from_message_id': 0,
-        'offset': 0,
-        'limit': 100,
-        'only_local': false,
-      });
+
+      if (messageThreadId != null) {
+        // For forum topics, use searchChatMessages with topic_id
+        // This properly filters messages by forum topic in TDLib
+        debugPrint(
+          'TelegramChat: Searching messages for forum topic chat=$chatId, topic=$messageThreadId',
+        );
+        _service.send({
+          '@type': 'searchChatMessages',
+          'chat_id': chatId,
+          'topic_id': {
+            '@type': 'messageTopicForum',
+            'forum_topic_id': messageThreadId,
+          },
+          'query': '',
+          'sender_id': null,
+          'from_message_id': 0,
+          'offset': 0,
+          'limit': 100,
+          'filter': null,
+        });
+      } else {
+        _service.send({
+          '@type': 'getChatHistory',
+          'chat_id': chatId,
+          'from_message_id': 0,
+          'offset': 0,
+          'limit': 100,
+          'only_local': false,
+        });
+      }
     } catch (e) {
       if (e.toString().contains('StateError') ||
           e.toString().contains('disposed')) {
-        // Ignore state errors if notifier is disposed
         return;
       }
-      debugPrint('TelegramChatNotifier: Error loading messages: $e');
+      debugPrint('TelegramChat: Error loading messages: $e');
     }
   }
 
-  /// Forces a full refresh, clearing cached messages first.
   Future<void> refreshMessages() async {
     _retryCount = 0;
     await loadMessages(forceRefresh: true);
@@ -191,18 +298,29 @@ class TelegramChatNotifier extends _$TelegramChatNotifier {
       return;
     }
 
-    debugPrint('TelegramChatNotifier: Loading more messages...');
+    debugPrint('TelegramChat: Loading more messages...');
     state = state.copyWith(isLoadingMore: true);
 
     final lastMessageId = state.messages.last['id'];
 
-    _service.send({
-      '@type': 'getChatHistory',
-      'chat_id': chatId,
-      'from_message_id': lastMessageId,
-      'offset': 0,
-      'limit': 100, // Increased limit
-      'only_local': false,
-    });
+    if (messageThreadId != null) {
+      _service.send({
+        '@type': 'getMessageThreadHistory',
+        'chat_id': chatId,
+        'message_id': messageThreadId,
+        'from_message_id': lastMessageId,
+        'offset': 0,
+        'limit': 100,
+      });
+    } else {
+      _service.send({
+        '@type': 'getChatHistory',
+        'chat_id': chatId,
+        'from_message_id': lastMessageId,
+        'offset': 0,
+        'limit': 100,
+        'only_local': false,
+      });
+    }
   }
 }

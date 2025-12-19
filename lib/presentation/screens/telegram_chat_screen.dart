@@ -9,11 +9,13 @@ import '../providers/telegram_content_notifier.dart'; // For getStreamUrl helper
 class TelegramChatScreen extends ConsumerStatefulWidget {
   final int chatId;
   final String title;
+  final int? messageThreadId; // For forum topics
 
   const TelegramChatScreen({
     super.key,
     required this.chatId,
     required this.title,
+    this.messageThreadId,
   });
 
   @override
@@ -21,9 +23,14 @@ class TelegramChatScreen extends ConsumerStatefulWidget {
 }
 
 class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
+  TelegramChatParams get _params => TelegramChatParams(
+    chatId: widget.chatId,
+    messageThreadId: widget.messageThreadId,
+  );
+
   @override
   Widget build(BuildContext context) {
-    final state = ref.watch(telegramChatProvider(widget.chatId));
+    final state = ref.watch(telegramChatProvider(_params));
 
     // Filter for video or video note messages
     final videoMessages = state.messages.where((m) {
@@ -47,9 +54,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
       );
       Future.microtask(() {
         if (mounted) {
-          ref
-              .read(telegramChatProvider(widget.chatId).notifier)
-              .loadMoreMessages();
+          ref.read(telegramChatProvider(_params).notifier).loadMoreMessages();
         }
       });
     }
@@ -66,7 +71,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
             icon: const Icon(LucideIcons.refreshCw),
             tooltip: 'Refresh',
             onPressed: () => ref
-                .read(telegramChatProvider(widget.chatId).notifier)
+                .read(telegramChatProvider(_params).notifier)
                 .refreshMessages(),
           ),
         ],
@@ -93,7 +98,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                     !state.isLoadingMore &&
                     state.hasMore) {
                   ref
-                      .read(telegramChatProvider(widget.chatId).notifier)
+                      .read(telegramChatProvider(_params).notifier)
                       .loadMoreMessages();
                 }
                 return false;

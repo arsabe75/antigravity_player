@@ -9,14 +9,14 @@ part of 'telegram_chat_notifier.dart';
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
 
-@ProviderFor(TelegramChatNotifier)
-const telegramChatProvider = TelegramChatNotifierFamily._();
+@ProviderFor(TelegramChat)
+const telegramChatProvider = TelegramChatFamily._();
 
-final class TelegramChatNotifierProvider
-    extends $NotifierProvider<TelegramChatNotifier, TelegramChatState> {
-  const TelegramChatNotifierProvider._({
-    required TelegramChatNotifierFamily super.from,
-    required int super.argument,
+final class TelegramChatProvider
+    extends $NotifierProvider<TelegramChat, TelegramChatState> {
+  const TelegramChatProvider._({
+    required TelegramChatFamily super.from,
+    required TelegramChatParams super.argument,
   }) : super(
          retry: null,
          name: r'telegramChatProvider',
@@ -26,7 +26,7 @@ final class TelegramChatNotifierProvider
        );
 
   @override
-  String debugGetCreateSourceHash() => _$telegramChatNotifierHash();
+  String debugGetCreateSourceHash() => _$telegramChatHash();
 
   @override
   String toString() {
@@ -37,7 +37,7 @@ final class TelegramChatNotifierProvider
 
   @$internal
   @override
-  TelegramChatNotifier create() => TelegramChatNotifier();
+  TelegramChat create() => TelegramChat();
 
   /// {@macro riverpod.override_with_value}
   Override overrideWithValue(TelegramChatState value) {
@@ -49,7 +49,7 @@ final class TelegramChatNotifierProvider
 
   @override
   bool operator ==(Object other) {
-    return other is TelegramChatNotifierProvider && other.argument == argument;
+    return other is TelegramChatProvider && other.argument == argument;
   }
 
   @override
@@ -58,19 +58,18 @@ final class TelegramChatNotifierProvider
   }
 }
 
-String _$telegramChatNotifierHash() =>
-    r'73430daf310448a4e8156cd3ec612990f111d227';
+String _$telegramChatHash() => r'285c841a43484bcd9cf6e3606c5f43f7b2cf02c7';
 
-final class TelegramChatNotifierFamily extends $Family
+final class TelegramChatFamily extends $Family
     with
         $ClassFamilyOverride<
-          TelegramChatNotifier,
+          TelegramChat,
           TelegramChatState,
           TelegramChatState,
           TelegramChatState,
-          int
+          TelegramChatParams
         > {
-  const TelegramChatNotifierFamily._()
+  const TelegramChatFamily._()
     : super(
         retry: null,
         name: r'telegramChatProvider',
@@ -79,18 +78,18 @@ final class TelegramChatNotifierFamily extends $Family
         isAutoDispose: false,
       );
 
-  TelegramChatNotifierProvider call(int chatId) =>
-      TelegramChatNotifierProvider._(argument: chatId, from: this);
+  TelegramChatProvider call(TelegramChatParams params) =>
+      TelegramChatProvider._(argument: params, from: this);
 
   @override
   String toString() => r'telegramChatProvider';
 }
 
-abstract class _$TelegramChatNotifier extends $Notifier<TelegramChatState> {
-  late final _$args = ref.$arg as int;
-  int get chatId => _$args;
+abstract class _$TelegramChat extends $Notifier<TelegramChatState> {
+  late final _$args = ref.$arg as TelegramChatParams;
+  TelegramChatParams get params => _$args;
 
-  TelegramChatState build(int chatId);
+  TelegramChatState build(TelegramChatParams params);
   @$mustCallSuper
   @override
   void runBuild() {
