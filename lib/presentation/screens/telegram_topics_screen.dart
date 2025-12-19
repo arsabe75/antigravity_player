@@ -139,7 +139,6 @@ class TelegramTopicsScreen extends ConsumerWidget {
                   final forumTopicId = topicInfo['forum_topic_id'] as int? ?? 0;
                   final isPinned = topic['is_pinned'] == true;
                   final isGeneral = topicInfo['is_general'] == true;
-                  final unreadCount = topic['unread_count'] as int? ?? 0;
 
                   // Get last message preview
                   final lastMessage =
@@ -195,10 +194,8 @@ class TelegramTopicsScreen extends ConsumerWidget {
                             child: Text(
                               topicName,
                               overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontWeight: unreadCount > 0
-                                    ? FontWeight.bold
-                                    : FontWeight.normal,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.normal,
                               ),
                             ),
                           ),
@@ -212,26 +209,7 @@ class TelegramTopicsScreen extends ConsumerWidget {
                               style: const TextStyle(fontSize: 12),
                             )
                           : null,
-                      trailing: unreadCount > 0
-                          ? Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 2,
-                              ),
-                              decoration: BoxDecoration(
-                                color: Theme.of(context).colorScheme.primary,
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: Text(
-                                unreadCount > 99 ? '99+' : '$unreadCount',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            )
-                          : const Icon(LucideIcons.chevronRight, size: 20),
+                      trailing: const Icon(LucideIcons.chevronRight, size: 20),
                       onTap: () {
                         Navigator.of(context).push(
                           MaterialPageRoute(
