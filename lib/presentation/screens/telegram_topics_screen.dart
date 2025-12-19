@@ -1,0 +1,253 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:lucide_icons/lucide_icons.dart';
+import 'package:window_manager/window_manager.dart';
+import '../providers/telegram_forum_notifier.dart';
+import 'telegram_chat_screen.dart';
+
+class TelegramTopicsScreen extends ConsumerWidget {
+  final int chatId;
+  final String title;
+
+  const TelegramTopicsScreen({
+    super.key,
+    required this.chatId,
+    required this.title,
+  });
+
+  /// Get topic icon data from topic info
+  IconData _getTopicIcon(Map<String, dynamic> topicInfo) {
+    // TDLib uses custom emoji or icons for topics
+    // For now, we'll use a default icon
+    final iconCustomEmojiId = topicInfo['icon']?['custom_emoji_id'];
+    if (iconCustomEmojiId != null && iconCustomEmojiId != 0) {
+      // Custom emoji - would need to fetch the actual emoji
+      return LucideIcons.smile;
+    }
+    return LucideIcons.messageSquare;
+  }
+
+  /// Get topic icon color from topic info
+  Color _getTopicColor(Map<String, dynamic> topicInfo) {
+    // TDLib provides icon_color as an integer color value
+    final iconColor = topicInfo['icon']?['color'] as int?;
+    if (iconColor != null && iconColor != 0) {
+      // TDLib uses RGB format
+      return Color(iconColor | 0xFF000000); // Add alpha
+    }
+    return Colors.blue;
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(telegramForumProvider(chatId));
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: const TextStyle(fontSize: 16)),
+            const Text(
+              'Topics',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+            ),
+          ],
+        ),
+        flexibleSpace: GestureDetector(
+          onPanStart: (_) => windowManager.startDragging(),
+          behavior: HitTestBehavior.translucent,
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(LucideIcons.refreshCw),
+            tooltip: 'Refresh',
+            onPressed: () {
+              ref.read(telegramForumProvider(chatId).notifier).refreshTopics();
+            },
+          ),
+        ],
+      ),
+      body: state.isLoading && state.topics.isEmpty
+          ? const Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Loading topics...'),
+                ],
+              ),
+            )
+          : state.topics.isEmpty
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Icon(
+                    LucideIcons.messagesSquare,
+                    size: 64,
+                    color: Colors.grey,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'No topics found',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                  const SizedBox(height: 8),
+                  ElevatedButton.icon(
+                    onPressed: () {
+                      ref
+                          .read(telegramForumProvider(chatId).notifier)
+                          .refreshTopics();
+                    },
+                    icon: const Icon(LucideIcons.refreshCw),
+                    label: const Text('Retry'),
+                  ),
+                ],
+              ),
+            )
+          : NotificationListener<ScrollNotification>(
+              onNotification: (scrollInfo) {
+                if (scrollInfo.metrics.pixels >=
+                        scrollInfo.metrics.maxScrollExtent - 200 &&
+                    !state.isLoadingMore &&
+                    state.hasMore) {
+                  ref
+                      .read(telegramForumProvider(chatId).notifier)
+                      .loadMoreTopics();
+                }
+                return false;
+              },
+              child: ListView.builder(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                itemCount: state.topics.length + (state.isLoadingMore ? 1 : 0),
+                itemBuilder: (context, index) {
+                  if (index == state.topics.length) {
+                    return const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+
+                  final topic = state.topics[index];
+                  final topicInfo =
+                      topic['info'] as Map<String, dynamic>? ?? {};
+                  final topicName =
+                      topicInfo['name'] as String? ?? 'Unknown Topic';
+                  // TDLib uses forum_topic_id as the thread identifier
+                  final forumTopicId = topicInfo['forum_topic_id'] as int? ?? 0;
+                  final isPinned = topic['is_pinned'] == true;
+                  final isGeneral = topicInfo['is_general'] == true;
+                  final unreadCount = topic['unread_count'] as int? ?? 0;
+
+                  // Get last message preview
+                  final lastMessage =
+                      topic['last_message'] as Map<String, dynamic>?;
+                  String? preview;
+                  if (lastMessage != null) {
+                    final content =
+                        lastMessage['content'] as Map<String, dynamic>?;
+                    if (content != null) {
+                      final type = content['@type'] as String?;
+                      if (type == 'messageText') {
+                        final text = content['text'] as Map<String, dynamic>?;
+                        preview = text?['text'] as String?;
+                      } else if (type == 'messageVideo') {
+                        preview = '🎬 Video';
+                      } else if (type == 'messagePhoto') {
+                        preview = '📷 Photo';
+                      } else if (type == 'messageDocument') {
+                        preview = '📎 Document';
+                      } else {
+                        preview = type?.replaceFirst('message', '') ?? '';
+                      }
+                    }
+                  }
+
+                  return Card(
+                    margin: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 4,
+                    ),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: _getTopicColor(topicInfo),
+                        child: Icon(
+                          isGeneral
+                              ? LucideIcons.hash
+                              : _getTopicIcon(topicInfo),
+                          color: Colors.white,
+                          size: 20,
+                        ),
+                      ),
+                      title: Row(
+                        children: [
+                          if (isPinned) ...[
+                            Icon(
+                              LucideIcons.pin,
+                              size: 14,
+                              color: Theme.of(context).colorScheme.primary,
+                            ),
+                            const SizedBox(width: 4),
+                          ],
+                          Expanded(
+                            child: Text(
+                              topicName,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: unreadCount > 0
+                                    ? FontWeight.bold
+                                    : FontWeight.normal,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      subtitle: preview != null
+                          ? Text(
+                              preview,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12),
+                            )
+                          : null,
+                      trailing: unreadCount > 0
+                          ? Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Theme.of(context).colorScheme.primary,
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: Text(
+                                unreadCount > 99 ? '99+' : '$unreadCount',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            )
+                          : const Icon(LucideIcons.chevronRight, size: 20),
+                      onTap: () {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => TelegramChatScreen(
+                              chatId: chatId,
+                              title: topicName,
+                              messageThreadId: forumTopicId,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  );
+                },
+              ),
+            ),
+    );
+  }
+}
