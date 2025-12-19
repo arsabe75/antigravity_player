@@ -84,13 +84,6 @@ class TelegramChat extends _$TelegramChat {
     try {
       final updateType = update['@type'];
 
-      // Debug: log updates for topic providers
-      if (messageThreadId != null) {
-        debugPrint(
-          'TelegramChat[$chatId/topic:$messageThreadId]: Update: $updateType',
-        );
-      }
-
       // Handle TDLib errors
       if (updateType == 'error') {
         debugPrint(
@@ -186,9 +179,6 @@ class TelegramChat extends _$TelegramChat {
       } else if (updateType == 'foundChatMessages') {
         // Response from searchChatMessages
         final msgsList = update['messages'] as List?;
-        debugPrint(
-          'TelegramChat: Received foundChatMessages with ${msgsList?.length ?? 0} messages',
-        );
 
         if (msgsList == null || msgsList.isEmpty) {
           state = state.copyWith(
@@ -200,9 +190,26 @@ class TelegramChat extends _$TelegramChat {
         }
 
         final msgs = msgsList.cast<Map<String, dynamic>>();
+
+        // Verify messages belong to this chat
+        if (msgs.first['chat_id'] != chatId) {
+          return; // Messages for different chat, ignore
+        }
+
+        // TDLib returns @extra in the response matching what we sent
+        if (messageThreadId != null) {
+          final extra = update['@extra'] as String?;
+          final expectedExtra = 'topic_$messageThreadId';
+
+          if (extra != expectedExtra) {
+            return; // Response for different topic
+          }
+        }
+
+        debugPrint('TelegramChat: Loaded ${msgs.length} messages');
+
         _retryCount = 0;
 
-        // No need to filter since searchChatMessages already filtered by topic
         final currentMessages = List<Map<String, dynamic>>.from(state.messages);
 
         for (final msg in msgs) {
@@ -218,9 +225,6 @@ class TelegramChat extends _$TelegramChat {
           return (b['id'] as int).compareTo(a['id'] as int);
         });
 
-        debugPrint(
-          'TelegramChat: Forum topic loaded ${currentMessages.length} messages',
-        );
         state = state.copyWith(
           messages: currentMessages,
           isLoading: false,
@@ -248,7 +252,7 @@ class TelegramChat extends _$TelegramChat {
 
       if (messageThreadId != null) {
         // For forum topics, use searchChatMessages with topic_id
-        // This properly filters messages by forum topic in TDLib
+        // Use @extra to identify this request when receiving the response
         debugPrint(
           'TelegramChat: Searching messages for forum topic chat=$chatId, topic=$messageThreadId',
         );
@@ -265,6 +269,7 @@ class TelegramChat extends _$TelegramChat {
           'offset': 0,
           'limit': 100,
           'filter': null,
+          '@extra': 'topic_$messageThreadId', // Identifier for this request
         });
       } else {
         _service.send({

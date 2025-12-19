@@ -76,24 +76,6 @@ class TelegramForum extends _$TelegramForum {
             .map((t) => t as Map<String, dynamic>)
             .toList();
 
-        // Debug: print each topic structure
-        for (int i = 0; i < topics.length; i++) {
-          final topic = topics[i];
-          debugPrint('TelegramForum: Topic $i keys: ${topic.keys.toList()}');
-          final info = topic['info'];
-          if (info != null) {
-            final infoMap = info as Map;
-            debugPrint(
-              'TelegramForum: Topic $i info keys: ${infoMap.keys.toList()}',
-            );
-            debugPrint(
-              'TelegramForum: Topic $i info: name=${info['name']}, message_thread_id=${info['message_thread_id']}, forum_topic_id=${info['forum_topic_id']}',
-            );
-          } else {
-            debugPrint('TelegramForum: Topic $i has no info field');
-          }
-        }
-
         // Merge topics - handle both direct and nested info structures
         final currentTopics = List<Map<String, dynamic>>.from(state.topics);
 
@@ -101,14 +83,12 @@ class TelegramForum extends _$TelegramForum {
           // TDLib forumTopic structure: { info: {...}, last_message: {...}, ... }
           final topicInfo = topic['info'] as Map<String, dynamic>?;
           if (topicInfo == null) {
-            debugPrint('TelegramForum: Skipping topic without info');
             continue;
           }
 
           // TDLib uses 'forum_topic_id' as the thread identifier
           final topicId = topicInfo['forum_topic_id'];
           if (topicId == null) {
-            debugPrint('TelegramForum: Skipping topic without forum_topic_id');
             continue;
           }
 
@@ -119,15 +99,12 @@ class TelegramForum extends _$TelegramForum {
 
           if (index == -1) {
             currentTopics.add(topic);
-            debugPrint('TelegramForum: Added topic: ${topicInfo['name']}');
           } else {
             currentTopics[index] = topic;
           }
         }
 
-        debugPrint(
-          'TelegramForum: Total topics after merge: ${currentTopics.length}',
-        );
+        debugPrint('TelegramForum: Loaded ${currentTopics.length} topics');
 
         // Sort by order (descending - higher order first)
         currentTopics.sort((a, b) {
