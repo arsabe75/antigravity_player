@@ -176,7 +176,33 @@ class MediaKitVideoRepository implements VideoRepository {
 
   @override
   Future<void> seekTo(Duration position) async {
-    await _player?.seek(position);
+    if (_player == null) return;
+
+    // TELEGRAM ANDROID-INSPIRED: Temporarily reduce buffer requirement for faster seek
+    // Similar to ExoPlayer's bufferForPlaybackMs being lower than minBufferMs
+    try {
+      // Reduce cache-secs to 3 seconds for immediate playback after seek
+      await (_player!.platform as dynamic).setProperty('cache-secs', '3');
+      debugPrint(
+        'MediaKit: Seek to ${position.inSeconds}s - reduced buffer for fast resume',
+      );
+    } catch (e) {
+      debugPrint('MediaKit: Could not reduce cache-secs: $e');
+    }
+
+    await _player!.seek(position);
+
+    // Restore normal buffer after 5 seconds
+    Future.delayed(const Duration(seconds: 5), () async {
+      if (_player != null) {
+        try {
+          await (_player!.platform as dynamic).setProperty('cache-secs', '20');
+          debugPrint('MediaKit: Restored normal buffer (20s)');
+        } catch (e) {
+          // Player may have been disposed
+        }
+      }
+    });
   }
 
   @override

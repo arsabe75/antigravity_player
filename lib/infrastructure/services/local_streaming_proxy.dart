@@ -40,6 +40,48 @@ class ProxyFileInfo {
   }
 }
 
+/// Metrics for tracking download speed per file.
+/// Used for adaptive buffer decisions inspired by Telegram Android's approach.
+class _DownloadMetrics {
+  DateTime _lastUpdateTime = DateTime.now();
+  int _bytesInWindow = 0;
+  int _totalBytesDownloaded = 0;
+  double _averageBytesPerSecond = 0;
+
+  /// Total bytes downloaded since tracking started
+  int get totalBytesDownloaded => _totalBytesDownloaded;
+  void recordBytes(int bytes) {
+    final now = DateTime.now();
+    final elapsed = now.difference(_lastUpdateTime).inMilliseconds;
+
+    _bytesInWindow += bytes;
+    _totalBytesDownloaded += bytes;
+
+    // Update average every 500ms
+    if (elapsed >= 500) {
+      final currentSpeed = _bytesInWindow / (elapsed / 1000);
+      // Exponential moving average
+      _averageBytesPerSecond = _averageBytesPerSecond == 0
+          ? currentSpeed
+          : (_averageBytesPerSecond * 0.7 + currentSpeed * 0.3);
+      _bytesInWindow = 0;
+      _lastUpdateTime = now;
+    }
+  }
+
+  /// Current download speed in bytes/second
+  double get bytesPerSecond => _averageBytesPerSecond;
+
+  /// Is the network considered "fast"? (> 2 MB/s)
+  bool get isFastNetwork => _averageBytesPerSecond > 2 * 1024 * 1024;
+
+  /// Is download stalled? (< 50 KB/s for more than 2s)
+  bool get isStalled {
+    final elapsed = DateTime.now().difference(_lastUpdateTime).inMilliseconds;
+    return elapsed > 2000 && _averageBytesPerSecond < 50 * 1024;
+  }
+}
+
 class LocalStreamingProxy {
   static final LocalStreamingProxy _instance = LocalStreamingProxy._internal();
   factory LocalStreamingProxy() => _instance;
@@ -69,6 +111,24 @@ class LocalStreamingProxy {
   static const int _offsetChangeCooldownMs =
       500; // 500ms cooldown between offset changes
 
+  // ============================================================
+  // TELEGRAM ANDROID-INSPIRED IMPROVEMENTS
+  // ============================================================
+
+  // PRELOAD ADAPTATIVO: Bytes mínimos antes de servir datos al player
+  // Inspired by ExoPlayer's bufferForPlaybackMs
+  static const int _minPreloadBytes = 2 * 1024 * 1024; // 2MB default preload
+  static const int _fastNetworkPreload = 512 * 1024; // 512KB for fast network
+  static const int _slowNetworkPreload =
+      4 * 1024 * 1024; // 4MB for slow network
+
+  // MÉTRICAS DE VELOCIDAD: Track download speed for adaptive decisions
+  final Map<int, _DownloadMetrics> _downloadMetrics = {};
+
+  // SEEK RÁPIDO: Track if we recently seeked to reduce buffer requirement
+  final Map<int, DateTime> _lastSeekTime = {};
+  static const int _seekBufferReductionWindowMs = 5000; // 5s after seek
+
   // Track all active HTTP request offsets per file for cleanup on close
   final Map<int, Set<int>> _activeHttpRequestOffsets = {};
 
@@ -76,6 +136,9 @@ class LocalStreamingProxy {
   // This helps distinguish actual playback from metadata probes at end-of-file (moov atom).
   // Stall recovery should only act on the primary playback position, not on metadata probes.
   final Map<int, int> _primaryPlaybackOffset = {};
+
+  // Track last served offset to detect seeks
+  final Map<int, int> _lastServedOffset = {};
 
   int get port => _port;
 
@@ -295,6 +358,18 @@ class LocalStreamingProxy {
         _primaryPlaybackOffset[fileId] = start;
       }
 
+      // SEEK DETECTION: Mark if this is a seek (jump > 1MB from last served offset)
+      final lastOffset = _lastServedOffset[fileId];
+      if (lastOffset != null) {
+        final jump = (start - lastOffset).abs();
+        if (jump > 1024 * 1024) {
+          _lastSeekTime[fileId] = DateTime.now();
+          debugPrint(
+            'Proxy: Detected seek for $fileId: $lastOffset -> $start (jump: ${jump ~/ 1024}KB)',
+          );
+        }
+      }
+
       // 2. Ensure File Info is available
       if (!_filePaths.containsKey(fileId) || _filePaths[fileId]!.path.isEmpty) {
         await _fetchFileInfo(fileId);
@@ -428,6 +503,13 @@ class LocalStreamingProxy {
 
             currentReadOffset += data.length;
             remainingToSend -= data.length;
+
+            // Track download metrics for adaptive decisions
+            _downloadMetrics.putIfAbsent(fileId, () => _DownloadMetrics());
+            _downloadMetrics[fileId]!.recordBytes(data.length);
+
+            // Update last served offset for seek detection
+            _lastServedOffset[fileId] = currentReadOffset;
 
             // Ensure download is started at the exact offset the player needs
             _startDownloadAtOffset(fileId, currentReadOffset);
@@ -677,8 +759,8 @@ class LocalStreamingProxy {
   }
 
   /// Direct 1:1 mapping: player's Range request → TDLib downloadFile offset
-  /// No predictive logic - we trust the player to know what it needs.
   /// Following Telegram Android's FileStreamLoadOperation pattern.
+  /// IMPROVED: Dynamic priority based on distance to playback position.
   void _startDownloadAtOffset(int fileId, int requestedOffset) {
     // Check if file is already complete - no download needed
     final cached = _filePaths[fileId];
@@ -718,9 +800,39 @@ class LocalStreamingProxy {
       return;
     }
 
+    // TELEGRAM ANDROID-INSPIRED: Calculate dynamic priority based on distance
+    // to primary playback position. Closer = higher priority.
+    final primaryOffset = _primaryPlaybackOffset[fileId] ?? 0;
+    final distanceToPlayback = (requestedOffset - primaryOffset).abs();
+    final priority = _calculateDynamicPriority(distanceToPlayback);
+
+    // ADAPTIVE PRELOAD: Determine minimum bytes before we start serving
+    // Based on network speed and whether we just seeked
+    final metrics = _downloadMetrics[fileId];
+    final lastSeek = _lastSeekTime[fileId];
+    final isRecentSeek =
+        lastSeek != null &&
+        now.difference(lastSeek).inMilliseconds < _seekBufferReductionWindowMs;
+
+    int preloadBytes = _minPreloadBytes;
+    if (isRecentSeek) {
+      // After seek, use minimal preload for faster resume (like ExoPlayer's bufferForPlaybackMs)
+      preloadBytes = _fastNetworkPreload;
+      debugPrint(
+        'Proxy: Post-seek mode for $fileId - using fast preload (${preloadBytes ~/ 1024}KB)',
+      );
+    } else if (metrics != null) {
+      if (metrics.isFastNetwork) {
+        preloadBytes = _fastNetworkPreload;
+      } else if (metrics.isStalled) {
+        preloadBytes = _slowNetworkPreload;
+      }
+    }
+
     // Start download at exactly the offset the player requested
     debugPrint(
-      'Proxy: Downloading from offset $requestedOffset for $fileId (priority 32)',
+      'Proxy: Downloading from offset $requestedOffset for $fileId '
+      '(priority: $priority, preload: ${preloadBytes ~/ 1024}KB)',
     );
 
     _activeDownloadOffset[fileId] = requestedOffset;
@@ -729,10 +841,25 @@ class LocalStreamingProxy {
     TelegramService().send({
       '@type': 'downloadFile',
       'file_id': fileId,
-      'priority': 32, // Highest priority for player's current request
-      'offset': requestedOffset, // EXACT offset from player's Range header
-      'limit': 0, // Download from offset to end of file
+      'priority': priority,
+      'offset': requestedOffset,
+      'limit': 0,
       'synchronous': false,
     });
+  }
+
+  /// Calculate dynamic priority based on distance from playback position.
+  /// Inspired by Telegram Android's FileLoadOperation priority handling.
+  /// Returns priority 8-32 where 32 is highest.
+  int _calculateDynamicPriority(int distanceBytes) {
+    if (distanceBytes < 1024 * 1024) {
+      return 32; // < 1MB: Maximum priority (immediate playback)
+    } else if (distanceBytes < 5 * 1024 * 1024) {
+      return 24; // < 5MB: High priority (near-term playback)
+    } else if (distanceBytes < 10 * 1024 * 1024) {
+      return 16; // < 10MB: Medium priority (buffer building)
+    } else {
+      return 8; // >= 10MB: Low priority (preload/metadata)
+    }
   }
 }
