@@ -13,13 +13,6 @@ import 'player_state.dart';
 
 part 'player_notifier.g.dart';
 
-// Repository Provider
-
-@riverpod
-PlaybackStorageService playbackStorageService(Ref ref) {
-  return PlaybackStorageService();
-}
-
 // Player Notifier
 // Riverpod 3: @riverpod sobre una clase genera un NotifierProvider (o AsyncNotifierProvider si build devuelve Future).
 // La clase debe extender de _$NombreDeLaClase (generated mixin).

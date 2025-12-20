@@ -5,10 +5,20 @@ import '../../infrastructure/repositories/fvp_video_repository.dart';
 import '../../infrastructure/services/player_settings_service.dart';
 import '../../domain/repositories/streaming_repository.dart';
 import '../../infrastructure/repositories/local_streaming_repository.dart';
+import '../../infrastructure/services/playback_storage_service.dart';
+import '../../infrastructure/services/recent_videos_service.dart';
+import '../../application/use_cases/load_video_use_case.dart';
+import '../../application/use_cases/seek_video_use_case.dart';
+import '../../application/use_cases/toggle_playback_use_case.dart';
 
 // Helper provider to read settings
 final playerSettingsServiceProvider = Provider(
   (ref) => PlayerSettingsService(),
+);
+
+// Provider for playback storage service
+final playbackStorageServiceProvider = Provider(
+  (ref) => PlaybackStorageService(),
 );
 
 // The generic video repository provider
@@ -53,3 +63,34 @@ final videoRepositoryProvider = Provider.autoDispose<VideoRepository>((ref) {
 final streamingRepositoryProvider = Provider<StreamingRepository>((ref) {
   return LocalStreamingRepository();
 });
+
+// ============================================================================
+// Use Case Providers
+// ============================================================================
+
+/// Provider for LoadVideoUseCase with injected dependencies
+final loadVideoUseCaseProvider = Provider.autoDispose<LoadVideoUseCase>((ref) {
+  return LoadVideoUseCase(
+    videoRepository: ref.watch(videoRepositoryProvider),
+    streamingRepository: ref.watch(streamingRepositoryProvider),
+    storageService: ref.watch(playbackStorageServiceProvider),
+    recentVideosService: RecentVideosService(),
+  );
+});
+
+/// Provider for SeekVideoUseCase with injected dependencies
+final seekVideoUseCaseProvider = Provider.autoDispose<SeekVideoUseCase>((ref) {
+  return SeekVideoUseCase(
+    videoRepository: ref.watch(videoRepositoryProvider),
+    storageService: ref.watch(playbackStorageServiceProvider),
+  );
+});
+
+/// Provider for TogglePlaybackUseCase with injected dependencies
+final togglePlaybackUseCaseProvider =
+    Provider.autoDispose<TogglePlaybackUseCase>((ref) {
+      return TogglePlaybackUseCase(
+        videoRepository: ref.watch(videoRepositoryProvider),
+        storageService: ref.watch(playbackStorageServiceProvider),
+      );
+    });

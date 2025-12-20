@@ -9,54 +9,6 @@ part of 'player_notifier.dart';
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
 
-@ProviderFor(playbackStorageService)
-const playbackStorageServiceProvider = PlaybackStorageServiceProvider._();
-
-final class PlaybackStorageServiceProvider
-    extends
-        $FunctionalProvider<
-          PlaybackStorageService,
-          PlaybackStorageService,
-          PlaybackStorageService
-        >
-    with $Provider<PlaybackStorageService> {
-  const PlaybackStorageServiceProvider._()
-    : super(
-        from: null,
-        argument: null,
-        retry: null,
-        name: r'playbackStorageServiceProvider',
-        isAutoDispose: true,
-        dependencies: null,
-        $allTransitiveDependencies: null,
-      );
-
-  @override
-  String debugGetCreateSourceHash() => _$playbackStorageServiceHash();
-
-  @$internal
-  @override
-  $ProviderElement<PlaybackStorageService> $createElement(
-    $ProviderPointer pointer,
-  ) => $ProviderElement(pointer);
-
-  @override
-  PlaybackStorageService create(Ref ref) {
-    return playbackStorageService(ref);
-  }
-
-  /// {@macro riverpod.override_with_value}
-  Override overrideWithValue(PlaybackStorageService value) {
-    return $ProviderOverride(
-      origin: this,
-      providerOverride: $SyncValueProvider<PlaybackStorageService>(value),
-    );
-  }
-}
-
-String _$playbackStorageServiceHash() =>
-    r'f296c36645a0c5f35e53bbcbf9a8d18cd0dd69b8';
-
 @ProviderFor(PlayerNotifier)
 const playerProvider = PlayerNotifierProvider._();
 
