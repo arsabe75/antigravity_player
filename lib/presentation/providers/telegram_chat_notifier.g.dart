@@ -58,7 +58,7 @@ final class TelegramChatProvider
   }
 }
 
-String _$telegramChatHash() => r'285c841a43484bcd9cf6e3606c5f43f7b2cf02c7';
+String _$telegramChatHash() => r'c864d0672f7d7ae7578c15a54165e8ec3e7edce6';
 
 final class TelegramChatFamily extends $Family
     with
