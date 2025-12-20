@@ -95,7 +95,7 @@ class HomeScreen extends ConsumerWidget {
                             SizedBox(
                               width: 200,
                               height: 50,
-                              child: ElevatedButton.icon(
+                              child: OutlinedButton.icon(
                                 onPressed: () => _pickFile(context, ref),
                                 icon: const Icon(LucideIcons.folderOpen),
                                 label: const Text('Open Local File(s)'),
