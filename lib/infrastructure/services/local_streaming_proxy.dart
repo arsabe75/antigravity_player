@@ -780,9 +780,13 @@ class LocalStreamingProxy {
 
     // Check if current download will soon provide the data we need
     // (within 10MB of the download frontier)
+    // CRITICAL: Only wait if download is ACTUALLY ACTIVE, otherwise we'd wait forever!
     final downloadFrontier = currentDownloadOffset + currentPrefix;
     final distanceFromFrontier = requestedOffset - downloadFrontier;
-    if (distanceFromFrontier >= 0 && distanceFromFrontier < 10 * 1024 * 1024) {
+    final isDownloading = cached?.isDownloadingActive ?? false;
+    if (isDownloading &&
+        distanceFromFrontier >= 0 &&
+        distanceFromFrontier < 10 * 1024 * 1024) {
       // Current download will reach our offset soon, don't restart
       return;
     }
