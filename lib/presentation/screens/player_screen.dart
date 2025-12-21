@@ -298,7 +298,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                       // Top Bar (only when not fullscreen)
                       if (!state.isFullscreen)
                         PlayerTopBar(
-                          videoTitle: state.currentVideoPath,
+                          videoTitle:
+                              state.currentVideoTitle ?? state.currentVideoPath,
                           onBack: _handleBack,
                           onClose: () => windowManager.close(),
                         ),

@@ -105,6 +105,7 @@ class PlayerNotifier extends _$PlayerNotifier {
     try {
       state = state.copyWith(
         currentVideoPath: path,
+        currentVideoTitle: title,
         error: null,
         position: Duration.zero,
         duration: Duration.zero,
