@@ -19,6 +19,7 @@ abstract class PlayerState with _$PlayerState {
     int? currentAudioTrack,
     int? currentSubtitleTrack,
     String? currentVideoPath,
+    String? currentVideoTitle,
     String? error,
     @Default('media_kit') String playerBackend,
   }) = _PlayerState;
