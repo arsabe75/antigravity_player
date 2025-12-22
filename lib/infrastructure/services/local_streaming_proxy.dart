@@ -350,24 +350,35 @@ class LocalStreamingProxy {
       _activeHttpRequestOffsets.putIfAbsent(fileId, () => {});
       _activeHttpRequestOffsets[fileId]!.add(start);
 
-      // PRIMARY PLAYBACK TRACKING: Track the lowest offset as the "primary playback" position.
-      // This helps stall recovery prioritize actual playback over metadata probes (moov atom at EOF).
-      // Only update if this offset is earlier than the current primary, or if no primary is set.
-      final existingPrimary = _primaryPlaybackOffset[fileId];
-      if (existingPrimary == null || start < existingPrimary) {
-        _primaryPlaybackOffset[fileId] = start;
-      }
-
       // SEEK DETECTION: Mark if this is a seek (jump > 1MB from last served offset)
+      // IMPORTANT: Do this BEFORE primary tracking so we can reset primary on seek
+      bool isSeekRequest = false;
       final lastOffset = _lastServedOffset[fileId];
       if (lastOffset != null) {
         final jump = (start - lastOffset).abs();
         if (jump > 1024 * 1024) {
+          isSeekRequest = true;
           _lastSeekTime[fileId] = DateTime.now();
+          // CRITICAL FIX: When a seek is detected, reset the primary offset to the seek target
+          // This prevents the primary from getting stuck at 0 when seeking forward
+          _primaryPlaybackOffset[fileId] = start;
           debugPrint(
-            'Proxy: Detected seek for $fileId: $lastOffset -> $start (jump: ${jump ~/ 1024}KB)',
+            'Proxy: Detected seek for $fileId: $lastOffset -> $start (jump: ${jump ~/ 1024}KB), primary reset to $start',
           );
         }
+      }
+
+      // PRIMARY PLAYBACK TRACKING: Track the lowest RECENT offset as the "primary playback" position.
+      // This helps stall recovery prioritize actual playback over metadata probes (moov atom at EOF).
+      // Only update if this offset is earlier than the current primary, or if no primary is set,
+      // or if this is the first request after a seek.
+      final existingPrimary = _primaryPlaybackOffset[fileId];
+      if (existingPrimary == null) {
+        _primaryPlaybackOffset[fileId] = start;
+      } else if (!isSeekRequest && start < existingPrimary) {
+        // Only track lower offsets if this is NOT a seek request
+        // (seek requests already set the primary above)
+        _primaryPlaybackOffset[fileId] = start;
       }
 
       // 2. Ensure File Info is available
@@ -761,6 +772,7 @@ class LocalStreamingProxy {
   /// Direct 1:1 mapping: player's Range request → TDLib downloadFile offset
   /// Following Telegram Android's FileStreamLoadOperation pattern.
   /// IMPROVED: Dynamic priority based on distance to playback position.
+  /// STABILIZED: Longer cooldown post-seek to prevent ping-pong downloads.
   void _startDownloadAtOffset(int fileId, int requestedOffset) {
     // Check if file is already complete - no download needed
     final cached = _filePaths[fileId];
@@ -779,14 +791,14 @@ class LocalStreamingProxy {
     }
 
     // Check if current download will soon provide the data we need
-    // (within 10MB of the download frontier)
+    // (within 5MB of the download frontier - reduced from 10MB for stability)
     // CRITICAL: Only wait if download is ACTUALLY ACTIVE, otherwise we'd wait forever!
     final downloadFrontier = currentDownloadOffset + currentPrefix;
     final distanceFromFrontier = requestedOffset - downloadFrontier;
     final isDownloading = cached?.isDownloadingActive ?? false;
     if (isDownloading &&
         distanceFromFrontier >= 0 &&
-        distanceFromFrontier < 10 * 1024 * 1024) {
+        distanceFromFrontier < 5 * 1024 * 1024) {
       // Current download will reach our offset soon, don't restart
       return;
     }
@@ -796,27 +808,51 @@ class LocalStreamingProxy {
       return;
     }
 
-    // Throttle offset changes to avoid excessive downloadFile calls
     final now = DateTime.now();
-    final lastChange = _lastOffsetChangeTime[fileId];
-    if (lastChange != null &&
-        now.difference(lastChange).inMilliseconds < _offsetChangeCooldownMs) {
-      return;
+    final lastSeek = _lastSeekTime[fileId];
+    final isRecentSeek =
+        lastSeek != null &&
+        now.difference(lastSeek).inMilliseconds < _seekBufferReductionWindowMs;
+
+    // POST-SEEK STABILITY: During the post-seek window, use a longer cooldown
+    // and only allow offset changes if they're close to the primary playback offset.
+    // This prevents metadata probes (moov atom at EOF) from hijacking the download.
+    final primaryOffset = _primaryPlaybackOffset[fileId] ?? 0;
+    final distanceToPlayback = (requestedOffset - primaryOffset).abs();
+
+    if (isRecentSeek) {
+      // Use 2s cooldown post-seek (vs 500ms normal)
+      final postSeekCooldownMs = 2000;
+      final lastChange = _lastOffsetChangeTime[fileId];
+      if (lastChange != null &&
+          now.difference(lastChange).inMilliseconds < postSeekCooldownMs) {
+        // During post-seek cooldown, only allow changes VERY close to primary offset
+        // to avoid metadata probes (typically at file end) interrupting playback download
+        if (distanceToPlayback > 2 * 1024 * 1024) {
+          // > 2MB from primary = reject
+          debugPrint(
+            'Proxy: Post-seek cooldown - rejecting far offset $requestedOffset '
+            '(${distanceToPlayback ~/ 1024}KB from primary $primaryOffset)',
+          );
+          return;
+        }
+      }
+    } else {
+      // Normal throttle: 500ms cooldown between offset changes
+      final lastChange = _lastOffsetChangeTime[fileId];
+      if (lastChange != null &&
+          now.difference(lastChange).inMilliseconds < _offsetChangeCooldownMs) {
+        return;
+      }
     }
 
     // TELEGRAM ANDROID-INSPIRED: Calculate dynamic priority based on distance
     // to primary playback position. Closer = higher priority.
-    final primaryOffset = _primaryPlaybackOffset[fileId] ?? 0;
-    final distanceToPlayback = (requestedOffset - primaryOffset).abs();
     final priority = _calculateDynamicPriority(distanceToPlayback);
 
     // ADAPTIVE PRELOAD: Determine minimum bytes before we start serving
     // Based on network speed and whether we just seeked
     final metrics = _downloadMetrics[fileId];
-    final lastSeek = _lastSeekTime[fileId];
-    final isRecentSeek =
-        lastSeek != null &&
-        now.difference(lastSeek).inMilliseconds < _seekBufferReductionWindowMs;
 
     int preloadBytes = _minPreloadBytes;
     if (isRecentSeek) {
