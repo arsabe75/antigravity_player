@@ -125,14 +125,9 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                         // final thumbnail = ... (handle thumbnail later)
 
                         // Get video title with multiple fallbacks:
-                        // 1. file_name from video metadata
-                        // 2. caption text from message
+                        // 1. caption text from message (priority)
+                        // 2. file_name from video metadata
                         // 3. Default fallback
-                        String? rawFileName = video['file_name']?.toString();
-                        if (rawFileName != null && rawFileName.trim().isEmpty) {
-                          rawFileName = null;
-                        }
-
                         String? captionText;
                         final caption = content['caption'];
                         if (caption != null && caption['text'] != null) {
@@ -147,8 +142,13 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                           }
                         }
 
+                        String? rawFileName = video['file_name']?.toString();
+                        if (rawFileName != null && rawFileName.trim().isEmpty) {
+                          rawFileName = null;
+                        }
+
                         final fileName =
-                            rawFileName ?? captionText ?? 'Video sin título';
+                            captionText ?? rawFileName ?? 'Video sin título';
 
                         return Card(
                           clipBehavior: Clip.antiAlias,
