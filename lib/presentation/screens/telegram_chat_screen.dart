@@ -117,13 +117,37 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                           ),
                       delegate: SliverChildBuilderDelegate((context, index) {
                         final msg = videoMessages[index];
-                        final video = msg['content']['video'];
+                        final content = msg['content'];
+                        final video = content['video'];
                         final fileId = video['video']['id'];
                         final size = video['video']['size'];
                         // final thumbnail = ... (handle thumbnail later)
 
+                        // Get video title with multiple fallbacks:
+                        // 1. file_name from video metadata
+                        // 2. caption text from message
+                        // 3. Default fallback
+                        String? rawFileName = video['file_name']?.toString();
+                        if (rawFileName != null && rawFileName.trim().isEmpty) {
+                          rawFileName = null;
+                        }
+
+                        String? captionText;
+                        final caption = content['caption'];
+                        if (caption != null && caption['text'] != null) {
+                          final text = caption['text'].toString().trim();
+                          if (text.isNotEmpty) {
+                            // Take first line of caption as title
+                            captionText = text.split('\n').first;
+                            if (captionText.length > 100) {
+                              captionText =
+                                  '${captionText.substring(0, 97)}...';
+                            }
+                          }
+                        }
+
                         final fileName =
-                            video['file_name'] as String? ?? 'Video sin título';
+                            rawFileName ?? captionText ?? 'Video sin título';
 
                         return Card(
                           clipBehavior: Clip.antiAlias,
