@@ -9,10 +9,6 @@ import 'package:window_manager/window_manager.dart';
 import '../providers/telegram_auth_notifier.dart';
 import '../../infrastructure/services/local_streaming_proxy.dart';
 import 'telegram_login_screen.dart';
-import 'telegram_selection_screen.dart';
-import 'telegram_chat_screen.dart';
-import 'telegram_topics_screen.dart';
-import 'telegram_storage_screen.dart';
 
 class TelegramScreen extends ConsumerStatefulWidget {
   const TelegramScreen({super.key});
@@ -122,13 +118,11 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
           IconButton(
             icon: const Icon(LucideIcons.plus),
             onPressed: () async {
-              final result = await Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const TelegramSelectionScreen(),
-                ),
+              final result = await context.push<Map<String, dynamic>>(
+                '/telegram/selection',
               );
 
-              if (result != null && result is Map<String, dynamic>) {
+              if (result != null) {
                 setState(() {
                   if (!_favorites.any((c) => c['id'] == result['id'])) {
                     _favorites.add(result);
@@ -142,11 +136,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
             icon: const Icon(LucideIcons.hardDrive),
             tooltip: 'Storage',
             onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => const TelegramStorageScreen(),
-                ),
-              );
+              context.push('/telegram/storage');
             },
           ),
           IconButton(
@@ -210,23 +200,15 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                     onTap: () {
                       if (isForum) {
                         // Navigate to topics screen for forum groups
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => TelegramTopicsScreen(
-                              chatId: chat['id'],
-                              title: title,
-                            ),
-                          ),
+                        context.push(
+                          '/telegram/topics/${chat['id']}',
+                          extra: title,
                         );
                       } else {
                         // Navigate directly to chat screen for channels/regular groups
-                        Navigator.of(context).push(
-                          MaterialPageRoute(
-                            builder: (_) => TelegramChatScreen(
-                              chatId: chat['id'],
-                              title: title,
-                            ),
-                          ),
+                        context.push(
+                          '/telegram/chat/${chat['id']}',
+                          extra: {'title': title},
                         );
                       }
                     },

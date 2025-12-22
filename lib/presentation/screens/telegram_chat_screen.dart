@@ -52,7 +52,8 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
       debugPrint(
         'TelegramChatScreen: Auto-loading more messages (Current videos: ${videoMessages.length})',
       );
-      Future.microtask(() {
+      // Use addPostFrameCallback to avoid modifying provider during build
+      WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
           ref.read(telegramChatProvider(_params).notifier).loadMoreMessages();
         }
