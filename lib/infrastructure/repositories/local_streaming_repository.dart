@@ -13,4 +13,24 @@ class LocalStreamingRepository implements StreamingRepository {
 
   @override
   int get port => _proxy.port;
+
+  @override
+  void previewSeekTarget(int fileId, int estimatedOffset) {
+    _proxy.previewSeekTarget(fileId, estimatedOffset);
+  }
+
+  @override
+  Future<int> getByteOffsetForTime(
+    int fileId,
+    int timeMs,
+    int totalDurationMs,
+    int totalBytes,
+  ) {
+    return _proxy.getByteOffsetForTime(
+      fileId,
+      timeMs,
+      totalDurationMs,
+      totalBytes,
+    );
+  }
 }

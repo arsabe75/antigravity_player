@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'telegram_service.dart';
+import 'mp4_sample_table.dart';
 
 class ProxyFileInfo {
   final String path;
@@ -80,6 +81,34 @@ class _DownloadMetrics {
     final elapsed = DateTime.now().difference(_lastUpdateTime).inMilliseconds;
     return elapsed > 2000 && _averageBytesPerSecond < 50 * 1024;
   }
+
+  // ============================================================
+  // STALL TRACKING FOR ADAPTIVE POST-SEEK BUFFER
+  // ============================================================
+
+  int _recentStallCount = 0;
+  DateTime? _lastStallTime;
+
+  /// Record a stall event
+  void recordStall() {
+    _recentStallCount++;
+    _lastStallTime = DateTime.now();
+  }
+
+  /// Returns stall count in last 30 seconds
+  int get recentStallCount {
+    final now = DateTime.now();
+    if (_lastStallTime != null &&
+        now.difference(_lastStallTime!).inSeconds > 30) {
+      _recentStallCount = 0; // Reset after 30s without stalls
+    }
+    return _recentStallCount;
+  }
+
+  /// Reset stall count (e.g., after successful playback)
+  void resetStallCount() {
+    _recentStallCount = 0;
+  }
 }
 
 class LocalStreamingProxy {
@@ -108,8 +137,6 @@ class LocalStreamingProxy {
 
   // Throttle offset changes to avoid excessive downloadFile calls
   final Map<int, DateTime> _lastOffsetChangeTime = {};
-  static const int _offsetChangeCooldownMs =
-      500; // 500ms cooldown between offset changes
 
   // ============================================================
   // TELEGRAM ANDROID-INSPIRED IMPROVEMENTS
@@ -118,7 +145,8 @@ class LocalStreamingProxy {
   // PRELOAD ADAPTATIVO: Bytes mínimos antes de servir datos al player
   // Inspired by ExoPlayer's bufferForPlaybackMs
   static const int _minPreloadBytes = 2 * 1024 * 1024; // 2MB default preload
-  static const int _fastNetworkPreload = 512 * 1024; // 512KB for fast network
+  static const int _fastNetworkPreload =
+      1024 * 1024; // 1MB for fast network (increased from 512KB)
   static const int _slowNetworkPreload =
       4 * 1024 * 1024; // 4MB for slow network
 
@@ -814,36 +842,15 @@ class LocalStreamingProxy {
         lastSeek != null &&
         now.difference(lastSeek).inMilliseconds < _seekBufferReductionWindowMs;
 
-    // POST-SEEK STABILITY: During the post-seek window, use a longer cooldown
-    // and only allow offset changes if they're close to the primary playback offset.
-    // This prevents metadata probes (moov atom at EOF) from hijacking the download.
+    // Calculate distance to primary offset for priority calculation
     final primaryOffset = _primaryPlaybackOffset[fileId] ?? 0;
     final distanceToPlayback = (requestedOffset - primaryOffset).abs();
 
-    if (isRecentSeek) {
-      // Use 2s cooldown post-seek (vs 500ms normal)
-      final postSeekCooldownMs = 2000;
-      final lastChange = _lastOffsetChangeTime[fileId];
-      if (lastChange != null &&
-          now.difference(lastChange).inMilliseconds < postSeekCooldownMs) {
-        // During post-seek cooldown, only allow changes VERY close to primary offset
-        // to avoid metadata probes (typically at file end) interrupting playback download
-        if (distanceToPlayback > 2 * 1024 * 1024) {
-          // > 2MB from primary = reject
-          debugPrint(
-            'Proxy: Post-seek cooldown - rejecting far offset $requestedOffset '
-            '(${distanceToPlayback ~/ 1024}KB from primary $primaryOffset)',
-          );
-          return;
-        }
-      }
-    } else {
-      // Normal throttle: 500ms cooldown between offset changes
-      final lastChange = _lastOffsetChangeTime[fileId];
-      if (lastChange != null &&
-          now.difference(lastChange).inMilliseconds < _offsetChangeCooldownMs) {
-        return;
-      }
+    // SIMPLE THROTTLE: 100ms cooldown between offset changes to prevent flooding
+    // NO REJECTION based on distance - player knows what data it needs
+    final lastChange = _lastOffsetChangeTime[fileId];
+    if (lastChange != null && now.difference(lastChange).inMilliseconds < 100) {
+      return;
     }
 
     // TELEGRAM ANDROID-INSPIRED: Calculate dynamic priority based on distance
@@ -851,20 +858,32 @@ class LocalStreamingProxy {
     final priority = _calculateDynamicPriority(distanceToPlayback);
 
     // ADAPTIVE PRELOAD: Determine minimum bytes before we start serving
-    // Based on network speed and whether we just seeked
+    // Based on network speed, recent stalls, and whether we just seeked
     final metrics = _downloadMetrics[fileId];
 
     int preloadBytes = _minPreloadBytes;
     if (isRecentSeek) {
-      // After seek, use minimal preload for faster resume (like ExoPlayer's bufferForPlaybackMs)
-      preloadBytes = _fastNetworkPreload;
-      debugPrint(
-        'Proxy: Post-seek mode for $fileId - using fast preload (${preloadBytes ~/ 1024}KB)',
-      );
+      // GRADUAL POST-SEEK BUFFER: Check for recent stalls before using fast preload
+      if (metrics != null && metrics.recentStallCount > 0) {
+        // Had stalls recently - use conservative buffer even after seek
+        preloadBytes = _minPreloadBytes; // 2MB (safer)
+        debugPrint(
+          'Proxy: Post-seek with ${metrics.recentStallCount} recent stalls for $fileId - '
+          'using conservative buffer (${preloadBytes ~/ 1024}KB)',
+        );
+      } else {
+        // No recent stalls - use fast preload for quick seek response
+        preloadBytes = _fastNetworkPreload; // 512KB (fast)
+        debugPrint(
+          'Proxy: Post-seek mode for $fileId - using fast preload (${preloadBytes ~/ 1024}KB)',
+        );
+      }
     } else if (metrics != null) {
       if (metrics.isFastNetwork) {
         preloadBytes = _fastNetworkPreload;
       } else if (metrics.isStalled) {
+        // Record the stall for adaptive buffering
+        metrics.recordStall();
         preloadBytes = _slowNetworkPreload;
       }
     }
@@ -900,6 +919,112 @@ class LocalStreamingProxy {
       return 16; // < 10MB: Medium priority (buffer building)
     } else {
       return 8; // >= 10MB: Low priority (preload/metadata)
+    }
+  }
+
+  // ============================================================
+  // SEEK PREVIEW PRELOADING
+  // ============================================================
+
+  // Cache for parsed MP4 sample tables
+  final Map<int, Mp4SampleTable?> _sampleTableCache = {};
+
+  // Track last preview time to avoid spamming
+  final Map<int, DateTime> _lastPreviewTime = {};
+  static const int _previewCooldownMs =
+      100; // Reduced from 300ms for faster preview
+
+  /// Preview seek target - start downloading at estimated offset with lower priority
+  /// This is called during slider drag to preload data before user releases
+  void previewSeekTarget(int fileId, int estimatedOffset) {
+    final cached = _filePaths[fileId];
+    if (cached == null || cached.isCompleted) return;
+
+    // Check cooldown to avoid spamming TDLib during rapid dragging
+    final now = DateTime.now();
+    final lastPreview = _lastPreviewTime[fileId];
+    if (lastPreview != null &&
+        now.difference(lastPreview).inMilliseconds < _previewCooldownMs) {
+      return;
+    }
+
+    // If data is already available at this offset, skip
+    if (cached.availableBytesFrom(estimatedOffset) > 0) {
+      return;
+    }
+
+    // Start download with medium priority (16) - not highest to avoid
+    // interrupting active playback if video is still playing during drag
+    debugPrint('Proxy: Preview seek preload at $estimatedOffset for $fileId');
+
+    _lastPreviewTime[fileId] = now;
+
+    TelegramService().send({
+      '@type': 'downloadFile',
+      'file_id': fileId,
+      'priority': 16,
+      'offset': estimatedOffset,
+      'limit': 2 * 1024 * 1024, // Preload 2MB around target
+      'synchronous': false,
+    });
+  }
+
+  /// Get accurate byte offset for time using parsed sample table
+  /// Falls back to linear estimation if parsing fails
+  Future<int> getByteOffsetForTime(
+    int fileId,
+    int timeMs,
+    int totalDurationMs,
+    int totalBytes,
+  ) async {
+    // Try to get cached sample table
+    if (!_sampleTableCache.containsKey(fileId)) {
+      await _parseSampleTable(fileId);
+    }
+
+    final sampleTable = _sampleTableCache[fileId];
+    if (sampleTable != null) {
+      return sampleTable.getByteOffsetForTime(timeMs);
+    }
+
+    // Fallback: linear estimation (works for CBR, approximate for VBR)
+    if (totalDurationMs <= 0) return 0;
+    return (timeMs / totalDurationMs * totalBytes).round();
+  }
+
+  Future<void> _parseSampleTable(int fileId) async {
+    final fileInfo = _filePaths[fileId];
+    if (fileInfo == null || fileInfo.path.isEmpty) {
+      _sampleTableCache[fileId] = null;
+      return;
+    }
+
+    try {
+      final file = File(fileInfo.path);
+      if (!await file.exists()) {
+        _sampleTableCache[fileId] = null;
+        return;
+      }
+
+      final raf = await file.open(mode: FileMode.read);
+      try {
+        _sampleTableCache[fileId] = await Mp4SampleTable.parse(
+          raf,
+          fileInfo.totalSize,
+        );
+        if (_sampleTableCache[fileId] != null) {
+          debugPrint(
+            'Proxy: Parsed MP4 sample table for $fileId: '
+            '${_sampleTableCache[fileId]!.samples.length} samples, '
+            '${_sampleTableCache[fileId]!.keyframeSampleIndices.length} keyframes',
+          );
+        }
+      } finally {
+        await raf.close();
+      }
+    } catch (e) {
+      debugPrint('Proxy: Failed to parse sample table for $fileId: $e');
+      _sampleTableCache[fileId] = null;
     }
   }
 }

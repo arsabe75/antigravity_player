@@ -25,6 +25,7 @@ class PlayerBottomBar extends StatelessWidget {
   final VoidCallback onNext;
   final VoidCallback onPrevious;
   final ValueChanged<Duration> onSeek;
+  final ValueChanged<Duration>? onSeekPreview;
   final ValueChanged<double> onVolumeChanged;
   final VoidCallback onToggleMute;
   final ValueChanged<double> onSpeedChanged;
@@ -50,6 +51,7 @@ class PlayerBottomBar extends StatelessWidget {
     required this.onNext,
     required this.onPrevious,
     required this.onSeek,
+    this.onSeekPreview,
     required this.onVolumeChanged,
     required this.onToggleMute,
     required this.onSpeedChanged,
@@ -90,6 +92,7 @@ class PlayerBottomBar extends StatelessWidget {
               position: position,
               duration: duration,
               onSeek: onSeek,
+              onSeekPreview: onSeekPreview,
             ),
             // Controls Row
             Row(

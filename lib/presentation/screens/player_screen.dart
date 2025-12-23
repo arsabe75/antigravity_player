@@ -205,6 +205,46 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
   }
 
+  /// Handle seek preview for Telegram streaming videos
+  /// Extracts file ID from proxy URL and calls previewSeekTarget with accurate byte offset
+  void _handleSeekPreview(PlayerState state, Duration previewDuration) {
+    final videoPath = state.currentVideoPath;
+    if (videoPath == null) return;
+
+    // Only for Telegram streaming videos (proxy URLs)
+    if (!videoPath.contains('/stream?file_id=')) return;
+
+    try {
+      final uri = Uri.parse(videoPath);
+      final fileIdStr = uri.queryParameters['file_id'];
+      final sizeStr = uri.queryParameters['size'];
+
+      if (fileIdStr == null) return;
+
+      final fileId = int.tryParse(fileIdStr);
+      final totalBytes = int.tryParse(sizeStr ?? '') ?? 0;
+
+      if (fileId == null || totalBytes <= 0) return;
+
+      final durationMs = state.duration.inMilliseconds;
+      final previewMs = previewDuration.inMilliseconds;
+
+      if (durationMs <= 0) return;
+
+      // Get streaming repository and request seek preview preload
+      final streamingRepo = ref.read(streamingRepositoryProvider);
+
+      // Use getByteOffsetForTime for accurate byte offset (uses MP4 sample table if available)
+      streamingRepo
+          .getByteOffsetForTime(fileId, previewMs, durationMs, totalBytes)
+          .then((byteOffset) {
+            streamingRepo.previewSeekTarget(fileId, byteOffset);
+          });
+    } catch (e) {
+      // Ignore errors in seek preview - it's an optimization, not critical
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(playerProvider);
@@ -321,6 +361,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         onNext: playNext,
                         onPrevious: playPrevious,
                         onSeek: notifier.seekTo,
+                        onSeekPreview: (previewDuration) {
+                          // Seek preview preloading for Telegram streaming videos
+                          _handleSeekPreview(state, previewDuration);
+                        },
                         onVolumeChanged: notifier.setVolume,
                         onToggleMute: notifier.toggleMute,
                         onSpeedChanged: notifier.setPlaybackSpeed,
