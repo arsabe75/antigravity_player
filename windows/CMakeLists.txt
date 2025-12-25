@@ -106,3 +106,13 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# Copy TDLib native libraries to the executable directory
+set(TDLIB_LIBS_DIR "${CMAKE_CURRENT_SOURCE_DIR}/tdlib_libs")
+install(FILES
+  "${TDLIB_LIBS_DIR}/tdjson.dll"
+  "${TDLIB_LIBS_DIR}/libcrypto-3-x64.dll"
+  "${TDLIB_LIBS_DIR}/libssl-3-x64.dll"
+  "${TDLIB_LIBS_DIR}/zlib1.dll"
+  DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+  COMPONENT Runtime)
