@@ -98,9 +98,14 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                         scrollInfo.metrics.maxScrollExtent - 500 &&
                     !state.isLoadingMore &&
                     state.hasMore) {
-                  ref
-                      .read(telegramChatProvider(_params).notifier)
-                      .loadMoreMessages();
+                  // Use addPostFrameCallback to avoid modifying provider during build
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) {
+                      ref
+                          .read(telegramChatProvider(_params).notifier)
+                          .loadMoreMessages();
+                    }
+                  });
                 }
                 return false;
               },
