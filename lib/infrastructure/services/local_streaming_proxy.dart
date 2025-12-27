@@ -988,14 +988,44 @@ class LocalStreamingProxy {
       return;
     }
 
-    // MOOV ATOM PROTECTION: Detect if this is a moov atom request (offset near end of file)
-    // and if we're still in initial download phase with insufficient data.
-    // If so, skip this request to avoid canceling the initial download.
+    // PHASE 4: SMART MOOV ATOM DETECTION
+    // Instead of blocking all requests near end of file, distinguish:
+    // 1. Actual moov atom requests (metadata, no sample table entry)
+    // 2. Legitimate seeks to end of video (has sample table entry)
     final totalSize = cached?.totalSize ?? 0;
     if (totalSize > 0) {
       final distanceFromEnd = totalSize - requestedOffset;
-      final isMoovAtomRequest =
-          distanceFromEnd < 10 * 1024 * 1024; // Within 10MB of end
+
+      // PHASE 4: Use percentage-based threshold for large files
+      // For 2GB file: 0.5% = 10MB, for 500MB file: 0.5% = 2.5MB
+      final moovThresholdBytes = totalSize > 500 * 1024 * 1024
+          ? (totalSize * 0.005)
+                .round() // 0.5% for large files
+          : 10 * 1024 * 1024; // 10MB for smaller files
+
+      final mightBeMoovRequest = distanceFromEnd < moovThresholdBytes;
+
+      // PHASE 4: If we have sample table, check if this offset is video data
+      // If it's valid video data, it's NOT a moov request
+      final sampleTable = _sampleTableCache[fileId];
+      bool isConfirmedVideoData = false;
+      if (sampleTable != null && sampleTable.samples.isNotEmpty) {
+        // Check if requestedOffset falls within known sample ranges
+        final lastSample = sampleTable.samples.last;
+        final lastVideoByteOffset = lastSample.byteOffset + lastSample.size;
+        isConfirmedVideoData = requestedOffset < lastVideoByteOffset;
+
+        if (mightBeMoovRequest && isConfirmedVideoData) {
+          // This looks like moov position but sample table says it's video data
+          // This is a legitimate seek to end of video, allow it!
+          debugPrint(
+            'Proxy: Offset $requestedOffset is near end but confirmed as video data '
+            '(last sample ends at $lastVideoByteOffset)',
+          );
+        }
+      }
+
+      final isMoovAtomRequest = mightBeMoovRequest && !isConfirmedVideoData;
 
       // Mark file as not optimized for streaming if moov is at the end
       if (isMoovAtomRequest && !_isMoovAtEnd.containsKey(fileId)) {
@@ -1007,9 +1037,10 @@ class LocalStreamingProxy {
 
       final currentData = cached?.downloadedPrefixSize ?? 0;
       final downloadStart = _downloadStartTime[fileId];
+      // PHASE 4: Reduced early phase from 10s to 5s for faster availability
       final isEarlyPhase =
           downloadStart != null &&
-          DateTime.now().difference(downloadStart).inSeconds < 10;
+          DateTime.now().difference(downloadStart).inSeconds < 5;
 
       if (isMoovAtomRequest &&
           isEarlyPhase &&
