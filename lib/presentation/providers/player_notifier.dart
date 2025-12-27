@@ -26,7 +26,9 @@ class PlayerNotifier extends _$PlayerNotifier {
   StreamSubscription? _playingSub;
   StreamSubscription? _bufferingSub;
   StreamSubscription? _tracksSub;
+  StreamSubscription? _errorSub;
   Timer? _saveTimer;
+  Timer? _moovCheckTimer;
   int? _currentProxyFileId;
   bool _mounted = true;
 
@@ -55,7 +57,9 @@ class PlayerNotifier extends _$PlayerNotifier {
       _playingSub?.cancel();
       _bufferingSub?.cancel();
       _tracksSub?.cancel();
+      _errorSub?.cancel();
       _saveTimer?.cancel();
+      _moovCheckTimer?.cancel();
       _savePosition();
       _abortCurrentProxyRequest();
     });
@@ -80,12 +84,63 @@ class PlayerNotifier extends _$PlayerNotifier {
       state = state.copyWith(isPlaying: playing);
     });
     _bufferingSub = _repository.isBufferingStream.listen((buffering) {
-      state = state.copyWith(isBuffering: buffering);
+      // Check if current video is not optimized for streaming (moov atom at end)
+      bool isNotOptimized = false;
+      if (buffering && _currentProxyFileId != null) {
+        isNotOptimized = _streamingRepository.isVideoNotOptimizedForStreaming(
+          _currentProxyFileId!,
+        );
+
+        // Start periodic check if buffering and not yet detected as not-optimized
+        // This catches cases where moov detection happens after buffering starts
+        if (!isNotOptimized) {
+          _startMoovCheckTimer();
+        }
+      } else {
+        // Stop timer when not buffering
+        _stopMoovCheckTimer();
+      }
+
+      state = state.copyWith(
+        isBuffering: buffering,
+        isVideoNotOptimizedForStreaming: isNotOptimized,
+      );
     });
     // Listen for track changes (for streaming videos where tracks arrive late)
     _tracksSub = _repository.tracksChangedStream.listen((_) {
       _loadTracks();
     });
+    // Listen for player errors and update state
+    _errorSub = _repository.errorStream.listen((error) {
+      debugPrint('PlayerNotifier: Player error received: $error');
+      state = state.copyWith(error: error);
+    });
+  }
+
+  /// Start a timer to periodically check if video is not optimized for streaming
+  /// This catches late detection of moov-at-end during initial buffering
+  void _startMoovCheckTimer() {
+    _stopMoovCheckTimer();
+    _moovCheckTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (!state.isBuffering || _currentProxyFileId == null) {
+        _stopMoovCheckTimer();
+        return;
+      }
+
+      final isNotOptimized = _streamingRepository
+          .isVideoNotOptimizedForStreaming(_currentProxyFileId!);
+
+      if (isNotOptimized && !state.isVideoNotOptimizedForStreaming) {
+        state = state.copyWith(isVideoNotOptimizedForStreaming: true);
+        _stopMoovCheckTimer(); // Stop once we've detected it
+      }
+    });
+  }
+
+  /// Stop the moov check timer
+  void _stopMoovCheckTimer() {
+    _moovCheckTimer?.cancel();
+    _moovCheckTimer = null;
   }
 
   /// Load and play a video.

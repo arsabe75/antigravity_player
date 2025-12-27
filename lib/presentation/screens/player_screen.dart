@@ -327,7 +327,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 _buildVideoLayer(controller, state, notifier),
 
                 // Buffering Indicator
-                BufferingIndicator(isBuffering: state.isBuffering),
+                BufferingIndicator(
+                  isBuffering: state.isBuffering,
+                  isVideoNotOptimizedForStreaming:
+                      state.isVideoNotOptimizedForStreaming,
+                ),
 
                 // Controls Layer
                 AnimatedOpacity(

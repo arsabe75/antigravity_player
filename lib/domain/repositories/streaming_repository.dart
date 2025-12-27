@@ -17,4 +17,12 @@ abstract class StreamingRepository {
     int totalDurationMs,
     int totalBytes,
   );
+
+  /// Check if a video is NOT optimized for streaming (moov atom at end of file)
+  /// Returns true if the video requires extra loading time due to metadata placement
+  bool isVideoNotOptimizedForStreaming(int fileId);
+
+  /// OPTIMIZATION 2: Preload first 2MB of video when it appears in list view
+  /// Call this when a video thumbnail becomes visible to pre-download data
+  void preloadVideoStart(int fileId, int? totalSize);
 }

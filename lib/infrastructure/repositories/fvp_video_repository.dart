@@ -191,4 +191,8 @@ class FvpVideoRepository implements VideoRepository {
   // FVP doesn't support track detection - return empty stream
   @override
   Stream<void> get tracksChangedStream => const Stream.empty();
+
+  // FVP doesn't have a built-in error stream mechanism
+  @override
+  Stream<String> get errorStream => const Stream.empty();
 }

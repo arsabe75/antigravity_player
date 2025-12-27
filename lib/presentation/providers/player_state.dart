@@ -22,5 +22,7 @@ abstract class PlayerState with _$PlayerState {
     String? currentVideoTitle,
     String? error,
     @Default('media_kit') String playerBackend,
+    // Video not optimized for streaming (moov atom at end of file)
+    @Default(false) bool isVideoNotOptimizedForStreaming,
   }) = _PlayerState;
 }
