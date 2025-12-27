@@ -155,7 +155,7 @@ class LocalStreamingProxy {
 
   // SEEK RÁPIDO: Track if we recently seeked to reduce buffer requirement
   final Map<int, DateTime> _lastSeekTime = {};
-  static const int _seekBufferReductionWindowMs = 5000; // 5s after seek
+  // Note: Seek window is now 2000ms (inline in _startDownloadAtOffset for Phase 2)
 
   // Track all active HTTP request offsets per file for cleanup on close
   final Map<int, Set<int>> _activeHttpRequestOffsets = {};
@@ -167,6 +167,9 @@ class LocalStreamingProxy {
 
   // Track last served offset to detect seeks
   final Map<int, int> _lastServedOffset = {};
+
+  // PHASE 2: Counter to reduce log spam from POST-SEEK BLOCK
+  int? _postSeekBlockCount;
 
   // MOOV ATOM PROTECTION: Track when download started for each file
   // This helps avoid canceling initial download when moov atom is requested
@@ -1022,9 +1025,13 @@ class LocalStreamingProxy {
 
     final now = DateTime.now();
     final lastSeek = _lastSeekTime[fileId];
+
+    // PHASE 2: Reduced seek window from 5s to 2s for faster recovery
+    final seekWindowMs =
+        2000; // Reduced from _seekBufferReductionWindowMs (5000ms)
     final isRecentSeek =
         lastSeek != null &&
-        now.difference(lastSeek).inMilliseconds < _seekBufferReductionWindowMs;
+        now.difference(lastSeek).inMilliseconds < seekWindowMs;
 
     // Calculate distance to primary offset for priority calculation
     final primaryOffset = _primaryPlaybackOffset[fileId] ?? 0;
@@ -1034,34 +1041,52 @@ class LocalStreamingProxy {
     final activeDownloadTarget = _activeDownloadOffset[fileId] ?? 0;
     final distanceFromCurrent = (requestedOffset - activeDownloadTarget).abs();
 
-    // POST-SEEK STRICT LOCK: After a seek, ONLY allow downloads near the seek target
-    // This prevents old buffer requests from canceling the seek download
-    // The restriction relaxes for sequential reads near the active download (normal playback)
-    final isNearPlaybackTarget =
-        distanceToPlayback <
-        10 * 1024 * 1024; // Within 10MB of primary playback offset
-    final isNearCurrentDownload =
-        distanceFromCurrent <
-        5 * 1024 * 1024; // Within 5MB of current download (sequential)
+    // PHASE 2: Adaptive thresholds based on file size
+    // Large files need larger proximity thresholds to avoid excessive blocking
+    final totalFileSize = cached?.totalSize ?? 0;
+    final playbackThreshold = totalFileSize > 500 * 1024 * 1024
+        ? 50 *
+              1024 *
+              1024 // 50MB for files > 500MB
+        : 10 * 1024 * 1024; // 10MB for smaller files
+    final downloadThreshold = totalFileSize > 500 * 1024 * 1024
+        ? 20 *
+              1024 *
+              1024 // 20MB for large files
+        : 5 * 1024 * 1024; // 5MB for smaller files
+
+    // POST-SEEK LOCK with adaptive thresholds
+    final isNearPlaybackTarget = distanceToPlayback < playbackThreshold;
+    final isNearCurrentDownload = distanceFromCurrent < downloadThreshold;
 
     if (isRecentSeek && !isNearPlaybackTarget && !isNearCurrentDownload) {
-      // After seek: block requests that are far from BOTH the seek target AND current download
-      debugPrint(
-        'Proxy: POST-SEEK BLOCK at $requestedOffset - not near seek target '
-        '(${distanceToPlayback ~/ (1024 * 1024)}MB from target)',
-      );
+      // Reduce log spam: only log every 10th block
+      _postSeekBlockCount = (_postSeekBlockCount ?? 0) + 1;
+      if (_postSeekBlockCount! % 10 == 1) {
+        debugPrint(
+          'Proxy: POST-SEEK BLOCK at $requestedOffset - not near seek target '
+          '(${distanceToPlayback ~/ (1024 * 1024)}MB from target) [+${_postSeekBlockCount! - 1} more]',
+        );
+      }
       return;
+    } else {
+      _postSeekBlockCount = 0; // Reset counter when not blocking
     }
 
-    // THROTTLE: 300ms cooldown AND minimum 1MB distance between offset changes
-    // This prevents PartsManager crashes from too many concurrent requests
+    // PHASE 2: Adaptive throttle - shorter cooldown for sequential reads
     final lastChange = _lastOffsetChangeTime[fileId];
-    // Note: using currentDownloadOffset calculated above instead of lastOffset
+    final isSequentialRead =
+        requestedOffset > activeDownloadTarget &&
+        distanceFromCurrent < 2 * 1024 * 1024; // Within 2MB ahead
+    final cooldownMs = isSequentialRead ? 100 : 300; // Faster for sequential
 
-    // Skip if too soon OR if offset is too close to last request
     if (lastChange != null) {
       final timeSinceLastChange = now.difference(lastChange).inMilliseconds;
-      if (timeSinceLastChange < 300 || distanceFromCurrent < 1024 * 1024) {
+      // For sequential reads: smaller distance threshold (512KB)
+      // For random access: larger threshold (1MB)
+      final minDistance = isSequentialRead ? 512 * 1024 : 1024 * 1024;
+      if (timeSinceLastChange < cooldownMs ||
+          distanceFromCurrent < minDistance) {
         return; // Too soon or too close
       }
     }
@@ -1072,34 +1097,10 @@ class LocalStreamingProxy {
 
     // ADAPTIVE PRELOAD: Determine minimum bytes before we start serving
     // Based on network speed, recent stalls, and whether we just seeked
+    // PHASE 1 IMPROVEMENT: Dynamic buffer calculation with safety margin
     final metrics = _downloadMetrics[fileId];
 
-    int preloadBytes = _minPreloadBytes;
-    if (isRecentSeek) {
-      // GRADUAL POST-SEEK BUFFER: Check for recent stalls before using fast preload
-      if (metrics != null && metrics.recentStallCount > 0) {
-        // Had stalls recently - use conservative buffer even after seek
-        preloadBytes = _minPreloadBytes; // 2MB (safer)
-        debugPrint(
-          'Proxy: Post-seek with ${metrics.recentStallCount} recent stalls for $fileId - '
-          'using conservative buffer (${preloadBytes ~/ 1024}KB)',
-        );
-      } else {
-        // No recent stalls - use fast preload for quick seek response
-        preloadBytes = _fastNetworkPreload; // 512KB (fast)
-        debugPrint(
-          'Proxy: Post-seek mode for $fileId - using fast preload (${preloadBytes ~/ 1024}KB)',
-        );
-      }
-    } else if (metrics != null) {
-      if (metrics.isFastNetwork) {
-        preloadBytes = _fastNetworkPreload;
-      } else if (metrics.isStalled) {
-        // Record the stall for adaptive buffering
-        metrics.recordStall();
-        preloadBytes = _slowNetworkPreload;
-      }
-    }
+    int preloadBytes = _calculateSmartPreload(fileId, isRecentSeek, metrics);
 
     // Start download at exactly the offset the player requested
     debugPrint(
@@ -1134,6 +1135,72 @@ class LocalStreamingProxy {
     } else {
       return 8; // >= 10MB: Low priority (preload/metadata)
     }
+  }
+
+  /// PHASE 1: Smart adaptive preload calculation
+  /// Calculates buffer size based on:
+  /// - Network speed (with 3x safety margin)
+  /// - Recent stall history (increases buffer if stalls detected)
+  /// - Post-seek mode (faster initial response, then builds up)
+  int _calculateSmartPreload(
+    int fileId,
+    bool isRecentSeek,
+    _DownloadMetrics? metrics,
+  ) {
+    // Base calculation: 3 seconds of buffer at current network speed
+    // with 3x safety margin for variable bitrate videos
+    const safetyMultiplier = 3.0;
+    const targetBufferSeconds = 3.0;
+
+    // Default: 2MB if no metrics available
+    int basePreload = _minPreloadBytes;
+
+    if (metrics != null && metrics.bytesPerSecond > 0) {
+      // Calculate based on network speed
+      basePreload =
+          (metrics.bytesPerSecond * targetBufferSeconds * safetyMultiplier)
+              .round();
+
+      // Clamp to reasonable range: 1MB - 8MB
+      basePreload = basePreload.clamp(
+        _fastNetworkPreload, // 1MB min
+        _slowNetworkPreload * 2, // 8MB max
+      );
+    }
+
+    // Adjust based on stall history
+    if (metrics != null && metrics.recentStallCount > 0) {
+      // Increase buffer by 50% for each recent stall, up to 2x
+      final stallMultiplier =
+          1.0 + (metrics.recentStallCount * 0.5).clamp(0, 1);
+      basePreload = (basePreload * stallMultiplier).round();
+      debugPrint(
+        'Proxy: Stall-adjusted buffer for $fileId: ${basePreload ~/ 1024}KB '
+        '(${metrics.recentStallCount} stalls)',
+      );
+    }
+
+    // Post-seek optimization: use smaller initial buffer for faster response
+    // but ensure we still have enough data to avoid immediate buffering
+    if (isRecentSeek) {
+      // After seek: use 50% of calculated buffer (min 1MB)
+      // This gives faster response while still being adaptive
+      final seekPreload = (basePreload * 0.5).round().clamp(
+        _fastNetworkPreload,
+        basePreload,
+      );
+      debugPrint(
+        'Proxy: Post-seek adaptive buffer for $fileId: ${seekPreload ~/ 1024}KB '
+        '(base: ${basePreload ~/ 1024}KB)',
+      );
+      return seekPreload;
+    }
+
+    debugPrint(
+      'Proxy: Adaptive buffer for $fileId: ${basePreload ~/ 1024}KB '
+      '(speed: ${metrics?.bytesPerSecond ?? 0 ~/ 1024}KB/s)',
+    );
+    return basePreload;
   }
 
   // ============================================================
