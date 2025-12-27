@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
+import '../widgets/window_controls.dart';
 import '../providers/telegram_chat_notifier.dart';
 import '../providers/telegram_content_notifier.dart'; // For getStreamUrl helper if needed
 
@@ -75,6 +76,9 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                 .read(telegramChatProvider(_params).notifier)
                 .refreshMessages(),
           ),
+          const SizedBox(width: 8),
+          const WindowControls(),
+          const SizedBox(width: 8),
         ],
       ),
       body: state.isLoading && state.messages.isEmpty

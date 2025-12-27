@@ -4,6 +4,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../providers/telegram_auth_notifier.dart';
 
 import 'package:window_manager/window_manager.dart';
+import '../widgets/window_controls.dart';
 
 class TelegramLoginScreen extends ConsumerStatefulWidget {
   const TelegramLoginScreen({super.key});
@@ -40,6 +41,11 @@ class _TelegramLoginScreenState extends ConsumerState<TelegramLoginScreen> {
           onPanStart: (_) => windowManager.startDragging(),
           behavior: HitTestBehavior.translucent,
         ),
+        actions: const [
+          SizedBox(width: 8),
+          WindowControls(),
+          SizedBox(width: 8),
+        ],
       ),
       body: Center(
         child: Container(

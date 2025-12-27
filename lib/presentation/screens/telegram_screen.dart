@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:window_manager/window_manager.dart';
 
+import '../widgets/window_controls.dart';
 import '../providers/telegram_auth_notifier.dart';
 import '../../infrastructure/services/local_streaming_proxy.dart';
 import 'telegram_login_screen.dart';
@@ -145,6 +146,9 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
               ref.read(telegramAuthProvider.notifier).logout();
             },
           ),
+          const SizedBox(width: 8),
+          const WindowControls(),
+          const SizedBox(width: 8),
         ],
       ),
       body: _favorites.isEmpty

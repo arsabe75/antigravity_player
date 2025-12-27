@@ -4,6 +4,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../providers/telegram_content_notifier.dart';
 
 import 'package:window_manager/window_manager.dart';
+import '../widgets/window_controls.dart';
 
 class TelegramSelectionScreen extends ConsumerStatefulWidget {
   const TelegramSelectionScreen({super.key});
@@ -105,6 +106,9 @@ class _TelegramSelectionScreenState
               ref.read(telegramContentProvider.notifier).reloadChats();
             },
           ),
+          const SizedBox(width: 8),
+          const WindowControls(),
+          const SizedBox(width: 8),
         ],
       ),
       body: state.isLoading && state.chats.isEmpty
