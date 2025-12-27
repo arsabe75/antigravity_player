@@ -16,6 +16,7 @@ class MediaKitVideoRepository implements VideoRepository {
   final _isPlayingController = StreamController<bool>.broadcast();
   final _isBufferingController = StreamController<bool>.broadcast();
   final _tracksChangedController = StreamController<void>.broadcast();
+  final _errorController = StreamController<String>.broadcast();
 
   StreamSubscription? _playerSub;
   StreamSubscription? _tracksSub;
@@ -54,6 +55,7 @@ class MediaKitVideoRepository implements VideoRepository {
     await _isPlayingController.close();
     await _isBufferingController.close();
     await _tracksChangedController.close();
+    await _errorController.close();
   }
 
   @override
@@ -132,6 +134,12 @@ class MediaKitVideoRepository implements VideoRepository {
 
     _player!.stream.buffering.listen((buffering) {
       _isBufferingController.add(buffering);
+    });
+
+    // Listen to player errors and propagate them
+    _player!.stream.error.listen((error) {
+      debugPrint('MediaKit Error: $error');
+      _errorController.add(error);
     });
 
     await _player!.open(Media(video.path));
@@ -323,4 +331,7 @@ class MediaKitVideoRepository implements VideoRepository {
 
   @override
   Stream<void> get tracksChangedStream => _tracksChangedController.stream;
+
+  @override
+  Stream<String> get errorStream => _errorController.stream;
 }

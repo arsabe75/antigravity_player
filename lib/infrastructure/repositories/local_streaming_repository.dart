@@ -33,4 +33,14 @@ class LocalStreamingRepository implements StreamingRepository {
       totalBytes,
     );
   }
+
+  @override
+  bool isVideoNotOptimizedForStreaming(int fileId) {
+    return _proxy.isVideoNotOptimizedForStreaming(fileId);
+  }
+
+  @override
+  void preloadVideoStart(int fileId, int? totalSize) {
+    _proxy.preloadVideoStart(fileId, totalSize);
+  }
 }

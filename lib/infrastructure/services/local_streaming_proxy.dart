@@ -168,7 +168,133 @@ class LocalStreamingProxy {
   // Track last served offset to detect seeks
   final Map<int, int> _lastServedOffset = {};
 
+  // MOOV ATOM PROTECTION: Track when download started for each file
+  // This helps avoid canceling initial download when moov atom is requested
+  final Map<int, DateTime> _downloadStartTime = {};
+
+  // ADAPTIVE MOOV THRESHOLD: Calculate based on network speed AND file size
+  // Fast network = smaller threshold = faster initial load
+  // Slow network = larger threshold = more safety
+  // Large files = larger threshold = more stability
+  // OPTIMIZATION 3: Existing cache = much lower threshold
+  int _getAdaptiveMoovThreshold(int fileId) {
+    final metrics = _downloadMetrics[fileId];
+    final cached = _filePaths[fileId];
+    final totalSize = cached?.totalSize ?? 0;
+    final existingPrefix = cached?.downloadedPrefixSize ?? 0;
+
+    // OPTIMIZATION 3: If file already has substantial data from previous session,
+    // use a much lower threshold - we can trust the cached data
+    if (existingPrefix > 5 * 1024 * 1024) {
+      // Already have 5MB+ cached, can start moov download quickly
+      debugPrint(
+        'Proxy: Using low threshold for $fileId - already have ${existingPrefix ~/ (1024 * 1024)}MB cached',
+      );
+      return 512 * 1024; // 512KB - trust the existing cache
+    }
+
+    // Base threshold based on network speed
+    int baseThreshold;
+    if (metrics == null || metrics.bytesPerSecond == 0) {
+      // No metrics yet, use conservative default
+      baseThreshold = 2 * 1024 * 1024; // 2MB
+    } else if (metrics.isFastNetwork) {
+      // Fast network (>2MB/s): User expects quick loading
+      baseThreshold = 512 * 1024; // 512KB - very fast start
+    } else if (metrics.bytesPerSecond > 500 * 1024) {
+      // Medium network (500KB/s - 2MB/s): Balance speed and safety
+      baseThreshold = 1024 * 1024; // 1MB
+    } else {
+      // Slow network (<500KB/s): User is used to waiting, prioritize reliability
+      baseThreshold = 2 * 1024 * 1024; // 2MB - safe default
+    }
+
+    // LARGE FILE ADJUSTMENT: Increase threshold for very large files
+    // The moov atom download takes time to start, larger files need more buffer
+    if (totalSize > 2 * 1024 * 1024 * 1024) {
+      // Files > 2GB: Use at least 10MB (or more based on size)
+      final sizeBasedThreshold = (totalSize ~/ 400).clamp(
+        10 * 1024 * 1024, // Min 10MB
+        50 * 1024 * 1024, // Max 50MB
+      );
+      baseThreshold = baseThreshold > sizeBasedThreshold
+          ? baseThreshold
+          : sizeBasedThreshold;
+      debugPrint(
+        'Proxy: Large file threshold for $fileId: ${baseThreshold ~/ (1024 * 1024)}MB '
+        '(file size: ${totalSize ~/ (1024 * 1024)}MB)',
+      );
+    } else if (totalSize > 1024 * 1024 * 1024) {
+      // Files 1-2GB: Use at least 5MB
+      baseThreshold = baseThreshold > 5 * 1024 * 1024
+          ? baseThreshold
+          : 5 * 1024 * 1024;
+    }
+
+    return baseThreshold;
+  }
+
+  // MOOV-AT-END DETECTION: Track files where moov atom is at the end
+  // These files are NOT optimized for streaming and require extra loading time
+  final Map<int, bool> _isMoovAtEnd = {};
+
+  /// Check if a file has moov atom at the end (not optimized for streaming)
+  /// Returns true if the video needs extra loading time due to metadata placement
+  bool isVideoNotOptimizedForStreaming(int fileId) =>
+      _isMoovAtEnd[fileId] ?? false;
+
+  // OPTIMIZATION 1: DISABLED - TDLib doesn't support parallel downloads
+  // Calling downloadFile with a different offset CANCELS any ongoing download.
+  // The moov protection mechanism in _startDownloadAtOffset handles this instead.
+  // This method is kept as a stub for potential future use if TDLib behavior changes.
+  final Set<int> _moovPreloadStarted = {};
+
+  void _preloadMoovAtom(int fileId, int totalSize) {
+    // DISABLED: TDLib cancels previous downloads when starting a new offset.
+    // The existing moov protection mechanism is sufficient.
+    // Keeping this method as a no-op for interface compatibility.
+    return;
+  }
+
   int get port => _port;
+
+  // OPTIMIZATION 2: Track files we've started preloading from list view
+  final Set<int> _listPreloadStarted = {};
+
+  /// Preload the first 2MB of a video when it appears in the list view
+  /// This enables faster start when user clicks to play
+  void preloadVideoStart(int fileId, int? totalSize) {
+    // Only preload once per file
+    if (_listPreloadStarted.contains(fileId)) return;
+
+    // Skip if already cached or downloading
+    final cached = _filePaths[fileId];
+    if (cached != null &&
+        (cached.downloadedPrefixSize > 2 * 1024 * 1024 || cached.isCompleted)) {
+      return;
+    }
+
+    _listPreloadStarted.add(fileId);
+
+    debugPrint(
+      'Proxy: OPTIMIZATION 2 - Preloading first 2MB for $fileId from list view',
+    );
+
+    // Start background download with MINIMUM priority (1)
+    TelegramService().send({
+      '@type': 'downloadFile',
+      'file_id': fileId,
+      'priority': 1, // Minimum priority - won't interfere with active playback
+      'offset': 0,
+      'limit': 2 * 1024 * 1024, // Just first 2MB
+      'synchronous': false,
+    });
+
+    // Also preload moov if we know the total size
+    if (totalSize != null && totalSize > 50 * 1024 * 1024) {
+      _preloadMoovAtom(fileId, totalSize);
+    }
+  }
 
   void abortRequest(int fileId) {
     // Prevent duplicate abort calls
@@ -183,6 +309,9 @@ class LocalStreamingProxy {
     _activeDownloadOffset.remove(fileId);
     _lastOffsetChangeTime.remove(fileId);
     _primaryPlaybackOffset.remove(fileId);
+    _downloadStartTime.remove(fileId);
+    _isMoovAtEnd.remove(fileId);
+    _moovPreloadStarted.remove(fileId);
 
     // NOTE: Following Unigram's pattern - we do NOT call cancelDownloadFile here.
     // Unigram intentionally lets downloads continue in the background.
@@ -566,8 +695,21 @@ class LocalStreamingProxy {
             // Wait for updateFile that provides the data we need
             // This is more like Unigram's event-based waiting
             int waitAttempts = 0;
-            const maxWaitAttempts =
-                25; // 25 * 200ms = 5 seconds per chunk max wait
+
+            // EXTENDED TIMEOUT FOR MOOV ATOM: Requests near end of file need more time
+            // because TDLib must start a new download from a distant offset
+            final fileInfo = _filePaths[fileId];
+            final totalFileSize = fileInfo?.totalSize ?? 0;
+            final distanceFromEnd = totalFileSize > 0
+                ? totalFileSize - currentReadOffset
+                : 0;
+            final isMoovRequest =
+                distanceFromEnd > 0 && distanceFromEnd < 10 * 1024 * 1024;
+
+            // Use 15 seconds for moov requests, 5 seconds for normal data
+            final maxWaitAttempts = isMoovRequest
+                ? 75
+                : 25; // 75 * 200ms = 15 seconds
 
             while (waitAttempts < maxWaitAttempts) {
               if (_abortedRequests.contains(fileId)) {
@@ -736,6 +878,11 @@ class LocalStreamingProxy {
           );
         }
 
+        // OPTIMIZATION 1: Pre-load moov atom for large files
+        if (totalSize > 50 * 1024 * 1024 && !isCompleted) {
+          _preloadMoovAtom(fileId, totalSize);
+        }
+
         // If path is empty, trigger download to allocate the file
         final currentInfo = _filePaths[fileId];
         if (currentInfo == null ||
@@ -751,6 +898,8 @@ class LocalStreamingProxy {
 
           // Trigger download to allocate the file - use synchronous mode
           // to download sequentially and avoid PartsManager issues
+          _downloadStartTime[fileId] =
+              DateTime.now(); // Track when download started
           TelegramService().send({
             '@type': 'downloadFile',
             'file_id': fileId,
@@ -836,6 +985,41 @@ class LocalStreamingProxy {
       return;
     }
 
+    // MOOV ATOM PROTECTION: Detect if this is a moov atom request (offset near end of file)
+    // and if we're still in initial download phase with insufficient data.
+    // If so, skip this request to avoid canceling the initial download.
+    final totalSize = cached?.totalSize ?? 0;
+    if (totalSize > 0) {
+      final distanceFromEnd = totalSize - requestedOffset;
+      final isMoovAtomRequest =
+          distanceFromEnd < 10 * 1024 * 1024; // Within 10MB of end
+
+      // Mark file as not optimized for streaming if moov is at the end
+      if (isMoovAtomRequest && !_isMoovAtEnd.containsKey(fileId)) {
+        _isMoovAtEnd[fileId] = true;
+        debugPrint(
+          'Proxy: File $fileId has moov atom at end (not optimized for streaming)',
+        );
+      }
+
+      final currentData = cached?.downloadedPrefixSize ?? 0;
+      final downloadStart = _downloadStartTime[fileId];
+      final isEarlyPhase =
+          downloadStart != null &&
+          DateTime.now().difference(downloadStart).inSeconds < 10;
+
+      if (isMoovAtomRequest &&
+          isEarlyPhase &&
+          currentData < _getAdaptiveMoovThreshold(fileId)) {
+        final threshold = _getAdaptiveMoovThreshold(fileId);
+        debugPrint(
+          'Proxy: Delaying moov atom request at $requestedOffset for $fileId '
+          '(only ${currentData ~/ 1024}KB downloaded, need ${threshold ~/ 1024}KB)',
+        );
+        return; // Don't cancel initial download, let it build up data first
+      }
+    }
+
     final now = DateTime.now();
     final lastSeek = _lastSeekTime[fileId];
     final isRecentSeek =
@@ -846,11 +1030,40 @@ class LocalStreamingProxy {
     final primaryOffset = _primaryPlaybackOffset[fileId] ?? 0;
     final distanceToPlayback = (requestedOffset - primaryOffset).abs();
 
-    // SIMPLE THROTTLE: 100ms cooldown between offset changes to prevent flooding
-    // NO REJECTION based on distance - player knows what data it needs
-    final lastChange = _lastOffsetChangeTime[fileId];
-    if (lastChange != null && now.difference(lastChange).inMilliseconds < 100) {
+    // Calculate distance to CURRENT download offset
+    final activeDownloadTarget = _activeDownloadOffset[fileId] ?? 0;
+    final distanceFromCurrent = (requestedOffset - activeDownloadTarget).abs();
+
+    // POST-SEEK STRICT LOCK: After a seek, ONLY allow downloads near the seek target
+    // This prevents old buffer requests from canceling the seek download
+    // The restriction relaxes for sequential reads near the active download (normal playback)
+    final isNearPlaybackTarget =
+        distanceToPlayback <
+        10 * 1024 * 1024; // Within 10MB of primary playback offset
+    final isNearCurrentDownload =
+        distanceFromCurrent <
+        5 * 1024 * 1024; // Within 5MB of current download (sequential)
+
+    if (isRecentSeek && !isNearPlaybackTarget && !isNearCurrentDownload) {
+      // After seek: block requests that are far from BOTH the seek target AND current download
+      debugPrint(
+        'Proxy: POST-SEEK BLOCK at $requestedOffset - not near seek target '
+        '(${distanceToPlayback ~/ (1024 * 1024)}MB from target)',
+      );
       return;
+    }
+
+    // THROTTLE: 300ms cooldown AND minimum 1MB distance between offset changes
+    // This prevents PartsManager crashes from too many concurrent requests
+    final lastChange = _lastOffsetChangeTime[fileId];
+    // Note: using currentDownloadOffset calculated above instead of lastOffset
+
+    // Skip if too soon OR if offset is too close to last request
+    if (lastChange != null) {
+      final timeSinceLastChange = now.difference(lastChange).inMilliseconds;
+      if (timeSinceLastChange < 300 || distanceFromCurrent < 1024 * 1024) {
+        return; // Too soon or too close
+      }
     }
 
     // TELEGRAM ANDROID-INSPIRED: Calculate dynamic priority based on distance
@@ -902,7 +1115,8 @@ class LocalStreamingProxy {
       'file_id': fileId,
       'priority': priority,
       'offset': requestedOffset,
-      'limit': 0,
+      'limit':
+          preloadBytes, // Specific range instead of 0 (entire file) - reduces TDLib cancellations
       'synchronous': false,
     });
   }

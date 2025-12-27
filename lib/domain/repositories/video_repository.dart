@@ -37,4 +37,7 @@ abstract class VideoRepository {
 
   /// Stream that emits when available tracks change (for streaming videos)
   Stream<void> get tracksChangedStream;
+
+  /// Stream that emits player errors (codec issues, network problems, etc.)
+  Stream<String> get errorStream;
 }
