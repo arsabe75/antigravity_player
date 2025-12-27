@@ -168,12 +168,15 @@ class LocalStreamingProxy {
   // Track last served offset to detect seeks
   final Map<int, int> _lastServedOffset = {};
 
-  // PHASE 2: Counter to reduce log spam from POST-SEEK BLOCK
-  int? _postSeekBlockCount;
-
   // MOOV ATOM PROTECTION: Track when download started for each file
   // This helps avoid canceling initial download when moov atom is requested
   final Map<int, DateTime> _downloadStartTime = {};
+
+  // MOOV STABILIZE: Track when moov requests should be allowed (after delay)
+  final Map<int, DateTime> _moovUnblockTime = {};
+
+  // MOOV STABILIZE: Track files that have completed stabilization (don't re-trigger)
+  final Set<int> _moovStabilizeCompleted = {};
 
   // ADAPTIVE MOOV THRESHOLD: Calculate based on network speed AND file size
   // Fast network = smaller threshold = faster initial load
@@ -1059,70 +1062,108 @@ class LocalStreamingProxy {
         );
         return; // Don't cancel initial download, let it build up data first
       }
+
+      // PARTSMANAGER FIX: When there's cached data at start and we're requesting moov,
+      // TDLib can crash if the offset change is too rapid. Add a small delay.
+      if (_isMoovAtEnd[fileId] == true) {
+        final cachedPrefix = cached?.downloadedPrefixSize ?? 0;
+
+        // Check if we have cached data at a DIFFERENT location than the moov
+        // (i.e., we have data from start but requesting end, or vice versa)
+        final isMoovRequest =
+            totalSize > 0 &&
+            (totalSize - requestedOffset) <
+                (totalSize * 0.05).round().clamp(
+                  10 * 1024 * 1024,
+                  100 * 1024 * 1024,
+                );
+        final hasDataAtStart = cachedPrefix > 1024 * 1024; // >1MB from start
+        final isJumpingToMoov =
+            isMoovRequest &&
+            hasDataAtStart &&
+            (requestedOffset - cachedPrefix).abs() >
+                50 * 1024 * 1024; // >50MB jump
+
+        if (isJumpingToMoov) {
+          // If this file has already completed stabilization, skip
+          if (_moovStabilizeCompleted.contains(fileId)) {
+            // Already stabilized, allow request through
+            return; // Don't block, but don't start download here either
+          }
+
+          final unblockTime = _moovUnblockTime[fileId];
+          final now = DateTime.now();
+
+          // Check if we already have an unblock time set
+          if (unblockTime == null) {
+            // First moov request for this file - set unblock time 50ms from now
+            // (50ms is minimum to let TDLib process pending cancellations)
+            _moovUnblockTime[fileId] = now.add(
+              const Duration(milliseconds: 50),
+            );
+            debugPrint(
+              'Proxy: MOOV STABILIZE (first request) for $fileId - delaying 50ms before moov fetch',
+            );
+            return;
+          }
+
+          // Check if we've passed the unblock time
+          if (now.isBefore(unblockTime)) {
+            final msRemaining = unblockTime.difference(now).inMilliseconds;
+            debugPrint(
+              'Proxy: MOOV STABILIZE for $fileId - ${msRemaining}ms remaining before moov fetch allowed',
+            );
+            return;
+          }
+
+          // Unblock time has passed - mark as completed and allow the request
+          _moovUnblockTime.remove(fileId);
+          _moovStabilizeCompleted.add(fileId);
+          debugPrint(
+            'Proxy: MOOV STABILIZE complete for $fileId - allowing moov fetch',
+          );
+        }
+      }
     }
 
     final now = DateTime.now();
-    final lastSeek = _lastSeekTime[fileId];
-
-    // PHASE 2: Reduced seek window from 5s to 2s for faster recovery
-    final seekWindowMs =
-        2000; // Reduced from _seekBufferReductionWindowMs (5000ms)
-    final isRecentSeek =
-        lastSeek != null &&
-        now.difference(lastSeek).inMilliseconds < seekWindowMs;
-
-    // Calculate distance to primary offset for priority calculation
-    final primaryOffset = _primaryPlaybackOffset[fileId] ?? 0;
-    final distanceToPlayback = (requestedOffset - primaryOffset).abs();
 
     // Calculate distance to CURRENT download offset
     final activeDownloadTarget = _activeDownloadOffset[fileId] ?? 0;
     final distanceFromCurrent = (requestedOffset - activeDownloadTarget).abs();
 
-    // PHASE 2: Adaptive thresholds based on file size
-    // Large files need larger proximity thresholds to avoid excessive blocking
-    final totalFileSize = cached?.totalSize ?? 0;
-    final playbackThreshold = totalFileSize > 500 * 1024 * 1024
-        ? 50 *
-              1024 *
-              1024 // 50MB for files > 500MB
-        : 10 * 1024 * 1024; // 10MB for smaller files
-    final downloadThreshold = totalFileSize > 500 * 1024 * 1024
-        ? 20 *
-              1024 *
-              1024 // 20MB for large files
-        : 5 * 1024 * 1024; // 5MB for smaller files
+    // Calculate distance to primary offset for priority calculation
+    final primaryOffset = _primaryPlaybackOffset[fileId] ?? 0;
+    final distanceToPlayback = (requestedOffset - primaryOffset).abs();
 
-    // POST-SEEK LOCK with adaptive thresholds
-    final isNearPlaybackTarget = distanceToPlayback < playbackThreshold;
-    final isNearCurrentDownload = distanceFromCurrent < downloadThreshold;
+    // Check if this is a recent seek (used for preload calculation)
+    final lastSeek = _lastSeekTime[fileId];
+    final seekWindowMs = 2000;
+    final isRecentSeek =
+        lastSeek != null &&
+        now.difference(lastSeek).inMilliseconds < seekWindowMs;
 
-    if (isRecentSeek && !isNearPlaybackTarget && !isNearCurrentDownload) {
-      // Reduce log spam: only log every 10th block
-      _postSeekBlockCount = (_postSeekBlockCount ?? 0) + 1;
-      if (_postSeekBlockCount! % 10 == 1) {
-        debugPrint(
-          'Proxy: POST-SEEK BLOCK at $requestedOffset - not near seek target '
-          '(${distanceToPlayback ~/ (1024 * 1024)}MB from target) [+${_postSeekBlockCount! - 1} more]',
-        );
-      }
-      return;
-    } else {
-      _postSeekBlockCount = 0; // Reset counter when not blocking
-    }
+    // NOTE: POST-SEEK BLOCK has been DISABLED after testing showed it was
+    // blocking legitimate resume requests and causing videos to not start.
+    // The general cooldown (500-1000ms) and distance threshold (2-5MB) provide
+    // sufficient protection against rapid offset changes.
 
-    // PHASE 2: Adaptive throttle - shorter cooldown for sequential reads
+    // PARTSMANAGER FIX: Increased cooldown to prevent TDLib crashes
+    // TDLib's PartsManager can crash if offset changes happen too rapidly
     final lastChange = _lastOffsetChangeTime[fileId];
     final isSequentialRead =
         requestedOffset > activeDownloadTarget &&
         distanceFromCurrent < 2 * 1024 * 1024; // Within 2MB ahead
-    final cooldownMs = isSequentialRead ? 100 : 300; // Faster for sequential
+
+    // STABILITY FIX: Increased cooldown from 100-300ms to 500-1000ms
+    // This gives TDLib more time to stabilize between offset changes
+    final cooldownMs = isSequentialRead ? 500 : 1000;
 
     if (lastChange != null) {
       final timeSinceLastChange = now.difference(lastChange).inMilliseconds;
-      // For sequential reads: smaller distance threshold (512KB)
-      // For random access: larger threshold (1MB)
-      final minDistance = isSequentialRead ? 512 * 1024 : 1024 * 1024;
+      // STABILITY FIX: Increased distance threshold from 512KB-1MB to 2MB-5MB
+      // Larger thresholds reduce the frequency of download cancellations
+      final minDistance = isSequentialRead ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
       if (timeSinceLastChange < cooldownMs ||
           distanceFromCurrent < minDistance) {
         return; // Too soon or too close
@@ -1149,14 +1190,22 @@ class LocalStreamingProxy {
     _activeDownloadOffset[fileId] = requestedOffset;
     _lastOffsetChangeTime[fileId] = now;
 
+    // PARTSMANAGER FIX: Use synchronous mode for moov atom downloads
+    // This prevents parallel range conflicts that cause PartsManager crashes
+    final isMoovDownload =
+        _isMoovAtEnd[fileId] == true &&
+        totalSize > 0 &&
+        (totalSize - requestedOffset) <
+            (totalSize * 0.01).round().clamp(5 * 1024 * 1024, 50 * 1024 * 1024);
+
     TelegramService().send({
       '@type': 'downloadFile',
       'file_id': fileId,
       'priority': priority,
       'offset': requestedOffset,
-      'limit':
-          preloadBytes, // Specific range instead of 0 (entire file) - reduces TDLib cancellations
-      'synchronous': false,
+      'limit': preloadBytes,
+      // Use synchronous mode for moov downloads to prevent PartsManager crashes
+      'synchronous': isMoovDownload,
     });
   }
 
