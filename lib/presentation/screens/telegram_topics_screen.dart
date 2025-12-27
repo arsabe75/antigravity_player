@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
+import '../widgets/window_controls.dart';
 import '../providers/telegram_forum_notifier.dart';
 
 class TelegramTopicsScreen extends ConsumerWidget {
@@ -66,6 +67,9 @@ class TelegramTopicsScreen extends ConsumerWidget {
               ref.read(telegramForumProvider(chatId).notifier).refreshTopics();
             },
           ),
+          const SizedBox(width: 8),
+          const WindowControls(),
+          const SizedBox(width: 8),
         ],
       ),
       body: state.isLoading && state.topics.isEmpty

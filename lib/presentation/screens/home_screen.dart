@@ -11,6 +11,7 @@ import '../providers/theme_provider.dart';
 import '../widgets/dialogs/url_input_dialog.dart';
 import '../widgets/home/recent_videos_widget.dart';
 import '../widgets/settings_dialog.dart';
+import '../widgets/window_controls.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -195,36 +196,7 @@ class HomeScreen extends ConsumerWidget {
                       },
                       tooltip: 'Settings',
                     ),
-                    IconButton(
-                      icon: Icon(
-                        LucideIcons.minus,
-                        color: Theme.of(context).colorScheme.onSurface,
-                        size: 20,
-                      ),
-                      onPressed: () => windowManager.minimize(),
-                    ),
-                    IconButton(
-                      icon: Icon(
-                        LucideIcons.maximize,
-                        color: Theme.of(context).colorScheme.onSurface,
-                        size: 20,
-                      ),
-                      onPressed: () async {
-                        if (await windowManager.isMaximized()) {
-                          windowManager.unmaximize();
-                        } else {
-                          windowManager.maximize();
-                        }
-                      },
-                    ),
-                    IconButton(
-                      icon: Icon(
-                        LucideIcons.x,
-                        color: Theme.of(context).colorScheme.onSurface,
-                        size: 20,
-                      ),
-                      onPressed: () => windowManager.close(),
-                    ),
+                    const WindowControls(),
                   ],
                 ),
               ),

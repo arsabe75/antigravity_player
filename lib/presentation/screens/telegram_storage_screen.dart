@@ -4,6 +4,8 @@ import 'package:lucide_icons/lucide_icons.dart';
 import '../../domain/entities/storage_statistics.dart';
 import '../../infrastructure/services/telegram_cache_service.dart';
 import '../providers/telegram_cache_notifier.dart';
+import 'package:window_manager/window_manager.dart';
+import '../widgets/window_controls.dart';
 
 /// Screen for viewing and managing Telegram cache storage.
 ///
@@ -26,6 +28,15 @@ class TelegramStorageScreen extends ConsumerWidget {
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: const Text('Storage Usage'),
+        flexibleSpace: GestureDetector(
+          onPanStart: (_) => windowManager.startDragging(),
+          behavior: HitTestBehavior.translucent,
+        ),
+        actions: const [
+          SizedBox(width: 8),
+          WindowControls(),
+          SizedBox(width: 8),
+        ],
       ),
       body: cacheState.isLoading
           ? const Center(child: CircularProgressIndicator())
