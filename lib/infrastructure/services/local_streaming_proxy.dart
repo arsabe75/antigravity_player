@@ -684,6 +684,13 @@ class LocalStreamingProxy {
 
             // Ensure download is started at the exact offset the player needs
             _startDownloadAtOffset(fileId, currentReadOffset);
+
+            // PHASE 5: Read-ahead DISABLED due to TDLib limitation
+            // TDLib cancels any ongoing download when a new downloadFile is called
+            // for the same file_id with a different offset. This causes more harm
+            // than benefit, so read-ahead is disabled until TDLib supports parallel
+            // range requests for the same file.
+            // _scheduleReadAhead(fileId, currentReadOffset);
           } else {
             // NO DATA AVAILABLE -> BLOCKING WAIT
             final cached = _filePaths[fileId];
@@ -1233,6 +1240,10 @@ class LocalStreamingProxy {
     );
     return basePreload;
   }
+
+  // NOTE: Read-ahead feature was removed because TDLib cancels ongoing downloads
+  // when a new downloadFile call is made for the same file_id with a different offset.
+  // This limitation makes proactive read-ahead counterproductive.
 
   // ============================================================
   // SEEK PREVIEW PRELOADING
