@@ -119,9 +119,10 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                     padding: const EdgeInsets.all(16),
                     sliver: SliverGrid(
                       gridDelegate:
-                          const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 3,
-                            childAspectRatio: 0.8, // Taller for title
+                          const SliverGridDelegateWithMaxCrossAxisExtent(
+                            maxCrossAxisExtent: 250,
+                            childAspectRatio:
+                                1.3, // Cinema-like landscape ratio
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                           ),
