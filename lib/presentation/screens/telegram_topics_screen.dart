@@ -17,15 +17,20 @@ class TelegramTopicsScreen extends ConsumerWidget {
     required this.title,
   });
 
-  /// Get topic icon color from topic info
-  Color _getTopicColor(Map<String, dynamic> topicInfo) {
+  /// Get topic icon color from topic info.
+  /// Uses TDLib icon color, or falls back to theme-aware colors for contrast.
+  Color _getTopicColor(Map<String, dynamic> topicInfo, BuildContext context) {
     // TDLib provides icon_color as an integer color value
     final iconColor = topicInfo['icon']?['color'] as int?;
     if (iconColor != null && iconColor != 0) {
       // TDLib uses RGB format
       return Color(iconColor | 0xFF000000); // Add alpha
     }
-    return Colors.blue;
+    // Theme-aware fallback for better contrast
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return isDark
+        ? Theme.of(context).colorScheme.primaryContainer
+        : Theme.of(context).colorScheme.primary;
   }
 
   @override
@@ -163,29 +168,33 @@ class TelegramTopicsScreen extends ConsumerWidget {
                       vertical: 4,
                     ),
                     child: ListTile(
-                      leading: CircleAvatar(
-                        backgroundColor: _getTopicColor(topicInfo),
-                        child: isGeneral
-                            ? const Icon(
-                                LucideIcons.hash,
-                                color: Colors.white,
-                                size: 20,
-                              )
-                            : CustomEmojiIcon(
-                                customEmojiId:
-                                    topicInfo['icon']?['custom_emoji_id'] is int
-                                    ? topicInfo['icon']!['custom_emoji_id']
-                                          as int
-                                    : int.tryParse(
-                                            topicInfo['icon']?['custom_emoji_id']
-                                                    .toString() ??
-                                                '0',
-                                          ) ??
-                                          0,
-                                fallbackIcon: LucideIcons.messageSquare,
-                                color: Colors.white,
-                                size: 20,
-                              ),
+                      leading: SizedBox(
+                        width: 40,
+                        height: 40,
+                        child: Center(
+                          child: isGeneral
+                              ? Icon(
+                                  LucideIcons.hash,
+                                  color: _getTopicColor(topicInfo, context),
+                                  size: 28,
+                                )
+                              : CustomEmojiIcon(
+                                  customEmojiId:
+                                      topicInfo['icon']?['custom_emoji_id']
+                                          is int
+                                      ? topicInfo['icon']!['custom_emoji_id']
+                                            as int
+                                      : int.tryParse(
+                                              topicInfo['icon']?['custom_emoji_id']
+                                                      .toString() ??
+                                                  '0',
+                                            ) ??
+                                            0,
+                                  fallbackIcon: LucideIcons.messageSquare,
+                                  color: _getTopicColor(topicInfo, context),
+                                  size: 28,
+                                ),
+                        ),
                       ),
                       title: Row(
                         children: [
