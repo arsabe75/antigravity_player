@@ -1,19 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../../infrastructure/services/recent_videos_service.dart';
+import '../../providers/recent_videos_refresh_provider.dart';
 
 /// Widget que muestra los videos recientes
-class RecentVideosWidget extends StatefulWidget {
-  final Function(String path, bool isNetwork) onVideoSelected;
+/// Use [showTelegramVideos] to filter:
+/// - false: Shows only local/network videos (for Home screen)
+/// - true: Shows only Telegram videos (for Telegram screen)
+class RecentVideosWidget extends ConsumerStatefulWidget {
+  final Function(RecentVideo video) onVideoSelected;
+  final bool showTelegramVideos;
 
-  const RecentVideosWidget({super.key, required this.onVideoSelected});
+  const RecentVideosWidget({
+    super.key,
+    required this.onVideoSelected,
+    this.showTelegramVideos = false,
+  });
 
   @override
-  State<RecentVideosWidget> createState() => _RecentVideosWidgetState();
+  ConsumerState<RecentVideosWidget> createState() => RecentVideosWidgetState();
 }
 
-class _RecentVideosWidgetState extends State<RecentVideosWidget> {
+/// Public state class so parent can call refresh() via GlobalKey
+class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
   final _service = RecentVideosService();
   List<RecentVideo> _videos = [];
   bool _isLoading = true;
@@ -24,11 +35,32 @@ class _RecentVideosWidgetState extends State<RecentVideosWidget> {
     _loadVideos();
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Reload videos when dependencies change
+    _loadVideos();
+  }
+
+  /// Public method to refresh the list (call via GlobalKey)
+  void refresh() {
+    _loadVideos();
+  }
+
   Future<void> _loadVideos() async {
-    final videos = await _service.getRecentVideos();
+    final allVideos = await _service.getRecentVideos();
+    // Filter based on showTelegramVideos parameter
+    final filteredVideos = allVideos.where((v) {
+      if (widget.showTelegramVideos) {
+        return v.isTelegramVideo;
+      } else {
+        return !v.isTelegramVideo;
+      }
+    }).toList();
+
     if (mounted) {
       setState(() {
-        _videos = videos;
+        _videos = filteredVideos;
         _isLoading = false;
       });
     }
@@ -99,6 +131,11 @@ class _RecentVideosWidgetState extends State<RecentVideosWidget> {
 
   @override
   Widget build(BuildContext context) {
+    // Listen for refresh trigger from anywhere in the app
+    ref.listen<int>(recentVideosRefreshProvider, (previous, next) {
+      _loadVideos();
+    });
+
     if (_isLoading) {
       return const SizedBox.shrink();
     }
@@ -168,7 +205,7 @@ class _RecentVideosWidgetState extends State<RecentVideosWidget> {
       color: isDark ? Colors.grey[850] : Colors.grey[100],
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
-        onTap: () => widget.onVideoSelected(video.path, video.isNetwork),
+        onTap: () => widget.onVideoSelected(video),
         borderRadius: BorderRadius.circular(12),
         child: Container(
           width: 180,

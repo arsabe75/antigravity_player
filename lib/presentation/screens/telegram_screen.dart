@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'package:window_manager/window_manager.dart';
 
 import '../widgets/window_controls.dart';
+import '../widgets/home/recent_videos_widget.dart';
 import '../providers/telegram_auth_notifier.dart';
 import '../../infrastructure/services/local_streaming_proxy.dart';
 import '../../infrastructure/services/telegram_service.dart';
@@ -22,6 +23,7 @@ class TelegramScreen extends ConsumerStatefulWidget {
 
 class _TelegramScreenState extends ConsumerState<TelegramScreen> {
   List<Map<String, dynamic>> _favorites = []; // No longer final
+  final _recentVideosKey = GlobalKey<RecentVideosWidgetState>();
 
   @override
   void initState() {
@@ -200,90 +202,146 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: _favorites.isEmpty
-          ? Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(
-                    LucideIcons.messageSquare,
-                    size: 64,
-                    color: Colors.grey,
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'No favorites yet.\nClick + to add channels.',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.grey),
-                  ),
-                ],
-              ),
-            )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: _favorites.length,
-              itemBuilder: (context, index) {
-                final chat = _favorites[index];
-                final title = chat['title'] ?? 'Unknown';
-                final isForum = _isForum(chat);
+      body: Column(
+        children: [
+          // Recent Telegram Videos
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+            child: RecentVideosWidget(
+              key: _recentVideosKey,
+              showTelegramVideos: true,
+              onVideoSelected: (video) {
+                // Regenerate proxy URL with current port
+                final proxy = LocalStreamingProxy();
+                String url = video.path;
+                if (video.path.contains('/stream?file_id=')) {
+                  try {
+                    final uri = Uri.parse(video.path);
+                    final fileIdStr = uri.queryParameters['file_id'];
+                    final sizeStr = uri.queryParameters['size'];
+                    if (fileIdStr != null && sizeStr != null) {
+                      final fileId = int.parse(fileIdStr);
+                      final size = int.parse(sizeStr);
+                      url = proxy.getUrl(fileId, size);
+                    }
+                  } catch (_) {}
+                }
 
-                return Card(
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor:
-                          ChatIcon.getAccentColor(chat) ??
-                          (isForum
-                              ? Theme.of(context).colorScheme.primaryContainer
-                              : null),
-                      child: ChatIcon(
-                        chat: chat,
-                        fallbackIcon: _getChatIcon(chat),
-                        size: 40,
-                      ),
-                    ),
-                    title: Text(title),
-                    subtitle: Row(
+                context
+                    .push(
+                      '/player',
+                      extra: {
+                        'url': url,
+                        'title': video.title,
+                        'telegramChatId': video.telegramChatId,
+                        'telegramMessageId': video.telegramMessageId,
+                        'telegramFileSize': video.telegramFileSize,
+                      },
+                    )
+                    .then((_) {
+                      // Refresh recent videos when returning from player
+                      _recentVideosKey.currentState?.refresh();
+                    });
+              },
+            ),
+          ),
+          // Favorites list
+          Expanded(
+            child: _favorites.isEmpty
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        if (isForum) ...[
-                          const Icon(LucideIcons.messagesSquare, size: 12),
-                          const SizedBox(width: 4),
-                          const Text('Topics', style: TextStyle(fontSize: 12)),
-                          const SizedBox(width: 8),
-                        ],
-                        Text(
-                          'ID: ${chat['id']}',
-                          style: const TextStyle(fontSize: 12),
+                        const Icon(
+                          LucideIcons.messageSquare,
+                          size: 64,
+                          color: Colors.grey,
+                        ),
+                        const SizedBox(height: 16),
+                        const Text(
+                          'No favorites yet.\nClick + to add channels.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.grey),
                         ),
                       ],
                     ),
-                    onTap: () {
-                      if (isForum) {
-                        // Navigate to topics screen for forum groups
-                        context.push(
-                          '/telegram/topics/${chat['id']}',
-                          extra: title,
-                        );
-                      } else {
-                        // Navigate directly to chat screen for channels/regular groups
-                        context.push(
-                          '/telegram/chat/${chat['id']}',
-                          extra: {'title': title},
-                        );
-                      }
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: _favorites.length,
+                    itemBuilder: (context, index) {
+                      final chat = _favorites[index];
+                      final title = chat['title'] ?? 'Unknown';
+                      final isForum = _isForum(chat);
+
+                      return Card(
+                        child: ListTile(
+                          leading: CircleAvatar(
+                            backgroundColor:
+                                ChatIcon.getAccentColor(chat) ??
+                                (isForum
+                                    ? Theme.of(
+                                        context,
+                                      ).colorScheme.primaryContainer
+                                    : null),
+                            child: ChatIcon(
+                              chat: chat,
+                              fallbackIcon: _getChatIcon(chat),
+                              size: 40,
+                            ),
+                          ),
+                          title: Text(title),
+                          subtitle: Row(
+                            children: [
+                              if (isForum) ...[
+                                const Icon(
+                                  LucideIcons.messagesSquare,
+                                  size: 12,
+                                ),
+                                const SizedBox(width: 4),
+                                const Text(
+                                  'Topics',
+                                  style: TextStyle(fontSize: 12),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                              Text(
+                                'ID: ${chat['id']}',
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                            ],
+                          ),
+                          onTap: () {
+                            if (isForum) {
+                              // Navigate to topics screen for forum groups
+                              context.push(
+                                '/telegram/topics/${chat['id']}',
+                                extra: title,
+                              );
+                            } else {
+                              // Navigate directly to chat screen for channels/regular groups
+                              context.push(
+                                '/telegram/chat/${chat['id']}',
+                                extra: {'title': title},
+                              );
+                            }
+                          },
+                          trailing: IconButton(
+                            icon: const Icon(LucideIcons.trash2, size: 20),
+                            onPressed: () {
+                              setState(() {
+                                _favorites.removeAt(index);
+                                _saveFavorites();
+                              });
+                            },
+                          ),
+                        ),
+                      );
                     },
-                    trailing: IconButton(
-                      icon: const Icon(LucideIcons.trash2, size: 20),
-                      onPressed: () {
-                        setState(() {
-                          _favorites.removeAt(index);
-                          _saveFavorites();
-                        });
-                      },
-                    ),
                   ),
-                );
-              },
-            ),
+          ),
+        ],
+      ),
     );
   }
 }
