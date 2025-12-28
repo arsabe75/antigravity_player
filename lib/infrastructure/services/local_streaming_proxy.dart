@@ -461,6 +461,7 @@ class LocalStreamingProxy {
     int? fileId;
     int start = 0;
     try {
+      debugPrint('Proxy: Received request for ${request.uri}');
       fileIdStr = request.uri.queryParameters['file_id'];
       final sizeStr = request.uri.queryParameters['size'];
 
@@ -472,6 +473,26 @@ class LocalStreamingProxy {
 
       fileId = int.parse(fileIdStr);
       final totalSize = int.tryParse(sizeStr ?? '') ?? 0;
+
+      // Wait for TDLib client to be ready (max 10 seconds)
+      // This is crucial on app start when TDLib might still be initializing
+      if (!TelegramService().isClientReady) {
+        debugPrint('Proxy: Waiting for TDLib client to initialize...');
+        int attempts = 0;
+        while (!TelegramService().isClientReady && attempts < 100) {
+          await Future.delayed(const Duration(milliseconds: 100));
+          attempts++;
+        }
+        if (!TelegramService().isClientReady) {
+          debugPrint(
+            'Proxy: TDLib client failed to initialize after 10 seconds',
+          );
+          request.response.statusCode = HttpStatus.serviceUnavailable;
+          await request.response.close();
+          return;
+        }
+        debugPrint('Proxy: TDLib client ready after ${attempts * 100}ms');
+      }
 
       // If ANY files were recently aborted, give TDLib time to clean up
       // This is crucial - TDLib can crash if we start new downloads while
@@ -1096,13 +1117,13 @@ class LocalStreamingProxy {
 
           // Check if we already have an unblock time set
           if (unblockTime == null) {
-            // First moov request for this file - set unblock time 50ms from now
-            // (50ms is minimum to let TDLib process pending cancellations)
+            // First moov request for this file - set unblock time 500ms from now
+            // (500ms is needed to let TDLib fully process pending cancellations and stabilize)
             _moovUnblockTime[fileId] = now.add(
-              const Duration(milliseconds: 50),
+              const Duration(milliseconds: 500),
             );
             debugPrint(
-              'Proxy: MOOV STABILIZE (first request) for $fileId - delaying 50ms before moov fetch',
+              'Proxy: MOOV STABILIZE (first request) for $fileId - delaying 500ms before moov fetch',
             );
             return;
           }
@@ -1197,6 +1218,36 @@ class LocalStreamingProxy {
         totalSize > 0 &&
         (totalSize - requestedOffset) <
             (totalSize * 0.01).round().clamp(5 * 1024 * 1024, 50 * 1024 * 1024);
+
+    // Check if this is a large offset jump from cached data
+    final cachedPrefix = cached?.downloadedPrefixSize ?? 0;
+    final isLargeJump =
+        (requestedOffset - cachedPrefix).abs() > 50 * 1024 * 1024;
+
+    // PARTSMANAGER FIX: Always cancel before moov download with large offset jump
+    // TDLib's PartsManager crashes on large offset changes, even without active downloads
+    if (isMoovDownload && isLargeJump && cachedPrefix > 0) {
+      debugPrint(
+        'Proxy: Canceling and waiting before moov jump for $fileId (cached: ${cachedPrefix ~/ 1024}KB, target: ${requestedOffset ~/ 1024}KB)',
+      );
+      TelegramService().send({
+        '@type': 'cancelDownloadFile',
+        'file_id': fileId,
+        'only_if_pending': false,
+      });
+      // Wait for TDLib to fully clean up internal state after cancellation
+      Future.delayed(const Duration(milliseconds: 1000), () {
+        TelegramService().send({
+          '@type': 'downloadFile',
+          'file_id': fileId,
+          'priority': priority,
+          'offset': requestedOffset,
+          'limit': preloadBytes,
+          'synchronous': true,
+        });
+      });
+      return;
+    }
 
     TelegramService().send({
       '@type': 'downloadFile',

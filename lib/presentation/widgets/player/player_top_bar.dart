@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:path/path.dart' as p;
 import 'package:window_manager/window_manager.dart';
 
 import '../../../config/constants/app_constants.dart';
@@ -21,9 +22,9 @@ class PlayerTopBar extends StatelessWidget {
 
   String _getDisplayTitle() {
     if (videoTitle == null) return AppConstants.appName;
-    // Extract filename from path
-    final parts = videoTitle!.split('/');
-    return parts.isNotEmpty ? parts.last : AppConstants.appName;
+    // Extract filename from path (works on both Windows and Linux)
+    final filename = p.basename(videoTitle!);
+    return filename.isNotEmpty ? filename : AppConstants.appName;
   }
 
   @override

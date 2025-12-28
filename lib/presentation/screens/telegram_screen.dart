@@ -305,11 +305,159 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
             child: RecentVideosWidget(
               key: _recentVideosKey,
               showTelegramVideos: true,
-              onVideoSelected: (video) {
-                // Regenerate proxy URL with current port
+              onVideoSelected: (video) async {
+                // Wait for TDLib to be ready before playing
+                final authState = ref.read(telegramAuthProvider);
+
+                // Show loading dialog - always wait a bit for TDLib file system to initialize
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (ctx) => const AlertDialog(
+                    content: Row(
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(width: 16),
+                        Text('Connecting to Telegram...'),
+                      ],
+                    ),
+                  ),
+                );
+
+                // Wait for authorization if not ready
+                if (authState.list != AuthState.ready) {
+                  debugPrint('TelegramScreen: Not ready, waiting for auth');
+                  int attempts = 0;
+                  while (attempts < 100) {
+                    await Future.delayed(const Duration(milliseconds: 100));
+                    final currentState = ref.read(telegramAuthProvider);
+                    if (currentState.list == AuthState.ready) {
+                      break;
+                    }
+                    if (currentState.list == AuthState.waitPhoneNumber ||
+                        currentState.list == AuthState.error ||
+                        currentState.list == AuthState.closed) {
+                      if (context.mounted) Navigator.of(context).pop();
+                      if (context.mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Telegram not authorized. Please log in first.',
+                            ),
+                          ),
+                        );
+                      }
+                      return;
+                    }
+                    attempts++;
+                  }
+
+                  final finalState = ref.read(telegramAuthProvider);
+                  if (finalState.list != AuthState.ready) {
+                    if (context.mounted) Navigator.of(context).pop();
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Telegram connection timed out. Please try again.',
+                          ),
+                        ),
+                      );
+                    }
+                    return;
+                  }
+                }
+
+                // Hydrate the chat to ensure TDLib knows about the file
+                // TDLib file IDs only become valid after the chat is loaded
+                if (video.telegramChatId != null) {
+                  debugPrint(
+                    'TelegramScreen: Hydrating chat ${video.telegramChatId} for file access...',
+                  );
+                  try {
+                    // First, open the chat to ensure TDLib loads it
+                    await TelegramService().sendWithResult({
+                      '@type': 'getChat',
+                      'chat_id': video.telegramChatId,
+                    });
+
+                    // Load some chat history to hydrate file information
+                    await TelegramService().sendWithResult({
+                      '@type': 'getChatHistory',
+                      'chat_id': video.telegramChatId,
+                      'from_message_id': 0,
+                      'offset': 0,
+                      'limit': 50,
+                      'only_local': false,
+                    });
+
+                    debugPrint('TelegramScreen: Chat hydration complete');
+                  } catch (e) {
+                    debugPrint('TelegramScreen: Chat hydration error: $e');
+                  }
+
+                  // Small delay to let TDLib process the loaded messages
+                  await Future.delayed(const Duration(milliseconds: 500));
+                } else {
+                  debugPrint(
+                    'TelegramScreen: No chatId available, using 2s delay fallback...',
+                  );
+                  await Future.delayed(const Duration(seconds: 2));
+                }
+
+                if (context.mounted) Navigator.of(context).pop();
+
+                // Get fresh file info from the message (file_ids can become stale)
                 final proxy = LocalStreamingProxy();
                 String url = video.path;
-                if (video.path.contains('/stream?file_id=')) {
+
+                if (video.telegramChatId != null &&
+                    video.telegramMessageId != null) {
+                  try {
+                    debugPrint(
+                      'TelegramScreen: Getting fresh file info from message ${video.telegramMessageId}',
+                    );
+                    final messageResult = await TelegramService()
+                        .sendWithResult({
+                          '@type': 'getMessage',
+                          'chat_id': video.telegramChatId,
+                          'message_id': video.telegramMessageId,
+                        });
+
+                    // Extract video file from message content
+                    final content =
+                        messageResult['content'] as Map<String, dynamic>?;
+                    if (content != null) {
+                      final videoContent =
+                          content['video'] as Map<String, dynamic>?;
+                      if (videoContent != null) {
+                        final videoFile =
+                            videoContent['video'] as Map<String, dynamic>?;
+                        if (videoFile != null) {
+                          final freshFileId = videoFile['id'] as int?;
+                          final size =
+                              videoFile['size'] as int? ??
+                              video.telegramFileSize ??
+                              0;
+                          if (freshFileId != null) {
+                            url = proxy.getUrl(freshFileId, size);
+                            debugPrint(
+                              'TelegramScreen: Got fresh file_id: $freshFileId, size: $size',
+                            );
+                          }
+                        }
+                      }
+                    }
+                  } catch (e) {
+                    debugPrint(
+                      'TelegramScreen: Failed to get message, using stored URL: $e',
+                    );
+                  }
+                }
+
+                // Fallback to stored URL if fresh fetch failed
+                if (url == video.path &&
+                    video.path.contains('/stream?file_id=')) {
                   try {
                     final uri = Uri.parse(video.path);
                     final fileIdStr = uri.queryParameters['file_id'];
@@ -321,6 +469,8 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                     }
                   } catch (_) {}
                 }
+
+                if (!context.mounted) return;
 
                 context
                     .push(
