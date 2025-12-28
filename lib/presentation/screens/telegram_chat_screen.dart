@@ -181,6 +181,11 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                     'telegramChatId': widget.chatId,
                                     'telegramMessageId': messageId,
                                     'telegramFileSize': size,
+                                    'telegramTopicId': widget.messageThreadId,
+                                    'telegramTopicName':
+                                        widget.messageThreadId != null
+                                        ? widget.title
+                                        : null,
                                   },
                                 );
                               }

@@ -29,6 +29,8 @@ class PlayerScreen extends ConsumerStatefulWidget {
   final int? telegramChatId;
   final int? telegramMessageId;
   final int? telegramFileSize;
+  final int? telegramTopicId;
+  final String? telegramTopicName;
 
   const PlayerScreen({
     super.key,
@@ -37,6 +39,8 @@ class PlayerScreen extends ConsumerStatefulWidget {
     this.telegramChatId,
     this.telegramMessageId,
     this.telegramFileSize,
+    this.telegramTopicId,
+    this.telegramTopicName,
   });
 
   @override
@@ -67,6 +71,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               telegramChatId: widget.telegramChatId,
               telegramMessageId: widget.telegramMessageId,
               telegramFileSize: widget.telegramFileSize,
+              telegramTopicId: widget.telegramTopicId,
+              telegramTopicName: widget.telegramTopicName,
             ),
       );
     }

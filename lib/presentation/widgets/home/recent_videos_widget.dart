@@ -269,6 +269,33 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    // Show topic name if available
+                    if (video.telegramTopicName != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Row(
+                          children: [
+                            Icon(
+                              LucideIcons.hash,
+                              size: 10,
+                              color: Colors.orange[400],
+                            ),
+                            const SizedBox(width: 2),
+                            Expanded(
+                              child: Text(
+                                video.telegramTopicName!,
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w400,
+                                  color: Colors.orange[400],
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     const SizedBox(height: 2),
                     Row(
                       children: [
