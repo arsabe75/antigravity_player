@@ -213,4 +213,26 @@ class RecentVideosService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_key);
   }
+
+  /// Limpia solo los videos de Telegram
+  Future<void> clearTelegramVideos() async {
+    final prefs = await SharedPreferences.getInstance();
+    final videos = await getRecentVideos();
+    // Keep only non-Telegram videos
+    videos.removeWhere((v) => v.isTelegramVideo);
+
+    final jsonList = videos.map((v) => jsonEncode(v.toJson())).toList();
+    await prefs.setStringList(_key, jsonList);
+  }
+
+  /// Limpia solo los videos locales y de red (no Telegram)
+  Future<void> clearLocalVideos() async {
+    final prefs = await SharedPreferences.getInstance();
+    final videos = await getRecentVideos();
+    // Keep only Telegram videos
+    videos.removeWhere((v) => !v.isTelegramVideo);
+
+    final jsonList = videos.map((v) => jsonEncode(v.toJson())).toList();
+    await prefs.setStringList(_key, jsonList);
+  }
 }

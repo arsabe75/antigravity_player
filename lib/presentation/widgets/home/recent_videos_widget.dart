@@ -9,14 +9,18 @@ import '../../providers/recent_videos_refresh_provider.dart';
 /// Use [showTelegramVideos] to filter:
 /// - false: Shows only local/network videos (for Home screen)
 /// - true: Shows only Telegram videos (for Telegram screen)
+///
+/// Set [panelWidth] to constrain the widget width (used when placed in a Row)
 class RecentVideosWidget extends ConsumerStatefulWidget {
   final Function(RecentVideo video) onVideoSelected;
   final bool showTelegramVideos;
+  final double panelWidth;
 
   const RecentVideosWidget({
     super.key,
     required this.onVideoSelected,
     this.showTelegramVideos = false,
+    this.panelWidth = 280,
   });
 
   @override
@@ -93,7 +97,12 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
     );
 
     if (confirm == true) {
-      await _service.clearAll();
+      // Clear only the appropriate type of videos
+      if (widget.showTelegramVideos) {
+        await _service.clearTelegramVideos();
+      } else {
+        await _service.clearLocalVideos();
+      }
       await _loadVideos();
     }
   }
@@ -147,51 +156,69 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Container(
-      margin: EdgeInsets.zero,
+      width: widget.panelWidth,
+      decoration: BoxDecoration(
+        color: isDark
+            ? Colors.grey[900]?.withValues(alpha: 0.5)
+            : Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+        ),
+      ),
+      padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
         children: [
           // Header
-          Row(
-            children: [
-              Icon(
-                LucideIcons.history,
-                size: 18,
-                color: Theme.of(context).colorScheme.primary,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                'Recent Videos',
-                style: TextStyle(
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                  color: Theme.of(context).colorScheme.onSurface,
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              children: [
+                Icon(
+                  LucideIcons.history,
+                  size: 16,
+                  color: Theme.of(context).colorScheme.primary,
                 ),
-              ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: _clearAll,
-                icon: const Icon(LucideIcons.trash2, size: 14),
-                label: const Text('Clear'),
-                style: TextButton.styleFrom(
-                  foregroundColor: Colors.grey,
-                  textStyle: const TextStyle(fontSize: 12),
+                const SizedBox(width: 6),
+                Text(
+                  'Recent',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
                 ),
-              ),
-            ],
+                const Spacer(),
+                IconButton(
+                  onPressed: _clearAll,
+                  icon: Icon(
+                    LucideIcons.trash2,
+                    size: 14,
+                    color: Colors.grey[500],
+                  ),
+                  tooltip: 'Clear all',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(
+                    minWidth: 24,
+                    minHeight: 24,
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
 
-          // Videos List
-          SizedBox(
-            height: 120,
+          // Videos List - Vertical scrollable
+          Expanded(
             child: ListView.separated(
-              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 4),
               itemCount: _videos.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 12),
+              separatorBuilder: (context, index) => const SizedBox(height: 8),
               itemBuilder: (context, index) {
                 final video = _videos[index];
-                return _buildVideoCard(video, isDark);
+                return _buildVerticalVideoCard(video, isDark);
               },
             ),
           ),
@@ -200,83 +227,84 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
     );
   }
 
-  Widget _buildVideoCard(RecentVideo video, bool isDark) {
+  Widget _buildVerticalVideoCard(RecentVideo video, bool isDark) {
     return Material(
       color: isDark ? Colors.grey[850] : Colors.grey[100],
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(8),
       child: InkWell(
         onTap: () => widget.onVideoSelected(video),
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          width: 180,
-          padding: const EdgeInsets.all(12),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        borderRadius: BorderRadius.circular(8),
+        child: Padding(
+          padding: const EdgeInsets.all(10),
+          child: Row(
             children: [
-              // Icon and close button
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(6),
-                    decoration: BoxDecoration(
-                      color: video.isNetwork
-                          ? Colors.blue.withValues(alpha: 0.2)
-                          : Colors.green.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Icon(
-                      video.isNetwork ? LucideIcons.globe : LucideIcons.file,
-                      size: 14,
-                      color: video.isNetwork ? Colors.blue : Colors.green,
-                    ),
-                  ),
-                  const Spacer(),
-                  GestureDetector(
-                    onTap: () => _removeVideo(video),
-                    child: Icon(
-                      LucideIcons.x,
-                      size: 14,
-                      color: Colors.grey[500],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-
-              // Title
-              Expanded(
-                child: SingleChildScrollView(
-                  child: Text(
-                    video.displayName,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                      color: Theme.of(context).colorScheme.onSurface,
-                    ),
-                  ),
+              // Icon
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: video.isNetwork
+                      ? Colors.blue.withValues(alpha: 0.2)
+                      : Colors.green.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Icon(
+                  video.isNetwork ? LucideIcons.globe : LucideIcons.file,
+                  size: 14,
+                  color: video.isNetwork ? Colors.blue : Colors.green,
                 ),
               ),
-
-              const SizedBox(height: 6),
-
-              // Time and position
-              Row(
-                children: [
-                  Text(
-                    _formatTimeAgo(video.playedAt),
-                    style: TextStyle(fontSize: 10, color: Colors.grey[500]),
-                  ),
-                  if (video.lastPosition != null &&
-                      video.lastPosition!.inSeconds > 0) ...[
-                    const Spacer(),
-                    Icon(LucideIcons.clock, size: 10, color: Colors.grey[500]),
-                    const SizedBox(width: 2),
+              const SizedBox(width: 10),
+              // Title and metadata
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      _formatDuration(video.lastPosition!),
-                      style: TextStyle(fontSize: 10, color: Colors.grey[500]),
+                      video.displayName,
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
+                        color: Theme.of(context).colorScheme.onSurface,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Text(
+                          _formatTimeAgo(video.playedAt),
+                          style: TextStyle(
+                            fontSize: 10,
+                            color: Colors.grey[500],
+                          ),
+                        ),
+                        if (video.lastPosition != null &&
+                            video.lastPosition!.inSeconds > 0) ...[
+                          const SizedBox(width: 8),
+                          Icon(
+                            LucideIcons.clock,
+                            size: 10,
+                            color: Colors.grey[500],
+                          ),
+                          const SizedBox(width: 2),
+                          Text(
+                            _formatDuration(video.lastPosition!),
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey[500],
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ],
-                ],
+                ),
+              ),
+              // Delete button
+              GestureDetector(
+                onTap: () => _removeVideo(video),
+                child: Icon(LucideIcons.x, size: 14, color: Colors.grey[500]),
               ),
             ],
           ),
