@@ -202,50 +202,9 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: Column(
+      body: Row(
         children: [
-          // Recent Telegram Videos
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-            child: RecentVideosWidget(
-              key: _recentVideosKey,
-              showTelegramVideos: true,
-              onVideoSelected: (video) {
-                // Regenerate proxy URL with current port
-                final proxy = LocalStreamingProxy();
-                String url = video.path;
-                if (video.path.contains('/stream?file_id=')) {
-                  try {
-                    final uri = Uri.parse(video.path);
-                    final fileIdStr = uri.queryParameters['file_id'];
-                    final sizeStr = uri.queryParameters['size'];
-                    if (fileIdStr != null && sizeStr != null) {
-                      final fileId = int.parse(fileIdStr);
-                      final size = int.parse(sizeStr);
-                      url = proxy.getUrl(fileId, size);
-                    }
-                  } catch (_) {}
-                }
-
-                context
-                    .push(
-                      '/player',
-                      extra: {
-                        'url': url,
-                        'title': video.title,
-                        'telegramChatId': video.telegramChatId,
-                        'telegramMessageId': video.telegramMessageId,
-                        'telegramFileSize': video.telegramFileSize,
-                      },
-                    )
-                    .then((_) {
-                      // Refresh recent videos when returning from player
-                      _recentVideosKey.currentState?.refresh();
-                    });
-              },
-            ),
-          ),
-          // Favorites list
+          // Left side - Favorites list
           Expanded(
             child: _favorites.isEmpty
                 ? Center(
@@ -339,6 +298,47 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                       );
                     },
                   ),
+          ),
+          // Right side - Recent Telegram Videos Panel (only shows when not empty)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 16, right: 16),
+            child: RecentVideosWidget(
+              key: _recentVideosKey,
+              showTelegramVideos: true,
+              onVideoSelected: (video) {
+                // Regenerate proxy URL with current port
+                final proxy = LocalStreamingProxy();
+                String url = video.path;
+                if (video.path.contains('/stream?file_id=')) {
+                  try {
+                    final uri = Uri.parse(video.path);
+                    final fileIdStr = uri.queryParameters['file_id'];
+                    final sizeStr = uri.queryParameters['size'];
+                    if (fileIdStr != null && sizeStr != null) {
+                      final fileId = int.parse(fileIdStr);
+                      final size = int.parse(sizeStr);
+                      url = proxy.getUrl(fileId, size);
+                    }
+                  } catch (_) {}
+                }
+
+                context
+                    .push(
+                      '/player',
+                      extra: {
+                        'url': url,
+                        'title': video.title,
+                        'telegramChatId': video.telegramChatId,
+                        'telegramMessageId': video.telegramMessageId,
+                        'telegramFileSize': video.telegramFileSize,
+                      },
+                    )
+                    .then((_) {
+                      // Refresh recent videos when returning from player
+                      _recentVideosKey.currentState?.refresh();
+                    });
+              },
+            ),
           ),
         ],
       ),

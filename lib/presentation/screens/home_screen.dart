@@ -62,74 +62,84 @@ class HomeScreen extends ConsumerWidget {
     return Scaffold(
       body: Stack(
         children: [
-          // Main content
-          Column(
+          // Main content with right panel
+          Row(
             children: [
+              // Left side - Main content
               Expanded(
-                child: Center(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 32),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        const SizedBox(height: 60), // Space for top bar
-                        Icon(
-                          LucideIcons.clapperboard,
-                          size: 64,
-                          color: Theme.of(context).colorScheme.primary,
-                        ),
-                        const SizedBox(height: 32),
-                        Text(
-                          'Antigravity Player',
-                          style: TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: Theme.of(context).colorScheme.onSurface,
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: Center(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(horizontal: 32),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const SizedBox(height: 60), // Space for top bar
+                              Icon(
+                                LucideIcons.clapperboard,
+                                size: 64,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                              const SizedBox(height: 32),
+                              Text(
+                                'Antigravity Player',
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurface,
+                                ),
+                              ),
+                              const SizedBox(height: 48),
+                              Wrap(
+                                spacing: 16,
+                                runSpacing: 16,
+                                alignment: WrapAlignment.center,
+                                children: [
+                                  SizedBox(
+                                    width: 200,
+                                    height: 50,
+                                    child: OutlinedButton.icon(
+                                      onPressed: () => _pickFile(context, ref),
+                                      icon: const Icon(LucideIcons.folderOpen),
+                                      label: const Text('Open Local File(s)'),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 200,
+                                    height: 50,
+                                    child: OutlinedButton.icon(
+                                      onPressed: () => _enterUrl(context),
+                                      icon: const Icon(LucideIcons.globe),
+                                      label: const Text('Open Network URL'),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 200,
+                                    height: 50,
+                                    child: OutlinedButton.icon(
+                                      onPressed: () =>
+                                          context.push('/telegram'),
+                                      icon: const Icon(LucideIcons.send),
+                                      label: const Text('Telegram'),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 48),
-                        Wrap(
-                          spacing: 16,
-                          runSpacing: 16,
-                          alignment: WrapAlignment.center,
-                          children: [
-                            SizedBox(
-                              width: 200,
-                              height: 50,
-                              child: OutlinedButton.icon(
-                                onPressed: () => _pickFile(context, ref),
-                                icon: const Icon(LucideIcons.folderOpen),
-                                label: const Text('Open Local File(s)'),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 200,
-                              height: 50,
-                              child: OutlinedButton.icon(
-                                onPressed: () => _enterUrl(context),
-                                icon: const Icon(LucideIcons.globe),
-                                label: const Text('Open Network URL'),
-                              ),
-                            ),
-                            SizedBox(
-                              width: 200,
-                              height: 50,
-                              child: OutlinedButton.icon(
-                                onPressed: () => context.push('/telegram'),
-                                icon: const Icon(LucideIcons.send),
-                                label: const Text('Telegram'),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
+                      ),
                     ),
-                  ),
+                  ],
                 ),
               ),
-              // Recent Videos pinned to bottom
+              // Right side - Recent Videos Panel (only shows when not empty)
               Padding(
-                padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
+                padding: const EdgeInsets.only(top: 48, bottom: 16, right: 16),
                 child: RecentVideosWidget(
                   // showTelegramVideos: false (default) - only local/network videos
                   onVideoSelected: (video) {
