@@ -16,6 +16,10 @@ class RecentVideo {
   final int? telegramMessageId;
   final int? telegramFileSize;
 
+  /// Topic information for forum videos
+  final int? telegramTopicId;
+  final String? telegramTopicName;
+
   RecentVideo({
     required this.path,
     this.title,
@@ -25,6 +29,8 @@ class RecentVideo {
     this.telegramChatId,
     this.telegramMessageId,
     this.telegramFileSize,
+    this.telegramTopicId,
+    this.telegramTopicName,
   });
 
   /// Returns a stable key for progress storage.
@@ -67,6 +73,8 @@ class RecentVideo {
     'telegramChatId': telegramChatId,
     'telegramMessageId': telegramMessageId,
     'telegramFileSize': telegramFileSize,
+    'telegramTopicId': telegramTopicId,
+    'telegramTopicName': telegramTopicName,
   };
 
   factory RecentVideo.fromJson(Map<String, dynamic> json) => RecentVideo(
@@ -80,6 +88,8 @@ class RecentVideo {
     telegramChatId: json['telegramChatId'] as int?,
     telegramMessageId: json['telegramMessageId'] as int?,
     telegramFileSize: json['telegramFileSize'] as int?,
+    telegramTopicId: json['telegramTopicId'] as int?,
+    telegramTopicName: json['telegramTopicName'] as String?,
   );
 }
 
@@ -109,6 +119,7 @@ class RecentVideosService {
   ///
   /// For Telegram videos, provide [telegramChatId], [telegramMessageId], and
   /// [telegramFileSize] for stable identification that survives cache clears.
+  /// For forum topics, provide [telegramTopicId] and [telegramTopicName].
   Future<void> addVideo(
     String path, {
     String? title,
@@ -117,6 +128,8 @@ class RecentVideosService {
     int? telegramChatId,
     int? telegramMessageId,
     int? telegramFileSize,
+    int? telegramTopicId,
+    String? telegramTopicName,
   }) async {
     final prefs = await SharedPreferences.getInstance();
     final videos = await getRecentVideos();
@@ -127,6 +140,8 @@ class RecentVideosService {
     int? existingChatId;
     int? existingMessageId;
     int? existingFileSize;
+    int? existingTopicId;
+    String? existingTopicName;
 
     int existingIndex = -1;
     if (telegramChatId != null && telegramMessageId != null) {
@@ -148,6 +163,8 @@ class RecentVideosService {
       existingChatId = existing.telegramChatId;
       existingMessageId = existing.telegramMessageId;
       existingFileSize = existing.telegramFileSize;
+      existingTopicId = existing.telegramTopicId;
+      existingTopicName = existing.telegramTopicName;
       videos.removeAt(existingIndex);
     }
 
@@ -163,6 +180,8 @@ class RecentVideosService {
         telegramChatId: telegramChatId ?? existingChatId,
         telegramMessageId: telegramMessageId ?? existingMessageId,
         telegramFileSize: telegramFileSize ?? existingFileSize,
+        telegramTopicId: telegramTopicId ?? existingTopicId,
+        telegramTopicName: telegramTopicName ?? existingTopicName,
       ),
     );
 
@@ -193,6 +212,8 @@ class RecentVideosService {
         telegramChatId: video.telegramChatId,
         telegramMessageId: video.telegramMessageId,
         telegramFileSize: video.telegramFileSize,
+        telegramTopicId: video.telegramTopicId,
+        telegramTopicName: video.telegramTopicName,
       );
 
       final jsonList = videos.map((v) => jsonEncode(v.toJson())).toList();

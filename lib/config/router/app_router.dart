@@ -19,6 +19,8 @@ final appRouter = GoRouter(
         int? telegramChatId;
         int? telegramMessageId;
         int? telegramFileSize;
+        int? telegramTopicId;
+        String? telegramTopicName;
 
         if (state.extra is Map) {
           final map = state.extra as Map;
@@ -27,6 +29,8 @@ final appRouter = GoRouter(
           telegramChatId = map['telegramChatId'] as int?;
           telegramMessageId = map['telegramMessageId'] as int?;
           telegramFileSize = map['telegramFileSize'] as int?;
+          telegramTopicId = map['telegramTopicId'] as int?;
+          telegramTopicName = map['telegramTopicName'] as String?;
         } else if (state.extra is String) {
           url = state.extra as String?;
         }
@@ -37,6 +41,8 @@ final appRouter = GoRouter(
           telegramChatId: telegramChatId,
           telegramMessageId: telegramMessageId,
           telegramFileSize: telegramFileSize,
+          telegramTopicId: telegramTopicId,
+          telegramTopicName: telegramTopicName,
         );
       },
     ),

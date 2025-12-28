@@ -36,6 +36,8 @@ class PlayerNotifier extends _$PlayerNotifier {
   int? _telegramChatId;
   int? _telegramMessageId;
   int? _telegramFileSize;
+  int? _telegramTopicId;
+  String? _telegramTopicName;
 
   @override
   PlayerState build() {
@@ -147,6 +149,7 @@ class PlayerNotifier extends _$PlayerNotifier {
   ///
   /// For Telegram videos, provide [telegramChatId], [telegramMessageId], and
   /// [telegramFileSize] for stable progress persistence that survives cache clears.
+  /// For forum topics, provide [telegramTopicId] and [telegramTopicName].
   Future<void> loadVideo(
     String path, {
     bool isNetwork = false,
@@ -154,6 +157,8 @@ class PlayerNotifier extends _$PlayerNotifier {
     int? telegramChatId,
     int? telegramMessageId,
     int? telegramFileSize,
+    int? telegramTopicId,
+    String? telegramTopicName,
   }) async {
     _abortCurrentProxyRequest();
 
@@ -176,6 +181,8 @@ class PlayerNotifier extends _$PlayerNotifier {
       _telegramChatId = telegramChatId;
       _telegramMessageId = telegramMessageId;
       _telegramFileSize = telegramFileSize;
+      _telegramTopicId = telegramTopicId;
+      _telegramTopicName = telegramTopicName;
 
       // Extract and store proxy file ID safely for disposal
       _currentProxyFileId = null;
@@ -231,6 +238,8 @@ class PlayerNotifier extends _$PlayerNotifier {
         telegramChatId: _telegramChatId,
         telegramMessageId: _telegramMessageId,
         telegramFileSize: _telegramFileSize,
+        telegramTopicId: _telegramTopicId,
+        telegramTopicName: _telegramTopicName,
       );
 
       // Use stable Telegram message ID for progress key (survives cache clears)
