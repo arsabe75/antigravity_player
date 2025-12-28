@@ -60,6 +60,9 @@ class TelegramService {
   ffi.Pointer<ffi.Void>? _client;
   bool _initialized = false;
 
+  /// Returns true if the TDLib client is initialized and ready to accept requests
+  bool get isClientReady => _client != null && _initialized;
+
   Future<void> initialize() async {
     if (_initialized) return;
 

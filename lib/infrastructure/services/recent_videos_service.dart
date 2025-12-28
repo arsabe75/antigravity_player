@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:path/path.dart' as p;
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// Representa un video en el historial
@@ -53,7 +54,8 @@ class RecentVideo {
         return path;
       }
     }
-    return path.split('/').last;
+    // Use path package for cross-platform support (Windows uses \, Linux uses /)
+    return p.basename(path);
   }
 
   Map<String, dynamic> toJson() => {
