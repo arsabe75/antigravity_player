@@ -53,6 +53,10 @@ class TelegramContentNotifier extends Notifier<TelegramContentState> {
       if (update['@type'] == 'updateNewChat') {
         final chat = update['chat'];
         final chatId = chat['id'];
+        final photoId = chat['photo']?['small']?['id'];
+        debugPrint(
+          'TelegramContentNotifier: New Chat $chatId, PhotoID: $photoId',
+        );
 
         // Add to buffer
         _bufferedChats[chatId] = chat;
@@ -80,6 +84,10 @@ class TelegramContentNotifier extends Notifier<TelegramContentState> {
       } else if (update['@type'] == 'chat') {
         // Response from getChat - full chat object
         final chatId = update['id'];
+        final photoId = update['photo']?['small']?['id'];
+        debugPrint(
+          'TelegramContentNotifier: Full Chat $chatId, PhotoID: $photoId',
+        );
         _bufferedChats[chatId] = update;
         _scheduleFlush();
       } else if (update['@type'] == 'updateChatPosition') {

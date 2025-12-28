@@ -5,6 +5,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
 import '../widgets/window_controls.dart';
 import '../providers/telegram_forum_notifier.dart';
+import '../widgets/custom_emoji_icon.dart';
 
 class TelegramTopicsScreen extends ConsumerWidget {
   final int chatId;
@@ -15,18 +16,6 @@ class TelegramTopicsScreen extends ConsumerWidget {
     required this.chatId,
     required this.title,
   });
-
-  /// Get topic icon data from topic info
-  IconData _getTopicIcon(Map<String, dynamic> topicInfo) {
-    // TDLib uses custom emoji or icons for topics
-    // For now, we'll use a default icon
-    final iconCustomEmojiId = topicInfo['icon']?['custom_emoji_id'];
-    if (iconCustomEmojiId != null && iconCustomEmojiId != 0) {
-      // Custom emoji - would need to fetch the actual emoji
-      return LucideIcons.smile;
-    }
-    return LucideIcons.messageSquare;
-  }
 
   /// Get topic icon color from topic info
   Color _getTopicColor(Map<String, dynamic> topicInfo) {
@@ -176,13 +165,27 @@ class TelegramTopicsScreen extends ConsumerWidget {
                     child: ListTile(
                       leading: CircleAvatar(
                         backgroundColor: _getTopicColor(topicInfo),
-                        child: Icon(
-                          isGeneral
-                              ? LucideIcons.hash
-                              : _getTopicIcon(topicInfo),
-                          color: Colors.white,
-                          size: 20,
-                        ),
+                        child: isGeneral
+                            ? const Icon(
+                                LucideIcons.hash,
+                                color: Colors.white,
+                                size: 20,
+                              )
+                            : CustomEmojiIcon(
+                                customEmojiId:
+                                    topicInfo['icon']?['custom_emoji_id'] is int
+                                    ? topicInfo['icon']!['custom_emoji_id']
+                                          as int
+                                    : int.tryParse(
+                                            topicInfo['icon']?['custom_emoji_id']
+                                                    .toString() ??
+                                                '0',
+                                          ) ??
+                                          0,
+                                fallbackIcon: LucideIcons.messageSquare,
+                                color: Colors.white,
+                                size: 20,
+                              ),
                       ),
                       title: Row(
                         children: [

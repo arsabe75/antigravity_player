@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../providers/telegram_content_notifier.dart';
-
+import '../widgets/chat_icon.dart';
 import 'package:window_manager/window_manager.dart';
 import '../widgets/window_controls.dart';
 
@@ -156,7 +156,11 @@ class _TelegramSelectionScreenState
                     backgroundColor: isForum
                         ? Theme.of(context).colorScheme.primaryContainer
                         : null,
-                    child: Icon(_getChatIcon(chat)),
+                    child: ChatIcon(
+                      chat: chat,
+                      fallbackIcon: _getChatIcon(chat),
+                      size: 40,
+                    ),
                   ),
                   title: Text(title),
                   subtitle: Text(_getChatSubtitle(chat)),
