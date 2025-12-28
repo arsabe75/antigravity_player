@@ -9,7 +9,9 @@ import 'package:window_manager/window_manager.dart';
 import '../widgets/window_controls.dart';
 import '../providers/telegram_auth_notifier.dart';
 import '../../infrastructure/services/local_streaming_proxy.dart';
+import '../../infrastructure/services/telegram_service.dart';
 import 'telegram_login_screen.dart';
+import '../widgets/chat_icon.dart';
 
 class TelegramScreen extends ConsumerStatefulWidget {
   const TelegramScreen({super.key});
@@ -33,9 +35,56 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
     final prefs = await SharedPreferences.getInstance();
     final String? favoritesJson = prefs.getString('telegram_favorites');
     if (favoritesJson != null) {
+      final cachedFavorites = List<Map<String, dynamic>>.from(
+        jsonDecode(favoritesJson),
+      );
+
+      // Set cached data immediately for fast display
       setState(() {
-        _favorites = List<Map<String, dynamic>>.from(jsonDecode(favoritesJson));
+        _favorites = cachedFavorites;
       });
+
+      // Refresh from TDLib to get fresh file IDs
+      _refreshFavoritesFromTdlib(cachedFavorites);
+    }
+  }
+
+  /// Refresh favorites data from TDLib to get updated file IDs
+  Future<void> _refreshFavoritesFromTdlib(
+    List<Map<String, dynamic>> cachedFavorites,
+  ) async {
+    final service = TelegramService();
+
+    final refreshedFavorites = <Map<String, dynamic>>[];
+
+    for (final cached in cachedFavorites) {
+      final chatId = cached['id'];
+      if (chatId == null) continue;
+
+      try {
+        final result = await service.sendWithResult({
+          '@type': 'getChat',
+          'chat_id': chatId,
+        });
+
+        if (result['@type'] == 'chat') {
+          refreshedFavorites.add(result);
+        } else {
+          // Keep cached version if refresh fails
+          refreshedFavorites.add(cached);
+        }
+      } catch (e) {
+        debugPrint('Failed to refresh chat $chatId: $e');
+        refreshedFavorites.add(cached);
+      }
+    }
+
+    if (refreshedFavorites.isNotEmpty && mounted) {
+      setState(() {
+        _favorites = refreshedFavorites;
+      });
+      // Save refreshed data
+      _saveFavorites();
     }
   }
 
@@ -181,10 +230,16 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                 return Card(
                   child: ListTile(
                     leading: CircleAvatar(
-                      backgroundColor: isForum
-                          ? Theme.of(context).colorScheme.primaryContainer
-                          : null,
-                      child: Icon(_getChatIcon(chat)),
+                      backgroundColor:
+                          ChatIcon.getAccentColor(chat) ??
+                          (isForum
+                              ? Theme.of(context).colorScheme.primaryContainer
+                              : null),
+                      child: ChatIcon(
+                        chat: chat,
+                        fallbackIcon: _getChatIcon(chat),
+                        size: 40,
+                      ),
                     ),
                     title: Text(title),
                     subtitle: Row(

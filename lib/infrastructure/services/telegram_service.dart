@@ -236,7 +236,11 @@ class TelegramService {
           final resultJson = jsonDecode(resultStr);
           // Only send relevant updates to Main Isolate to prevent flooding
           final type = resultJson['@type'];
+          if (type == 'updateFile') {
+            // print('Isolate received updateFile: ${resultJson['file']['id']}');
+          }
           if (type != null && !ignoredTypes.contains(type)) {
+            // if (type == 'updateFile') print('Isolate sending updateFile to main');
             args.sendPort.send(resultJson);
           }
         } catch (e) {
