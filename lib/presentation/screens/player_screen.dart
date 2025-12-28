@@ -16,6 +16,7 @@ import '../../domain/entities/player_error.dart';
 import '../providers/player_notifier.dart';
 import '../providers/player_state.dart';
 import '../providers/playlist_notifier.dart';
+import '../providers/recent_videos_refresh_provider.dart';
 import '../providers/video_repository_provider.dart';
 import '../widgets/player/player_widgets.dart';
 import '../widgets/player/track_selection_sheet.dart';
@@ -146,6 +147,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       _isDisposing = true;
     });
 
+    // Trigger refresh before closing
+    triggerRecentVideosRefresh(ref);
+
     // Wait for frame to unmount VideoPlayer
     await Future.delayed(AppConstants.disposeDelay * 2);
 
@@ -183,6 +187,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     setState(() {
       _isDisposing = true;
     });
+
+    // Trigger refresh of recent videos BEFORE we navigate away
+    triggerRecentVideosRefresh(ref);
+
     await Future.delayed(AppConstants.disposeDelay);
     await ref.read(playerProvider.notifier).stop();
     if (mounted) {

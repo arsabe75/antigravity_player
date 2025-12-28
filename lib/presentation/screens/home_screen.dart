@@ -131,8 +131,9 @@ class HomeScreen extends ConsumerWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(32, 0, 32, 32),
                 child: RecentVideosWidget(
-                  onVideoSelected: (path, isNetwork) {
-                    context.go('/player', extra: path);
+                  // showTelegramVideos: false (default) - only local/network videos
+                  onVideoSelected: (video) {
+                    context.go('/player', extra: video.path);
                   },
                 ),
               ),
