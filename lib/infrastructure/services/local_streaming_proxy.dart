@@ -1128,6 +1128,31 @@ class LocalStreamingProxy {
       return;
     }
 
+    // SCRUBBING DETECTION: If multiple seeks detected within 500ms, use debounce
+    // to reduce TDLib download cancellations during rapid scrubbing.
+    // This only triggers on the SECOND seek within the window.
+    final debounceLastSeek = _lastSeekTime[fileId];
+    final debounceNow = DateTime.now();
+    final isRapidSeek =
+        debounceLastSeek != null &&
+        debounceNow.difference(debounceLastSeek).inMilliseconds < 500;
+
+    // Check if there's already a pending debounced seek - if so, let it handle this
+    if (_pendingSeekOffsets.containsKey(fileId)) {
+      // Update the pending offset to the latest request
+      _handleDebouncedSeek(fileId, requestedOffset);
+      return;
+    }
+
+    // If this is a rapid seek (second+ seek within 500ms), use debounce
+    if (isRapidSeek) {
+      debugPrint(
+        'Proxy: Rapid seek detected for $fileId, debouncing to ${requestedOffset ~/ 1024}KB',
+      );
+      _handleDebouncedSeek(fileId, requestedOffset);
+      return;
+    }
+
     // Check if we're already downloading from this offset (or very close)
     final currentActiveOffset = _activeDownloadOffset[fileId];
     final currentDownloadOffset = cached?.downloadOffset ?? 0;
@@ -1675,7 +1700,6 @@ class LocalStreamingProxy {
   /// Debounced seek handler to prevent flooding TDLib with rapid cancellations.
   /// Instead of immediately cancelling and restarting download on each seek,
   /// this coalesces rapid seeks into a single request.
-  // ignore: unused_element
   void _handleDebouncedSeek(int fileId, int seekOffset) {
     // Cancel any pending debounce timer for this file
     _seekDebounceTimers[fileId]?.cancel();
