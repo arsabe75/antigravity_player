@@ -667,7 +667,28 @@ class LocalStreamingProxy {
         final jump = (start - lastOffset).abs();
         if (jump > 1024 * 1024) {
           isSeekRequest = true;
-          _lastSeekTime[fileId] = DateTime.now();
+
+          // Don't set _lastSeekTime for moov requests (near end of file) OR
+          // for seeks TO the beginning (initial playback).
+          // _lastSeekTime should only be set for TRUE SCRUBBING: user dragging
+          // the seek bar while video is playing (both positions > 10MB).
+          final isMoovRequest =
+              totalSize > 0 &&
+              (totalSize - start) <
+                  (totalSize * 0.05).round().clamp(
+                    10 * 1024 * 1024,
+                    100 * 1024 * 1024,
+                  );
+          final isSeekToBeginning = start < 10 * 1024 * 1024;
+          final isTrueScrubbing =
+              !isMoovRequest &&
+              !isSeekToBeginning &&
+              lastOffset > 10 * 1024 * 1024;
+
+          if (isTrueScrubbing) {
+            _lastSeekTime[fileId] = DateTime.now();
+          }
+
           // CRITICAL FIX: When a seek is detected, reset the primary offset to the seek target
           // This prevents the primary from getting stuck at 0 when seeking forward
           _primaryPlaybackOffset[fileId] = start;
@@ -896,6 +917,14 @@ class LocalStreamingProxy {
                 );
                 if (nowAvailable > 0) {
                   break; // Data is now available, exit wait loop
+                }
+
+                // DOWNLOAD RESTART: If download has stalled (not active anymore),
+                // restart it to continue downloading. This happens when TDLib stops
+                // after reaching the preload limit.
+                if (!updatedCache.isDownloadingActive &&
+                    waitAttempts % 5 == 4) {
+                  _startDownloadAtOffset(fileId, currentReadOffset);
                 }
               }
 
@@ -1130,15 +1159,21 @@ class LocalStreamingProxy {
 
     // SCRUBBING DETECTION: If multiple seeks detected within 500ms, use debounce
     // to reduce TDLib download cancellations during rapid scrubbing.
-    // This only triggers on the SECOND seek within the window.
+    // IMPORTANT: Only debounce during ACTIVE PLAYBACK, not during initial load.
+    // We detect active playback by checking if we've served at least 10MB of data.
+    final lastServed = _lastServedOffset[fileId] ?? 0;
+    final isActivePlayback =
+        lastServed > 10 * 1024 * 1024; // At least 10MB served
+
     final debounceLastSeek = _lastSeekTime[fileId];
     final debounceNow = DateTime.now();
     final isRapidSeek =
+        isActivePlayback &&
         debounceLastSeek != null &&
         debounceNow.difference(debounceLastSeek).inMilliseconds < 500;
 
     // Check if there's already a pending debounced seek - if so, let it handle this
-    if (_pendingSeekOffsets.containsKey(fileId)) {
+    if (isActivePlayback && _pendingSeekOffsets.containsKey(fileId)) {
       // Update the pending offset to the latest request
       _handleDebouncedSeek(fileId, requestedOffset);
       return;
@@ -1291,6 +1326,14 @@ class LocalStreamingProxy {
               debugPrint(
                 'Proxy: Fresh-file moov protection complete for $fileId - starting moov download',
               );
+
+              // IMPORTANT: Clear seek time to prevent debounce from interfering
+              // The next download request should proceed immediately, not be debounced
+              _lastSeekTime.remove(fileId);
+              _pendingSeekOffsets.remove(fileId);
+              _seekDebounceTimers[fileId]?.cancel();
+              _seekDebounceTimers.remove(fileId);
+
               // Trigger the moov download now that TDLib has settled
               _startDownloadAtOffset(fileId, requestedOffset);
             }
