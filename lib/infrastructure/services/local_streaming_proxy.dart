@@ -314,68 +314,6 @@ class LocalStreamingProxy {
   static const int _moovPreFetchMinPrefix =
       2 * 1024 * 1024; // Wait for 2MB before fetching moov
 
-  // ADAPTIVE MOOV THRESHOLD: Calculate based on network speed AND file size
-  // Fast network = smaller threshold = faster initial load
-  // Slow network = larger threshold = more safety
-  // Large files = larger threshold = more stability
-  // OPTIMIZATION 3: Existing cache = much lower threshold
-  int _getAdaptiveMoovThreshold(int fileId) {
-    final metrics = _downloadMetrics[fileId];
-    final cached = _filePaths[fileId];
-    final totalSize = cached?.totalSize ?? 0;
-    final existingPrefix = cached?.downloadedPrefixSize ?? 0;
-
-    // OPTIMIZATION 3: If file already has substantial data from previous session,
-    // use a much lower threshold - we can trust the cached data
-    if (existingPrefix > 5 * 1024 * 1024) {
-      // Already have 5MB+ cached, can start moov download quickly
-      debugPrint(
-        'Proxy: Using low threshold for $fileId - already have ${existingPrefix ~/ (1024 * 1024)}MB cached',
-      );
-      return 512 * 1024; // 512KB - trust the existing cache
-    }
-
-    // Base threshold based on network speed
-    int baseThreshold;
-    if (metrics == null || metrics.bytesPerSecond == 0) {
-      // No metrics yet, use conservative default
-      baseThreshold = 2 * 1024 * 1024; // 2MB
-    } else if (metrics.isFastNetwork) {
-      // Fast network (>2MB/s): User expects quick loading
-      baseThreshold = 512 * 1024; // 512KB - very fast start
-    } else if (metrics.bytesPerSecond > 500 * 1024) {
-      // Medium network (500KB/s - 2MB/s): Balance speed and safety
-      baseThreshold = 1024 * 1024; // 1MB
-    } else {
-      // Slow network (<500KB/s): User is used to waiting, prioritize reliability
-      baseThreshold = 2 * 1024 * 1024; // 2MB - safe default
-    }
-
-    // LARGE FILE ADJUSTMENT: Increase threshold for very large files
-    // The moov atom download takes time to start, larger files need more buffer
-    if (totalSize > 2 * 1024 * 1024 * 1024) {
-      // Files > 2GB: Use at least 10MB (or more based on size)
-      final sizeBasedThreshold = (totalSize ~/ 400).clamp(
-        10 * 1024 * 1024, // Min 10MB
-        50 * 1024 * 1024, // Max 50MB
-      );
-      baseThreshold = baseThreshold > sizeBasedThreshold
-          ? baseThreshold
-          : sizeBasedThreshold;
-      debugPrint(
-        'Proxy: Large file threshold for $fileId: ${baseThreshold ~/ (1024 * 1024)}MB '
-        '(file size: ${totalSize ~/ (1024 * 1024)}MB)',
-      );
-    } else if (totalSize > 1024 * 1024 * 1024) {
-      // Files 1-2GB: Use at least 5MB
-      baseThreshold = baseThreshold > 5 * 1024 * 1024
-          ? baseThreshold
-          : 5 * 1024 * 1024;
-    }
-
-    return baseThreshold;
-  }
-
   // MOOV-AT-END DETECTION: Track files where moov atom is at the end
   // These files are NOT optimized for streaming and require extra loading time
   final Map<int, bool> _isMoovAtEnd = {};
@@ -1305,9 +1243,6 @@ class LocalStreamingProxy {
             return; // Don't block, but don't start download here either
           }
 
-          final unblockTime = _moovUnblockTime[fileId];
-          final now = DateTime.now();
-
           // DISABLED: MOOV STABILIZE was blocking playback start by delaying moov fetch.
           // The player cannot display video without moov metadata. Removed blocking.
           // The TDLib will handle the download naturally without our interference.
@@ -1397,12 +1332,9 @@ class LocalStreamingProxy {
         (totalSize - requestedOffset) <
             (totalSize * 0.01).round().clamp(5 * 1024 * 1024, 50 * 1024 * 1024);
 
-    // Check if this is a large offset jump from cached data
-    final cachedPrefix = cached?.downloadedPrefixSize ?? 0;
-    // final isLargeJump = (requestedOffset - cachedPrefix).abs() > 50 * 1024 * 1024;
-
     // DISABLED: This cancel-and-wait mechanism was causing race conditions.
     // It would cancel the current download, wait 1s, then try to download moov.
+    // Removed cachedPrefix variable that was used for this mechanism.
     // But during that 1s wait, other requests kept coming and triggering new downloads,
     // which interfered with the deferred moov download.
     // Now we just let TDLib handle the offset change directly.
@@ -1634,6 +1566,8 @@ class LocalStreamingProxy {
   /// Schedule moov atom pre-fetch after initial buffering reaches threshold.
   /// Called from _onUpdate when downloadedPrefixSize changes.
   /// This implements the DrKLO-inspired sequential moov fetch strategy.
+  /// DISABLED: TDLib cancels active downloads when offset changes, breaking playback.
+  // ignore: unused_element
   void _scheduleMoovPreFetch(int fileId, int currentPrefix, int totalSize) {
     // Skip if already scheduled or completed
     if (_moovPreFetchScheduled[fileId] == true ||
@@ -1696,12 +1630,13 @@ class LocalStreamingProxy {
   }
 
   // ============================================================
-  // PHASE 1: SEEK DEBOUNCE
+  // PHASE 1: SEEK DEBOUNCE (RESERVED FOR FUTURE USE)
   // ============================================================
 
   /// Debounced seek handler to prevent flooding TDLib with rapid cancellations.
   /// Instead of immediately cancelling and restarting download on each seek,
   /// this coalesces rapid seeks into a single request.
+  // ignore: unused_element
   void _handleDebouncedSeek(int fileId, int seekOffset) {
     // Cancel any pending debounce timer for this file
     _seekDebounceTimers[fileId]?.cancel();
@@ -1729,6 +1664,7 @@ class LocalStreamingProxy {
 
   /// Check if there's a pending debounced seek for a file.
   /// Returns the pending offset if exists, null otherwise.
+  // ignore: unused_element
   int? _getPendingSeekOffset(int fileId) {
     return _pendingSeekOffsets[fileId];
   }
