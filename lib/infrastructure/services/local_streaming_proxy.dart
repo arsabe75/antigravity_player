@@ -111,6 +111,122 @@ class _DownloadMetrics {
   }
 }
 
+/// LRU Cache for streaming data.
+/// Caches recently read chunks to enable instant backward seeks.
+class _StreamingLRUCache {
+  static const int maxCacheSize = 32 * 1024 * 1024; // 32MB max per file
+  static const int chunkSize = 512 * 1024; // 512KB chunks
+
+  final Map<int, Uint8List> _chunks = {}; // chunkIndex -> data
+  final List<int> _lruOrder = []; // Most recently used at end
+  int _currentSize = 0;
+
+  /// Get cached data for the given range.
+  /// Returns null if data is not fully cached.
+  Uint8List? get(int offset, int length) {
+    final startChunk = offset ~/ chunkSize;
+    final endChunk = (offset + length - 1) ~/ chunkSize;
+
+    // Check if all required chunks are cached
+    for (int i = startChunk; i <= endChunk; i++) {
+      if (!_chunks.containsKey(i)) {
+        return null; // Cache miss
+      }
+    }
+
+    // All chunks are cached - assemble the result
+    final result = Uint8List(length);
+    int resultOffset = 0;
+
+    for (int i = startChunk; i <= endChunk; i++) {
+      final chunk = _chunks[i]!;
+      final chunkStart = i * chunkSize;
+
+      // Calculate which part of this chunk we need
+      final copyStart = i == startChunk ? offset - chunkStart : 0;
+      final copyEnd = i == endChunk
+          ? (offset + length) - chunkStart
+          : chunk.length;
+      final copyLen = min(copyEnd - copyStart, length - resultOffset);
+
+      if (copyStart >= 0 && copyStart < chunk.length && copyLen > 0) {
+        result.setRange(
+          resultOffset,
+          resultOffset + copyLen,
+          chunk.sublist(copyStart, copyStart + copyLen),
+        );
+        resultOffset += copyLen;
+      }
+
+      // Update LRU order
+      _lruOrder.remove(i);
+      _lruOrder.add(i);
+    }
+
+    return result;
+  }
+
+  /// Store data in cache, evicting old chunks if necessary.
+  void put(int offset, Uint8List data) {
+    final startChunk = offset ~/ chunkSize;
+
+    // Split data into chunks
+    int dataOffset = 0;
+    int chunkIndex = startChunk;
+
+    // Handle partial start chunk
+    final startChunkOffset = offset % chunkSize;
+    if (startChunkOffset > 0 && !_chunks.containsKey(chunkIndex)) {
+      // Skip partial first chunk if we don't have existing data
+      dataOffset = chunkSize - startChunkOffset;
+      chunkIndex++;
+    }
+
+    while (dataOffset < data.length) {
+      final remaining = data.length - dataOffset;
+      final chunkLen = min(chunkSize, remaining);
+
+      // Only cache complete chunks
+      if (chunkLen == chunkSize || dataOffset + chunkLen == data.length) {
+        final chunkData = data.sublist(dataOffset, dataOffset + chunkLen);
+
+        // Evict if necessary
+        while (_currentSize + chunkLen > maxCacheSize && _lruOrder.isNotEmpty) {
+          final evictIndex = _lruOrder.removeAt(0);
+          final evicted = _chunks.remove(evictIndex);
+          if (evicted != null) {
+            _currentSize -= evicted.length;
+          }
+        }
+
+        // Store chunk
+        if (!_chunks.containsKey(chunkIndex)) {
+          _chunks[chunkIndex] = chunkData;
+          _currentSize += chunkLen;
+        }
+        _lruOrder.remove(chunkIndex);
+        _lruOrder.add(chunkIndex);
+      }
+
+      dataOffset += chunkLen;
+      chunkIndex++;
+    }
+  }
+
+  /// Clear all cached data.
+  void clear() {
+    _chunks.clear();
+    _lruOrder.clear();
+    _currentSize = 0;
+  }
+
+  /// Current cache size in bytes.
+  int get size => _currentSize;
+
+  /// Number of cached chunks.
+  int get chunkCount => _chunks.length;
+}
+
 class LocalStreamingProxy {
   static final LocalStreamingProxy _instance = LocalStreamingProxy._internal();
   factory LocalStreamingProxy() => _instance;
@@ -152,6 +268,9 @@ class LocalStreamingProxy {
 
   // MÉTRICAS DE VELOCIDAD: Track download speed for adaptive decisions
   final Map<int, _DownloadMetrics> _downloadMetrics = {};
+
+  // IN-MEMORY LRU CACHE: Cache recently read data for instant backward seeks
+  final Map<int, _StreamingLRUCache> _streamingCaches = {};
 
   // SEEK RÁPIDO: Track if we recently seeked to reduce buffer requirement
   final Map<int, DateTime> _lastSeekTime = {};
@@ -375,6 +494,12 @@ class LocalStreamingProxy {
     _pendingSeekOffsets.clear();
     _moovPreFetchScheduled.clear();
     _moovPreFetchCompleted.clear();
+
+    // Clear LRU streaming caches
+    for (final cache in _streamingCaches.values) {
+      cache.clear();
+    }
+    _streamingCaches.clear();
   }
 
   /// Invalidates cached info for a specific file.
@@ -393,6 +518,10 @@ class LocalStreamingProxy {
     _pendingSeekOffsets.remove(fileId);
     _moovPreFetchScheduled.remove(fileId);
     _moovPreFetchCompleted.remove(fileId);
+
+    // Clear LRU streaming cache for this file
+    _streamingCaches[fileId]?.clear();
+    _streamingCaches.remove(fileId);
   }
 
   Future<void> start() async {
@@ -743,6 +872,18 @@ class LocalStreamingProxy {
               min(remainingToSend, 512 * 1024),
             );
 
+            // LRU CACHE: DISABLED - causes 'Error decoding audio' on backward seeks
+            // The cache logic has bugs with non-aligned chunk boundaries that return
+            // corrupted data. Needs redesign before re-enabling.
+            // TODO: Fix chunk boundary handling for non-512KB-aligned offsets
+
+            // _streamingCaches.putIfAbsent(fileId, () => _StreamingLRUCache());
+            // final cachedData = _streamingCaches[fileId]!.get(
+            //   currentReadOffset,
+            //   chunkToRead,
+            // );
+
+            // Always read from disk for now
             await raf.setPosition(currentReadOffset);
             final data = await raf.read(chunkToRead);
 
