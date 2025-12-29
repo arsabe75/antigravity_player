@@ -1452,16 +1452,21 @@ class LocalStreamingProxy {
     //   return;
     // }
 
-    // MOOV FIX: Use larger preload for moov downloads to ensure complete atom
-    // Moov atoms can be 5-10MB for large videos, adaptive buffer might be too small
-    final actualPreload = isMoovDownload
-        ? (preloadBytes < 8 * 1024 * 1024 ? 8 * 1024 * 1024 : preloadBytes)
-        : preloadBytes;
+    // MOOV FIX: Use dynamic preload for moov downloads based on actual moov size
+    // Moov atoms can be 5-15MB+ for large videos (4GB+ files have 10-15MB moov)
+    // Calculate the actual bytes remaining from request to end of file
+    int actualPreload = preloadBytes;
+    if (isMoovDownload) {
+      final moovSize = totalSize - requestedOffset;
+      // Use the actual moov size, clamped between 8MB min and 20MB max
+      final moovPreload = moovSize.clamp(8 * 1024 * 1024, 20 * 1024 * 1024);
+      actualPreload = (preloadBytes < moovPreload) ? moovPreload : preloadBytes;
 
-    if (isMoovDownload && actualPreload != preloadBytes) {
-      debugPrint(
-        'Proxy: Using larger preload for moov: ${actualPreload ~/ 1024}KB',
-      );
+      if (actualPreload != preloadBytes) {
+        debugPrint(
+          'Proxy: Using larger preload for moov: ${actualPreload ~/ 1024}KB (actual moov size: ${moovSize ~/ 1024}KB)',
+        );
+      }
     }
 
     TelegramService().send({
