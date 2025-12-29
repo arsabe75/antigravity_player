@@ -1236,6 +1236,45 @@ class LocalStreamingProxy {
             (requestedOffset - cachedPrefix).abs() >
                 50 * 1024 * 1024; // >50MB jump
 
+        // FRESH-FILE MOOV PROTECTION: After cache clear, there's no cached data
+        // but we still need to protect against large offset jumps which crash PartsManager.
+        // This case occurs when: cachedPrefix < 1MB AND requestedOffset > 500MB
+        final isFreshFileMoovJump =
+            isMoovRequest &&
+            !hasDataAtStart &&
+            requestedOffset > 500 * 1024 * 1024;
+
+        if (isFreshFileMoovJump && !_moovStabilizeCompleted.contains(fileId)) {
+          debugPrint(
+            'Proxy: Fresh-file moov jump detected for $fileId at ${requestedOffset ~/ (1024 * 1024)}MB - '
+            'canceling download and waiting before moov fetch',
+          );
+
+          // Mark as in-progress to prevent re-entry
+          _moovStabilizeCompleted.add(fileId);
+
+          // Cancel any ongoing download to give TDLib time to settle (fire-and-forget)
+          TelegramService().send({
+            '@type': 'cancelDownloadFile',
+            'file_id': fileId,
+            'only_if_pending': false,
+          });
+
+          // Schedule the actual moov download after TDLib settles
+          Future.delayed(const Duration(milliseconds: 300), () {
+            if (!_abortedRequests.contains(fileId)) {
+              debugPrint(
+                'Proxy: Fresh-file moov protection complete for $fileId - starting moov download',
+              );
+              // Trigger the moov download now that TDLib has settled
+              _startDownloadAtOffset(fileId, requestedOffset);
+            }
+          });
+
+          // Return early - the delayed callback will handle the download
+          return;
+        }
+
         if (isJumpingToMoov) {
           // If this file has already completed stabilization, skip
           if (_moovStabilizeCompleted.contains(fileId)) {
