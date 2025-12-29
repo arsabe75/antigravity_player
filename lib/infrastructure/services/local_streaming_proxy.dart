@@ -178,6 +178,23 @@ class LocalStreamingProxy {
   // MOOV STABILIZE: Track files that have completed stabilization (don't re-trigger)
   final Set<int> _moovStabilizeCompleted = {};
 
+  // ============================================================
+  // PHASE 1: DRKLO-INSPIRED OPTIMIZATIONS
+  // ============================================================
+
+  // SEEK DEBOUNCE: Prevent flooding TDLib with rapid seek cancellations
+  // During scrubbing, coalesce multiple seeks into single request
+  final Map<int, Timer?> _seekDebounceTimers = {};
+  final Map<int, int> _pendingSeekOffsets = {};
+  static const int _seekDebounceMs = 150; // Delay before executing seek
+
+  // MOOV PRE-FETCH: Schedule moov download after initial buffering
+  // This avoids the ping-pong effect for MP4s with moov at end
+  final Map<int, bool> _moovPreFetchScheduled = {};
+  final Map<int, bool> _moovPreFetchCompleted = {};
+  static const int _moovPreFetchMinPrefix =
+      2 * 1024 * 1024; // Wait for 2MB before fetching moov
+
   // ADAPTIVE MOOV THRESHOLD: Calculate based on network speed AND file size
   // Fast network = smaller threshold = faster initial load
   // Slow network = larger threshold = more safety
@@ -337,6 +354,27 @@ class LocalStreamingProxy {
     _lastOffsetChangeTime.clear();
     _activeHttpRequestOffsets.clear();
     _primaryPlaybackOffset.clear();
+
+    // Clear moov-related state to prevent stale behavior after cache clear
+    _moovUnblockTime.clear();
+    _moovStabilizeCompleted.clear();
+    _isMoovAtEnd.clear();
+    _downloadStartTime.clear();
+    _downloadMetrics.clear();
+    _sampleTableCache.clear();
+    _listPreloadStarted.clear();
+    _lastSeekTime.clear();
+    _lastServedOffset.clear();
+    _moovPreloadStarted.clear();
+
+    // Clear Phase 1 optimization state
+    for (final timer in _seekDebounceTimers.values) {
+      timer?.cancel();
+    }
+    _seekDebounceTimers.clear();
+    _pendingSeekOffsets.clear();
+    _moovPreFetchScheduled.clear();
+    _moovPreFetchCompleted.clear();
   }
 
   /// Invalidates cached info for a specific file.
@@ -348,6 +386,13 @@ class LocalStreamingProxy {
     _lastOffsetChangeTime.remove(fileId);
     _activeHttpRequestOffsets.remove(fileId);
     _primaryPlaybackOffset.remove(fileId);
+
+    // Clear Phase 1 state for this file
+    _seekDebounceTimers[fileId]?.cancel();
+    _seekDebounceTimers.remove(fileId);
+    _pendingSeekOffsets.remove(fileId);
+    _moovPreFetchScheduled.remove(fileId);
+    _moovPreFetchCompleted.remove(fileId);
   }
 
   Future<void> start() async {
@@ -387,6 +432,14 @@ class LocalStreamingProxy {
         isDownloadingActive: isDownloadingActive,
         isCompleted: isCompleted,
       );
+
+      // PHASE 1: DISABLED - Moov pre-fetch CANCELS active playback download!
+      // TDLib only allows 1 concurrent download per file, so pre-fetching moov
+      // interrupts the video buffering and breaks playback. The existing
+      // MOOV STABILIZE mechanism handles moov fetching when the player requests it.
+      // if (downloadedPrefixSize > 0 && size > 0 && !isCompleted) {
+      //   _scheduleMoovPreFetch(id, downloadedPrefixSize, size);
+      // }
 
       // Notify anyone waiting for updates on this file
       _fileUpdateNotifiers[id]?.add(null);
@@ -498,14 +551,19 @@ class LocalStreamingProxy {
       // This is crucial - TDLib can crash if we start new downloads while
       // it's still processing cancellations internally
       if (_abortedRequests.isNotEmpty) {
+        // Check if THIS file was aborted - needs longer wait
+        final thisFileWasAborted = _abortedRequests.contains(fileId);
+
         debugPrint(
-          'Proxy: Waiting for TDLib to stabilize (${_abortedRequests.length} aborted files)...',
+          'Proxy: Waiting for TDLib to stabilize (${_abortedRequests.length} aborted files, current file aborted: $thisFileWasAborted)...',
         );
         // Clear our abort tracking - we're about to start fresh
         _abortedRequests.clear();
-        // Give TDLib substantial time to clean up internal state
-        await Future.delayed(const Duration(milliseconds: 500));
-        debugPrint('Proxy: TDLib stabilization wait complete');
+
+        // Use shorter wait for unrelated files, longer if this file was aborted
+        final waitMs = thisFileWasAborted ? 500 : 200;
+        await Future.delayed(Duration(milliseconds: waitMs));
+        debugPrint('Proxy: TDLib stabilization wait complete (${waitMs}ms)');
       }
 
       // Also clear stale cache for this specific file if it exists
@@ -1066,23 +1124,17 @@ class LocalStreamingProxy {
         );
       }
 
-      final currentData = cached?.downloadedPrefixSize ?? 0;
-      final downloadStart = _downloadStartTime[fileId];
-      // PHASE 4: Reduced early phase from 10s to 5s for faster availability
-      final isEarlyPhase =
-          downloadStart != null &&
-          DateTime.now().difference(downloadStart).inSeconds < 5;
-
-      if (isMoovAtomRequest &&
-          isEarlyPhase &&
-          currentData < _getAdaptiveMoovThreshold(fileId)) {
-        final threshold = _getAdaptiveMoovThreshold(fileId);
-        debugPrint(
-          'Proxy: Delaying moov atom request at $requestedOffset for $fileId '
-          '(only ${currentData ~/ 1024}KB downloaded, need ${threshold ~/ 1024}KB)',
-        );
-        return; // Don't cancel initial download, let it build up data first
-      }
+      // DISABLED: This was blocking moov downloads and preventing playback start.
+      // The player NEEDS the moov atom to display video metadata and start playback.
+      // Blocking moov requests causes a deadlock: player waits for moov, we wait for data.
+      // final currentData = cached?.downloadedPrefixSize ?? 0;
+      // final downloadStart = _downloadStartTime[fileId];
+      // final isEarlyPhase = downloadStart != null &&
+      //     DateTime.now().difference(downloadStart).inSeconds < 5;
+      // if (isMoovAtomRequest && isEarlyPhase &&
+      //     currentData < _getAdaptiveMoovThreshold(fileId)) {
+      //   return; // This was causing videos to never load!
+      // }
 
       // PARTSMANAGER FIX: When there's cached data at start and we're requesting moov,
       // TDLib can crash if the offset change is too rapid. Add a small delay.
@@ -1115,27 +1167,12 @@ class LocalStreamingProxy {
           final unblockTime = _moovUnblockTime[fileId];
           final now = DateTime.now();
 
-          // Check if we already have an unblock time set
-          if (unblockTime == null) {
-            // First moov request for this file - set unblock time 500ms from now
-            // (500ms is needed to let TDLib fully process pending cancellations and stabilize)
-            _moovUnblockTime[fileId] = now.add(
-              const Duration(milliseconds: 500),
-            );
-            debugPrint(
-              'Proxy: MOOV STABILIZE (first request) for $fileId - delaying 500ms before moov fetch',
-            );
-            return;
-          }
-
-          // Check if we've passed the unblock time
-          if (now.isBefore(unblockTime)) {
-            final msRemaining = unblockTime.difference(now).inMilliseconds;
-            debugPrint(
-              'Proxy: MOOV STABILIZE for $fileId - ${msRemaining}ms remaining before moov fetch allowed',
-            );
-            return;
-          }
+          // DISABLED: MOOV STABILIZE was blocking playback start by delaying moov fetch.
+          // The player cannot display video without moov metadata. Removed blocking.
+          // The TDLib will handle the download naturally without our interference.
+          debugPrint(
+            'Proxy: Moov request for $fileId - proceeding without stabilize delay',
+          );
 
           // Unblock time has passed - mark as completed and allow the request
           _moovUnblockTime.remove(fileId);
@@ -1221,32 +1258,30 @@ class LocalStreamingProxy {
 
     // Check if this is a large offset jump from cached data
     final cachedPrefix = cached?.downloadedPrefixSize ?? 0;
-    final isLargeJump =
-        (requestedOffset - cachedPrefix).abs() > 50 * 1024 * 1024;
+    // final isLargeJump = (requestedOffset - cachedPrefix).abs() > 50 * 1024 * 1024;
 
-    // PARTSMANAGER FIX: Always cancel before moov download with large offset jump
-    // TDLib's PartsManager crashes on large offset changes, even without active downloads
-    if (isMoovDownload && isLargeJump && cachedPrefix > 0) {
+    // DISABLED: This cancel-and-wait mechanism was causing race conditions.
+    // It would cancel the current download, wait 1s, then try to download moov.
+    // But during that 1s wait, other requests kept coming and triggering new downloads,
+    // which interfered with the deferred moov download.
+    // Now we just let TDLib handle the offset change directly.
+    // if (isMoovDownload && isLargeJump && cachedPrefix > 0) {
+    //   debugPrint('Proxy: Canceling and waiting before moov jump...');
+    //   TelegramService().send({'@type': 'cancelDownloadFile', ...});
+    //   Future.delayed(...);
+    //   return;
+    // }
+
+    // MOOV FIX: Use larger preload for moov downloads to ensure complete atom
+    // Moov atoms can be 5-10MB for large videos, adaptive buffer might be too small
+    final actualPreload = isMoovDownload
+        ? (preloadBytes < 8 * 1024 * 1024 ? 8 * 1024 * 1024 : preloadBytes)
+        : preloadBytes;
+
+    if (isMoovDownload && actualPreload != preloadBytes) {
       debugPrint(
-        'Proxy: Canceling and waiting before moov jump for $fileId (cached: ${cachedPrefix ~/ 1024}KB, target: ${requestedOffset ~/ 1024}KB)',
+        'Proxy: Using larger preload for moov: ${actualPreload ~/ 1024}KB',
       );
-      TelegramService().send({
-        '@type': 'cancelDownloadFile',
-        'file_id': fileId,
-        'only_if_pending': false,
-      });
-      // Wait for TDLib to fully clean up internal state after cancellation
-      Future.delayed(const Duration(milliseconds: 1000), () {
-        TelegramService().send({
-          '@type': 'downloadFile',
-          'file_id': fileId,
-          'priority': priority,
-          'offset': requestedOffset,
-          'limit': preloadBytes,
-          'synchronous': true,
-        });
-      });
-      return;
     }
 
     TelegramService().send({
@@ -1254,7 +1289,7 @@ class LocalStreamingProxy {
       'file_id': fileId,
       'priority': priority,
       'offset': requestedOffset,
-      'limit': preloadBytes,
+      'limit': actualPreload,
       // Use synchronous mode for moov downloads to prevent PartsManager crashes
       'synchronous': isMoovDownload,
     });
@@ -1449,5 +1484,111 @@ class LocalStreamingProxy {
       debugPrint('Proxy: Failed to parse sample table for $fileId: $e');
       _sampleTableCache[fileId] = null;
     }
+  }
+
+  // ============================================================
+  // PHASE 1: INTELLIGENT MOOV PRE-FETCH
+  // ============================================================
+
+  /// Schedule moov atom pre-fetch after initial buffering reaches threshold.
+  /// Called from _onUpdate when downloadedPrefixSize changes.
+  /// This implements the DrKLO-inspired sequential moov fetch strategy.
+  void _scheduleMoovPreFetch(int fileId, int currentPrefix, int totalSize) {
+    // Skip if already scheduled or completed
+    if (_moovPreFetchScheduled[fileId] == true ||
+        _moovPreFetchCompleted[fileId] == true) {
+      return;
+    }
+
+    // Skip if file is not marked as having moov at end
+    if (_isMoovAtEnd[fileId] != true) {
+      return;
+    }
+
+    // Skip if not enough data buffered yet
+    if (currentPrefix < _moovPreFetchMinPrefix) {
+      return;
+    }
+
+    // Skip for small files (moov will be reached quickly anyway)
+    if (totalSize < 50 * 1024 * 1024) {
+      return;
+    }
+
+    // Mark as scheduled to prevent duplicate scheduling
+    _moovPreFetchScheduled[fileId] = true;
+
+    debugPrint(
+      'Proxy: PHASE1 - Scheduling moov pre-fetch for $fileId '
+      '(prefix: ${currentPrefix ~/ 1024}KB, total: ${totalSize ~/ (1024 * 1024)}MB)',
+    );
+
+    // Schedule moov fetch with a short delay to let current download settle
+    Future.delayed(const Duration(milliseconds: 300), () async {
+      if (_abortedRequests.contains(fileId)) {
+        debugPrint(
+          'Proxy: PHASE1 - Moov pre-fetch cancelled (file aborted): $fileId',
+        );
+        return;
+      }
+
+      // Calculate moov position (last 1MB of file)
+      final moovOffset = totalSize - (1024 * 1024);
+      if (moovOffset <= 0) return;
+
+      debugPrint(
+        'Proxy: PHASE1 - Fetching moov atom for $fileId at offset ${moovOffset ~/ 1024}KB',
+      );
+
+      // Fetch moov with lower priority so it doesn't interrupt playback buffer
+      TelegramService().send({
+        '@type': 'downloadFile',
+        'file_id': fileId,
+        'priority': 8, // Lower priority than playback (32)
+        'offset': moovOffset,
+        'limit': 1024 * 1024, // 1MB for moov
+        'synchronous': true, // Sequential to avoid PartsManager issues
+      });
+
+      _moovPreFetchCompleted[fileId] = true;
+    });
+  }
+
+  // ============================================================
+  // PHASE 1: SEEK DEBOUNCE
+  // ============================================================
+
+  /// Debounced seek handler to prevent flooding TDLib with rapid cancellations.
+  /// Instead of immediately cancelling and restarting download on each seek,
+  /// this coalesces rapid seeks into a single request.
+  void _handleDebouncedSeek(int fileId, int seekOffset) {
+    // Cancel any pending debounce timer for this file
+    _seekDebounceTimers[fileId]?.cancel();
+
+    // Store the pending seek offset
+    _pendingSeekOffsets[fileId] = seekOffset;
+
+    // Set up debounce timer
+    _seekDebounceTimers[fileId] = Timer(
+      Duration(milliseconds: _seekDebounceMs),
+      () {
+        final pendingOffset = _pendingSeekOffsets.remove(fileId);
+        _seekDebounceTimers.remove(fileId);
+
+        if (pendingOffset != null && !_abortedRequests.contains(fileId)) {
+          debugPrint(
+            'Proxy: PHASE1 - Executing debounced seek for $fileId to offset ${pendingOffset ~/ 1024}KB',
+          );
+          // Execute the actual seek by starting download at the debounced offset
+          _startDownloadAtOffset(fileId, pendingOffset);
+        }
+      },
+    );
+  }
+
+  /// Check if there's a pending debounced seek for a file.
+  /// Returns the pending offset if exists, null otherwise.
+  int? _getPendingSeekOffset(int fileId) {
+    return _pendingSeekOffsets[fileId];
   }
 }
