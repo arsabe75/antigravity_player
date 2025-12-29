@@ -318,6 +318,10 @@ class LocalStreamingProxy {
   // These files are NOT optimized for streaming and require extra loading time
   final Map<int, bool> _isMoovAtEnd = {};
 
+  // STALL DETECTION: Track last download progress to detect truly stalled downloads
+  // Used to avoid ping-pong downloads between multiple concurrent requests
+  final Map<int, int> _lastDownloadProgress = {};
+
   /// Check if a file has moov atom at the end (not optimized for streaming)
   /// Returns true if the video needs extra loading time due to metadata placement
   bool isVideoNotOptimizedForStreaming(int fileId) =>
@@ -919,12 +923,20 @@ class LocalStreamingProxy {
                   break; // Data is now available, exit wait loop
                 }
 
-                // DOWNLOAD RESTART: If download has stalled (not active anymore),
-                // restart it to continue downloading. This happens when TDLib stops
-                // after reaching the preload limit.
-                if (!updatedCache.isDownloadingActive &&
-                    waitAttempts % 5 == 4) {
-                  _startDownloadAtOffset(fileId, currentReadOffset);
+                // DOWNLOAD STALL DETECTION: Only restart if download is truly stalled.
+                // Don't restart just because current offset isn't being downloaded -
+                // another request might be downloading at a different offset which
+                // will eventually reach our position.
+                // Restart only after 10 attempts (2 seconds) with no progress at all.
+                final currentPrefix = updatedCache.downloadedPrefixSize;
+                final lastPrefix = _lastDownloadProgress[fileId] ?? 0;
+                if (waitAttempts % 10 == 9) {
+                  if (currentPrefix <= lastPrefix &&
+                      !updatedCache.isDownloadingActive) {
+                    // No progress in last 2 seconds and download not active - restart
+                    _startDownloadAtOffset(fileId, currentReadOffset);
+                  }
+                  _lastDownloadProgress[fileId] = currentPrefix;
                 }
               }
 
