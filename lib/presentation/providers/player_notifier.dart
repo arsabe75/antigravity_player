@@ -285,7 +285,10 @@ class PlayerNotifier extends _$PlayerNotifier {
 
         if (!_mounted) return; // Safety check
 
-        // Only seek if we have a valid duration or just try your best if timed out
+        // Only seek if we have a valid duration.
+        // If timed out and duration is still 0, DO NOT SEEK.
+        // Forcing a seek on 0 duration triggers a player reset which cancels the
+        // critical initial metadata/moov download, causing the video to fail or restart endlessly.
         if (state.duration > Duration.zero) {
           debugPrint(
             'PlayerNotifier: Resuming to $position (Duration: ${state.duration})',
@@ -293,9 +296,8 @@ class PlayerNotifier extends _$PlayerNotifier {
           await seekTo(position);
         } else {
           debugPrint(
-            'PlayerNotifier: Resume timed out waiting for duration. Attempting seek anyway...',
+            'PlayerNotifier: Resume timed out or duration invalid. Skipping resume to prevent download conflict.',
           );
-          await seekTo(position);
         }
       }
 

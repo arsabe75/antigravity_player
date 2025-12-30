@@ -420,6 +420,9 @@ class LocalStreamingProxy {
   // the critical metadata download needed to determine duration.
   final Map<int, int> _forcedMoovOffset = {};
 
+  // Track priorities to prevent low-priority requests from displacing high-priority ones
+  final Map<int, int> _activePriority = {};
+
   int get port => _port;
 
   // OPTIMIZATION 2: Track files we've started preloading from list view
@@ -448,7 +451,7 @@ class LocalStreamingProxy {
     TelegramService().send({
       '@type': 'downloadFile',
       'file_id': fileId,
-      'priority': 1, // Minimum priority - won't interfere with active playback
+      'priority': 1, // Minimum priority - background task (1-10 range)
       'offset': 0,
       'limit': 2 * 1024 * 1024, // Just first 2MB
       'synchronous': false,
@@ -973,7 +976,7 @@ class LocalStreamingProxy {
             );
 
             // Ensure download is started at the exact offset the player needs
-            _startDownloadAtOffset(fileId, currentReadOffset);
+            _startDownloadAtOffset(fileId, currentReadOffset, isBlocking: true);
 
             // Wait for updateFile that provides the data we need
             // This is more like Unigram's event-based waiting
@@ -1249,7 +1252,11 @@ class LocalStreamingProxy {
   /// Following Telegram Android's FileStreamLoadOperation pattern.
   /// IMPROVED: Dynamic priority based on distance to playback position.
   /// STABILIZED: Longer cooldown post-seek to prevent ping-pong downloads.
-  void _startDownloadAtOffset(int fileId, int requestedOffset) {
+  void _startDownloadAtOffset(
+    int fileId,
+    int requestedOffset, {
+    bool isBlocking = false,
+  }) {
     // Check if file is already complete - no download needed
     final cached = _filePaths[fileId];
     if (cached != null && cached.isCompleted) {
@@ -1538,15 +1545,91 @@ class LocalStreamingProxy {
       // STABILITY FIX: Increased distance threshold from 512KB-1MB to 2MB-5MB
       // Larger thresholds reduce the frequency of download cancellations
       final minDistance = isSequentialRead ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
-      if (timeSinceLastChange < cooldownMs ||
-          distanceFromCurrent < minDistance) {
+
+      // DEADLOCK PREVENTION:
+      // If we think we are downloading at offset X, but cache says we are inactive
+      // or at a totally different offset (e.g. Moov), then our "active" status is phantom.
+      // We should not let this phantom status block new requests.
+      bool isEffectiveActive = true;
+      if (timeSinceLastChange > 1000) {
+        // Only check after 1s to allow initial setup
+        if (cached == null ||
+            (!cached.isDownloadingActive && !cached.isCompleted)) {
+          // Not active according to TDLib (and not complete) triggers reset
+          isEffectiveActive = false;
+        } else if ((cached.downloadOffset - activeDownloadTarget).abs() >
+            2 * 1024 * 1024) {
+          // TDLib is downloading something completely different (>2MB away)
+          isEffectiveActive = false;
+        }
+      }
+
+      // Only apply blocking logic if the active download is effectively real
+      // EXCEPTION: If isBlocking is true (player starving), we MUST recover immediately
+      if (!isBlocking &&
+          isEffectiveActive &&
+          (timeSinceLastChange < cooldownMs ||
+              distanceFromCurrent < minDistance)) {
         return; // Too soon or too close
       }
     }
 
+    // PARTSMANAGER FIX: Define isMoovDownload to use for priority calculation
+    // This prevents parallel range conflicts that cause PartsManager crashes
+    final isMoovDownload =
+        _isMoovAtEnd[fileId] == true &&
+        totalSize > 0 &&
+        (totalSize - requestedOffset) <
+            (totalSize * 0.01).round().clamp(5 * 1024 * 1024, 50 * 1024 * 1024);
+
     // TELEGRAM ANDROID-INSPIRED: Calculate dynamic priority based on distance
     // to primary playback position. Closer = higher priority.
-    final priority = _calculateDynamicPriority(distanceToPlayback);
+    // FORCE PRIORITY 32 for Moov downloads AND Blocking waits.
+    final priority = (isMoovDownload || isBlocking)
+        ? 32
+        : _calculateDynamicPriority(fileId, distanceToPlayback);
+
+    // SAME-FILE DISPLACEMENT PROTECTION:
+    // TDLib cancels the current download for File X if a new request comes for File X.
+    // We must prevent a Low Priority request (e.g. background preload) from killing
+    // a High Priority Active Download (e.g. user watching video).
+    final activePriority = _activePriority[fileId] ?? 0;
+    final isHighPriorityActive = activePriority >= 20;
+
+    // STICKY PRIORITY PROTECTION:
+    // If we have a FRESH High Priority download (e.g. from a recent seek),
+    // don't let it be displaced by another High Priority request that is far away.
+    // This handles race conditions where a stale request (for old position) arrives
+    // late, updates the position state, and tries to start a download.
+    final lastActiveChange = _lastOffsetChangeTime[fileId];
+    final isActiveFresh =
+        lastActiveChange != null &&
+        now.difference(lastActiveChange).inMilliseconds < 1000;
+
+    if (!isBlocking &&
+        isHighPriorityActive &&
+        priority >= 20 &&
+        isActiveFresh &&
+        (requestedOffset - activeDownloadTarget).abs() > 5 * 1024 * 1024) {
+      debugPrint(
+        'Proxy: PROTECTED fresh High Priority download ($activeDownloadTarget) '
+        'from divergent request at $requestedOffset. Ignoring to prevent flapping.',
+      );
+      return;
+    }
+
+    // If we have a critical download running, and this new request is low priority,
+    // IGNORE IT (unless it's actually the same offset we want, or close to it).
+    // Allowing if new request is also high priority (e.g. user seeked).
+    if (isHighPriorityActive &&
+        priority < 20 &&
+        (requestedOffset - activeDownloadTarget).abs() > 1024 * 1024) {
+      debugPrint(
+        'Proxy: PROTECTED active download (prio $activePriority) from low-priority request '
+        'at $requestedOffset (prio $priority). Ignoring.',
+      );
+      return;
+    }
 
     // ADAPTIVE PRELOAD: Determine minimum bytes before we start serving
     // Based on network speed, recent stalls, and whether we just seeked
@@ -1562,28 +1645,11 @@ class LocalStreamingProxy {
     );
 
     _activeDownloadOffset[fileId] = requestedOffset;
+    _activePriority[fileId] = priority; // Track priority
     _lastOffsetChangeTime[fileId] = now;
 
     // PARTSMANAGER FIX: Use synchronous mode for moov atom downloads
     // This prevents parallel range conflicts that cause PartsManager crashes
-    final isMoovDownload =
-        _isMoovAtEnd[fileId] == true &&
-        totalSize > 0 &&
-        (totalSize - requestedOffset) <
-            (totalSize * 0.01).round().clamp(5 * 1024 * 1024, 50 * 1024 * 1024);
-
-    // DISABLED: This cancel-and-wait mechanism was causing race conditions.
-    // It would cancel the current download, wait 1s, then try to download moov.
-    // Removed cachedPrefix variable that was used for this mechanism.
-    // But during that 1s wait, other requests kept coming and triggering new downloads,
-    // which interfered with the deferred moov download.
-    // Now we just let TDLib handle the offset change directly.
-    // if (isMoovDownload && isLargeJump && cachedPrefix > 0) {
-    //   debugPrint('Proxy: Canceling and waiting before moov jump...');
-    //   TelegramService().send({'@type': 'cancelDownloadFile', ...});
-    //   Future.delayed(...);
-    //   return;
-    // }
 
     // MOOV FIX: Use dynamic preload for moov downloads based on actual moov size
     // Moov atoms can be 5-15MB+ for large videos (4GB+ files have 10-15MB moov)
@@ -1614,18 +1680,73 @@ class LocalStreamingProxy {
   }
 
   /// Calculate dynamic priority based on distance from playback position.
-  /// Inspired by Telegram Android's FileLoadOperation priority handling.
-  /// Returns priority 8-32 where 32 is highest.
-  int _calculateDynamicPriority(int distanceBytes) {
-    if (distanceBytes < 1024 * 1024) {
-      return 32; // < 1MB: Maximum priority (immediate playback)
-    } else if (distanceBytes < 5 * 1024 * 1024) {
-      return 24; // < 5MB: High priority (near-term playback)
-    } else if (distanceBytes < 10 * 1024 * 1024) {
-      return 16; // < 10MB: Medium priority (buffer building)
-    } else {
-      return 8; // >= 10MB: Low priority (preload/metadata)
+  /// Follows the 32-level scale requested by User:
+  /// - 32: Critical (Immediate playback, 0-1s ahead)
+  /// - 20-31: High (Pre-buffering, 1-10s ahead) - Scaled linearly
+  /// - 1-10: Low (Background/Far-ahead, >10s ahead)
+  int _calculateDynamicPriority(int fileId, int distanceBytes) {
+    // 1. Critical Priority (0-1s ahead or < 500KB if duration unknown)
+    // We need to estimate byte rate to convert seconds to bytes.
+
+    // Estimate bitrate mechanism: Default fallback 500KB/s (~4Mbps)
+    // int bytesPerSecond = 500 * 1024; // Commented out until used or removed completely if heuristic is sufficient
+
+    // Try to get more accurate bitrate from known file duration
+    // Note: We don't have duration in ProxyFileInfo yet, but we might have it in Mp4SampleTable
+
+    // Try to get more accurate bitrate from known file duration
+    // Note: We don't have duration in ProxyFileInfo yet, but we might have it in Mp4SampleTable
+    // or we can fallback to reasonable defaults.
+    // For now, let's use the default fallback or adjust if we had duration.
+    // Ideally we should pass duration to this method or store it.
+
+    // Using simple byte thresholds corresponding to generic HD video (approx 500KB/s - 1MB/s)
+
+    // Critical Window: 0 - 1MB (approx 1-2 seconds)
+    // Priority 32
+    if (distanceBytes < 1 * 1024 * 1024) {
+      return 32;
     }
+
+    // High Priority Window: 1MB - 10MB (approx 2s - 20s)
+    // Priority 31 down to 20
+    if (distanceBytes < 10 * 1024 * 1024) {
+      // Map 1MB..10MB to 31..20
+      const minDist = 1 * 1024 * 1024;
+      const maxDist = 10 * 1024 * 1024;
+      const range = maxDist - minDist;
+
+      const maxPrio = 31;
+      const minPrio = 20;
+
+      // Calculate linear interpolation
+      final progress = (distanceBytes - minDist) / range;
+      // Invert progress because closer = higher priority
+      // 0.0 (1MB) -> 31
+      // 1.0 (10MB) -> 20
+      final prio = maxPrio - (progress * (maxPrio - minPrio)).round();
+      return prio.clamp(minPrio, maxPrio);
+    }
+
+    // Low Priority Window: > 10MB
+    // Priority 10 down to 1
+    // Let's cap the "far ahead" at 50MB for priority 1
+    if (distanceBytes >= 10 * 1024 * 1024) {
+      const minDist = 10 * 1024 * 1024;
+      const maxDist = 50 * 1024 * 1024;
+
+      if (distanceBytes >= maxDist) return 1;
+
+      const range = maxDist - minDist;
+      const maxPrio = 10;
+      const minPrio = 1;
+
+      final progress = (distanceBytes - minDist) / range;
+      final prio = maxPrio - (progress * (maxPrio - minPrio)).round();
+      return prio.clamp(minPrio, maxPrio);
+    }
+
+    return 1;
   }
 
   /// PHASE 1: Smart adaptive preload calculation
@@ -1738,7 +1859,7 @@ class LocalStreamingProxy {
     TelegramService().send({
       '@type': 'downloadFile',
       'file_id': fileId,
-      'priority': 16,
+      'priority': 20, // High priority (bottom of range) for seek preview
       'offset': estimatedOffset,
       'limit': 2 * 1024 * 1024, // Preload 2MB around target
       'synchronous': false,
