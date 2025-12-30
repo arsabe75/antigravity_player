@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import '../../domain/entities/storage_statistics.dart';
 import '../../infrastructure/services/telegram_cache_service.dart';
+import '../../infrastructure/services/cache_settings.dart';
 import '../providers/telegram_cache_notifier.dart';
 import 'package:window_manager/window_manager.dart';
 import '../widgets/window_controls.dart';
@@ -12,6 +13,8 @@ import '../widgets/window_controls.dart';
 /// Following Telegram Android pattern:
 /// - Shows storage breakdown by file type
 /// - "Keep Media" dropdown for auto-delete period
+/// - Video cache size limit (NVR-style)
+/// - Disk space information
 /// - "Clear Cache" button for manual cleanup
 class TelegramStorageScreen extends ConsumerWidget {
   const TelegramStorageScreen({super.key});
@@ -49,6 +52,11 @@ class TelegramStorageScreen extends ConsumerWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
+                    // Disk space info
+                    _buildDiskSpaceCard(context, cacheState),
+
+                    const SizedBox(height: 24),
+
                     // Total size card
                     _buildTotalSizeCard(context, cacheState.statistics),
 
@@ -56,6 +64,11 @@ class TelegramStorageScreen extends ConsumerWidget {
 
                     // Storage breakdown
                     _buildStorageBreakdown(context, cacheState.statistics),
+
+                    const SizedBox(height: 24),
+
+                    // Video cache limit (NVR-style)
+                    _buildVideoCacheLimitSetting(context, ref, cacheState),
 
                     const SizedBox(height: 24),
 
@@ -83,6 +96,78 @@ class TelegramStorageScreen extends ConsumerWidget {
     );
   }
 
+  Widget _buildDiskSpaceCard(BuildContext context, TelegramCacheState state) {
+    final theme = Theme.of(context);
+    final availableSpace = state.availableDiskSpace;
+    final totalSpace = state.totalDiskSpace;
+    final usedPercent = totalSpace > 0
+        ? ((totalSpace - availableSpace) / totalSpace).clamp(0.0, 1.0)
+        : 0.0;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Row(
+          children: [
+            Icon(
+              LucideIcons.hardDrive,
+              size: 32,
+              color: theme.colorScheme.primary,
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Disk Space',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        '${StorageStatistics.formatBytes(availableSpace)} free',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(4),
+                    child: LinearProgressIndicator(
+                      value: usedPercent,
+                      backgroundColor:
+                          theme.colorScheme.surfaceContainerHighest,
+                      valueColor: AlwaysStoppedAnimation(
+                        usedPercent > 0.9
+                            ? theme.colorScheme.error
+                            : theme.colorScheme.primary,
+                      ),
+                      minHeight: 8,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    '${StorageStatistics.formatBytes(totalSpace - availableSpace)} used of ${StorageStatistics.formatBytes(totalSpace)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildTotalSizeCard(BuildContext context, StorageStatistics? stats) {
     final theme = Theme.of(context);
 
@@ -92,7 +177,7 @@ class TelegramStorageScreen extends ConsumerWidget {
         child: Column(
           children: [
             Icon(
-              LucideIcons.hardDrive,
+              LucideIcons.database,
               size: 48,
               color: theme.colorScheme.primary,
             ),
@@ -236,6 +321,159 @@ class TelegramStorageScreen extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildVideoCacheLimitSetting(
+    BuildContext context,
+    WidgetRef ref,
+    TelegramCacheState cacheState,
+  ) {
+    final theme = Theme.of(context);
+    final videoSize = cacheState.statistics?.videoSize ?? 0;
+    final isNearLimit = cacheState.isVideoNearLimit;
+    final usagePercent = cacheState.videoCacheUsagePercent;
+
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            LucideIcons.video,
+                            size: 18,
+                            color: theme.colorScheme.primary,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Video Cache Limit',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Maximum storage for cached videos (NVR-style: oldest deleted first)',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                DropdownButton<CacheSizeLimit>(
+                  value: cacheState.cacheSizeLimit,
+                  onChanged: (value) {
+                    if (value != null) {
+                      ref
+                          .read(telegramCacheProvider.notifier)
+                          .setCacheSizeLimit(value);
+                    }
+                  },
+                  items: CacheSizeLimit.values
+                      .map(
+                        (limit) => DropdownMenuItem(
+                          value: limit,
+                          child: Text(limit.label),
+                        ),
+                      )
+                      .toList(),
+                ),
+              ],
+            ),
+            // Show usage progress bar if limit is set
+            if (!cacheState.cacheSizeLimit.isUnlimited) ...[
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    StorageStatistics.formatBytes(videoSize),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: isNearLimit
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.onSurfaceVariant,
+                      fontWeight: isNearLimit ? FontWeight.bold : null,
+                    ),
+                  ),
+                  Text(
+                    cacheState.cacheSizeLimit.label,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 4),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: usagePercent,
+                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                  valueColor: AlwaysStoppedAnimation(
+                    isNearLimit ? theme.colorScheme.error : Colors.blue,
+                  ),
+                  minHeight: 8,
+                ),
+              ),
+              if (isNearLimit) ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(
+                      LucideIcons.alertTriangle,
+                      size: 14,
+                      color: theme.colorScheme.error,
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      'Approaching limit - oldest videos will be auto-deleted',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.error,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ],
+            // Warning for unlimited mode
+            if (cacheState.cacheSizeLimit.isUnlimited) ...[
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Icon(
+                    LucideIcons.info,
+                    size: 14,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 4),
+                  Expanded(
+                    child: Text(
+                      'No limit: ${StorageStatistics.formatBytes(cacheState.availableDiskSpace)} disk space available',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
