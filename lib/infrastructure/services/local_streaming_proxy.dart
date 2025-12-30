@@ -415,6 +415,11 @@ class LocalStreamingProxy {
     return;
   }
 
+  // FORCE MOOV DOWNLOAD: Track files that MUST download moov before anything else
+  // This prevents the player's request for the start of the file from canceling
+  // the critical metadata download needed to determine duration.
+  final Map<int, int> _forcedMoovOffset = {};
+
   int get port => _port;
 
   // OPTIMIZATION 2: Track files we've started preloading from list view
@@ -502,6 +507,7 @@ class LocalStreamingProxy {
     _lastSeekTime.clear();
     _lastServedOffset.clear();
     _moovPreloadStarted.clear();
+    _forcedMoovOffset.clear();
 
     // Clear Phase 1 optimization state
     for (final timer in _seekDebounceTimers.values) {
@@ -539,6 +545,7 @@ class LocalStreamingProxy {
     // Clear LRU streaming cache for this file
     _streamingCaches[fileId]?.clear();
     _streamingCaches.remove(fileId);
+    _forcedMoovOffset.remove(fileId);
   }
 
   Future<void> start() async {
@@ -1249,6 +1256,39 @@ class LocalStreamingProxy {
       return;
     }
 
+    // CHECK FORCED MOOV: If we are forcing a moov download, ignore requests for other offsets
+    // This allows the moov download to complete without being intercepted by start-of-file requests
+    final forcedOffset = _forcedMoovOffset[fileId];
+    if (forcedOffset != null) {
+      // Check if we have enough data at the forced offset now
+      final availableAtForced = cached?.availableBytesFrom(forcedOffset) ?? 0;
+      // MOOV FIX: Wait for the ENTIRE moov atom to be downloaded (or a reasonable cap)
+      // The previous 512KB threshold was too small (moov often > 2MB), causing early release
+      // of the lock and subsequent cancellation of the incomplete moov download.
+      final totalSize = cached?.totalSize ?? 0;
+      final neededSize = totalSize > forcedOffset
+          ? totalSize - forcedOffset
+          : 0;
+
+      // Use the exact needed size if known, capped at 20MB to prevent blocking forever on weird files
+      final targetSize = neededSize > 0
+          ? min(neededSize, 20 * 1024 * 1024)
+          : 5 * 1024 * 1024; // Default to 5MB if total size unknown
+
+      if (availableAtForced >= targetSize) {
+        // Got enough moov data
+        debugPrint(
+          'Proxy: Forced moov download satisfied ($availableAtForced bytes >= $targetSize), releasing lock for $fileId',
+        );
+        _forcedMoovOffset.remove(fileId);
+      } else if (requestedOffset != forcedOffset) {
+        debugPrint(
+          'Proxy: Ignoring request for $requestedOffset while forcing moov download at $forcedOffset for $fileId (have $availableAtForced/$targetSize)',
+        );
+        return;
+      }
+    }
+
     // SCRUBBING DETECTION: If multiple seeks detected within 500ms, use debounce
     // to reduce TDLib download cancellations during rapid scrubbing.
     // IMPORTANT: Only debounce during ACTIVE PLAYBACK, not during initial load.
@@ -1427,6 +1467,7 @@ class LocalStreamingProxy {
               _seekDebounceTimers.remove(fileId);
 
               // Trigger the moov download now that TDLib has settled
+              _forcedMoovOffset[fileId] = requestedOffset;
               _startDownloadAtOffset(fileId, requestedOffset);
             }
           });
