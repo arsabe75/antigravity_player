@@ -101,7 +101,7 @@ class FvpVideoRepository implements VideoRepository {
   }
 
   @override
-  Future<void> play(VideoEntity video) async {
+  Future<void> play(VideoEntity video, {Duration? startPosition}) async {
     if (_controller != null) {
       await _controller!.dispose();
     }
@@ -113,6 +113,14 @@ class FvpVideoRepository implements VideoRepository {
     }
 
     await _controller!.initialize();
+
+    // FVP doesn't have 'start' property, so we seek manually
+    if (startPosition != null && startPosition > Duration.zero) {
+      await _controller!.seekTo(startPosition);
+      _currentPosition = startPosition;
+      _positionController.add(startPosition);
+    }
+
     _startPoller();
     await _controller!.play();
   }
