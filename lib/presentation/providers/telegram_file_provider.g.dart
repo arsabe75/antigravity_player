@@ -58,7 +58,7 @@ final class TelegramFileProvider
   }
 }
 
-String _$telegramFileHash() => r'949d33a0820721270475aa7cf10b0409c0644610';
+String _$telegramFileHash() => r'b0c12d826045f30b7fd09dc8c94c6a3dc1a9f162';
 
 final class TelegramFileFamily extends $Family
     with

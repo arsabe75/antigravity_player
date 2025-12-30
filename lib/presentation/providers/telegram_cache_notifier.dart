@@ -1,6 +1,7 @@
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../domain/entities/storage_statistics.dart';
 import '../../infrastructure/services/telegram_cache_service.dart';
+import '../../infrastructure/services/cache_settings.dart';
 import '../../infrastructure/services/local_streaming_proxy.dart';
 
 part 'telegram_cache_notifier.g.dart';
@@ -9,6 +10,9 @@ part 'telegram_cache_notifier.g.dart';
 class TelegramCacheState {
   final StorageStatistics? statistics;
   final KeepMediaDuration keepMediaDuration;
+  final CacheSizeLimit cacheSizeLimit;
+  final int availableDiskSpace;
+  final int totalDiskSpace;
   final bool isLoading;
   final bool isClearing;
   final String? error;
@@ -16,14 +20,35 @@ class TelegramCacheState {
   const TelegramCacheState({
     this.statistics,
     this.keepMediaDuration = KeepMediaDuration.forever,
+    this.cacheSizeLimit = CacheSizeLimit.unlimited,
+    this.availableDiskSpace = 0,
+    this.totalDiskSpace = 0,
     this.isLoading = false,
     this.isClearing = false,
     this.error,
   });
 
+  /// Returns true if video cache is approaching the limit (>80%).
+  bool get isVideoNearLimit {
+    if (cacheSizeLimit.isUnlimited) return false;
+    final videoSize = statistics?.videoSize ?? 0;
+    return videoSize > (cacheSizeLimit.sizeInBytes * 0.8);
+  }
+
+  /// Returns the video cache usage percentage (0.0 to 1.0).
+  double get videoCacheUsagePercent {
+    if (cacheSizeLimit.isUnlimited) return 0.0;
+    final videoSize = statistics?.videoSize ?? 0;
+    if (cacheSizeLimit.sizeInBytes <= 0) return 0.0;
+    return (videoSize / cacheSizeLimit.sizeInBytes).clamp(0.0, 1.0);
+  }
+
   TelegramCacheState copyWith({
     StorageStatistics? statistics,
     KeepMediaDuration? keepMediaDuration,
+    CacheSizeLimit? cacheSizeLimit,
+    int? availableDiskSpace,
+    int? totalDiskSpace,
     bool? isLoading,
     bool? isClearing,
     String? error,
@@ -32,6 +57,9 @@ class TelegramCacheState {
     return TelegramCacheState(
       statistics: statistics ?? this.statistics,
       keepMediaDuration: keepMediaDuration ?? this.keepMediaDuration,
+      cacheSizeLimit: cacheSizeLimit ?? this.cacheSizeLimit,
+      availableDiskSpace: availableDiskSpace ?? this.availableDiskSpace,
+      totalDiskSpace: totalDiskSpace ?? this.totalDiskSpace,
       isLoading: isLoading ?? this.isLoading,
       isClearing: isClearing ?? this.isClearing,
       error: clearError ? null : (error ?? this.error),
@@ -58,10 +86,16 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
     try {
       final stats = await _service.getStorageStatistics();
       final keepDuration = await _service.getKeepMediaDuration();
+      final sizeLimit = await _service.getCacheSizeLimit();
+      final availableSpace = await _service.getAvailableDiskSpace();
+      final totalSpace = await _service.getTotalDiskSpace();
 
       state = state.copyWith(
         statistics: stats,
         keepMediaDuration: keepDuration,
+        cacheSizeLimit: sizeLimit,
+        availableDiskSpace: availableSpace,
+        totalDiskSpace: totalSpace,
         isLoading: false,
       );
     } catch (e) {
@@ -85,7 +119,12 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
 
         // Reload statistics after clearing
         final stats = await _service.getStorageStatistics();
-        state = state.copyWith(statistics: stats, isClearing: false);
+        final availableSpace = await _service.getAvailableDiskSpace();
+        state = state.copyWith(
+          statistics: stats,
+          availableDiskSpace: availableSpace,
+          isClearing: false,
+        );
         return true;
       } else {
         state = state.copyWith(
@@ -112,6 +151,20 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
     if (duration != KeepMediaDuration.forever) {
       await _service.runOptimization();
       await loadStatistics(); // Reload stats after optimization
+    }
+  }
+
+  /// Update the video cache size limit.
+  ///
+  /// Triggers NVR-style cleanup if new limit is lower than current usage.
+  Future<void> setCacheSizeLimit(CacheSizeLimit limit) async {
+    await _service.setCacheSizeLimit(limit);
+    state = state.copyWith(cacheSizeLimit: limit);
+
+    // Enforce new limit immediately if not unlimited
+    if (!limit.isUnlimited) {
+      await _service.enforceVideoSizeLimit();
+      await loadStatistics(); // Reload stats after enforcement
     }
   }
 }
