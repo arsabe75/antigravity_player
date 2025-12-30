@@ -59,7 +59,7 @@ class MediaKitVideoRepository implements VideoRepository {
   }
 
   @override
-  Future<void> play(VideoEntity video) async {
+  Future<void> play(VideoEntity video, {Duration? startPosition}) async {
     // Clean up previous instance partially if needed, or re-use
     // For now, let's create a new player per video for safety
     if (_player != null) {
@@ -117,6 +117,21 @@ class MediaKitVideoRepository implements VideoRepository {
       'cache-secs',
       '20',
     ); // Listen to streams
+
+    // OPTIMIZATION: Start directly at the saved position if provided
+    if (startPosition != null && startPosition > Duration.zero) {
+      final startSeconds = startPosition.inMilliseconds / 1000.0;
+      await (_player!.platform as dynamic).setProperty(
+        'start',
+        startSeconds.toString(),
+      );
+      debugPrint('MediaKit: Starting playback at ${startSeconds}s');
+
+      // Update initial position state immediately so UI doesn't show 0:00
+      _currentPosition = startPosition;
+      _positionController.add(startPosition);
+    }
+
     _playerSub = _player!.stream.position.listen((pos) {
       _currentPosition = pos;
       _positionController.add(pos);

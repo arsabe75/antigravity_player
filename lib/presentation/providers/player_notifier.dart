@@ -30,7 +30,7 @@ class PlayerNotifier extends _$PlayerNotifier {
   Timer? _saveTimer;
   Timer? _moovCheckTimer;
   int? _currentProxyFileId;
-  bool _mounted = true;
+
   bool _isInitialLoading = false;
 
   // Stable Telegram identifiers for progress persistence
@@ -54,7 +54,6 @@ class PlayerNotifier extends _$PlayerNotifier {
     // Registramos la limpieza de recursos.
     // En Riverpod 3, esto reemplaza al método dispose() de los StateNotifier.
     ref.onDispose(() {
-      _mounted = false;
       _positionSub?.cancel();
       _durationSub?.cancel();
       _playingSub?.cancel();
@@ -242,8 +241,26 @@ class PlayerNotifier extends _$PlayerNotifier {
         }
       }
 
+      // Use stable Telegram message ID for progress key (survives cache clears)
+      // Falls back to file_id for legacy, then path for local files
+      final storageKey = _getStableStorageKey(path);
+      final savedPositionMs = await _storageService.getPosition(storageKey);
+      Duration startPosition = Duration.zero;
+
+      if (savedPositionMs != null && savedPositionMs > 0) {
+        startPosition = Duration(milliseconds: savedPositionMs);
+        debugPrint('PlayerNotifier: Will resume from $startPosition');
+
+        // Optimistic update for UI to show correct time immediately
+        state = state.copyWith(position: startPosition);
+      }
+
       final video = VideoEntity(path: path, isNetwork: isNetwork);
-      await _repository.play(video);
+
+      // OPTIMIZATION: Pass startPosition to play()
+      // This allows the player (MediaKit/libmpv) to start directly at this timestamp
+      // avoiding the "start at 0 -> seek to X" pattern which causes double-loading and proxy crashes.
+      await _repository.play(video, startPosition: startPosition);
 
       // Give player a moment to load initial tracks (for local files)
       await Future.delayed(const Duration(milliseconds: 300));
@@ -262,43 +279,11 @@ class PlayerNotifier extends _$PlayerNotifier {
         telegramTopicName: _telegramTopicName,
       );
 
-      // Use stable Telegram message ID for progress key (survives cache clears)
-      // Falls back to file_id for legacy, then path for local files
-      final storageKey = _getStableStorageKey(path);
-      final savedPositionMs = await _storageService.getPosition(storageKey);
-      if (savedPositionMs != null && savedPositionMs > 0) {
-        final position = Duration(milliseconds: savedPositionMs);
-
-        // Wait for duration to be known (metadata loaded) before seeking
-        // This prevents seeking to a valid position while duration is 0 (which often fails or resets)
-        int waitAttempts = 0;
-        const maxWaitAttempts = 100; // 10 seconds (100 * 100ms)
-
-        // Modified loop to check _mounted to avoid crash on dispose
-        while (_mounted &&
-            state.duration == Duration.zero &&
-            waitAttempts < maxWaitAttempts) {
-          await Future.delayed(const Duration(milliseconds: 100));
-          if (!_mounted) return; // Exit if disposed
-          waitAttempts++;
-        }
-
-        if (!_mounted) return; // Safety check
-
-        // Only seek if we have a valid duration.
-        // If timed out and duration is still 0, DO NOT SEEK.
-        // Forcing a seek on 0 duration triggers a player reset which cancels the
-        // critical initial metadata/moov download, causing the video to fail or restart endlessly.
-        if (state.duration > Duration.zero) {
-          debugPrint(
-            'PlayerNotifier: Resuming to $position (Duration: ${state.duration})',
-          );
-          await seekTo(position);
-        } else {
-          debugPrint(
-            'PlayerNotifier: Resume timed out or duration invalid. Skipping resume to prevent download conflict.',
-          );
-        }
+      // CRITICAL: Ensure buffering state clears if not actually buffering
+      // Sometimes MediaKit doesn't emit 'buffering=false' if we start with 'start' property
+      if (state.isBuffering && !isNetwork) {
+        state = state.copyWith(isBuffering: false);
+        _isInitialLoading = false;
       }
 
       _startSaveTimer();

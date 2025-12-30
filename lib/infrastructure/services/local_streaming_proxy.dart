@@ -362,6 +362,16 @@ class LocalStreamingProxy {
   // Track last served offset to detect seeks
   final Map<int, int> _lastServedOffset = {};
 
+  // Map to track blacklisted "zombie" offsets that should be permanently ignored
+  // until the user explicitly seeks back to them.
+  // key: fileId, value: offset
+  final Map<int, int> _zombieBlacklist = {};
+
+  // VIRTUAL ACTIVE STATE: Track when download last finished to simulate "sticky" active state
+  final Map<int, DateTime> _lastActiveDownloadEndTime = {};
+  final Map<int, int> _lastActiveDownloadOffset = {};
+  final Map<int, DateTime> _lastPrimaryUpdateTime = {};
+
   // MOOV ATOM PROTECTION: Track when download started for each file
   // This helps avoid canceling initial download when moov atom is requested
   final Map<int, DateTime> _downloadStartTime = {};
@@ -579,6 +589,17 @@ class LocalStreamingProxy {
       final isDownloadingActive =
           local?['is_downloading_active'] as bool? ?? false;
 
+      // VIRTUAL ACTIVE STATE: Track when download STOPS being active
+      // This allows us to simulate "Active" status for a short time (500ms)
+      // to bridge the gap between chunks and prevent zombie attacks during the lull.
+      final wasDownloading = _filePaths[id]?.isDownloadingActive ?? false;
+      if (wasDownloading && !isDownloadingActive) {
+        _lastActiveDownloadEndTime[id] = DateTime.now();
+        _lastActiveDownloadOffset[id] = _filePaths[id]?.downloadOffset ?? 0;
+      } else if (isDownloadingActive) {
+        _lastActiveDownloadEndTime.remove(id);
+      }
+
       // Always update the cache, even if path is empty (file not yet allocated)
       _filePaths[id] = ProxyFileInfo(
         path: path,
@@ -780,24 +801,129 @@ class LocalStreamingProxy {
 
           // CRITICAL FIX: When a seek is detected, reset the primary offset to the seek target
           // This prevents the primary from getting stuck at 0 when seeking forward
-          _primaryPlaybackOffset[fileId] = start;
+          // _primaryPlaybackOffset[fileId] = start; // MOVED BELOW for centralized logic
           debugPrint(
-            'Proxy: Detected seek for $fileId: $lastOffset -> $start (jump: ${jump ~/ 1024}KB), primary reset to $start',
+            'Proxy: Detected seek for $fileId: $lastOffset -> $start (jump: ${jump ~/ 1024}KB)',
           );
         }
       }
 
-      // PRIMARY PLAYBACK TRACKING: Track the lowest RECENT offset as the "primary playback" position.
-      // This helps stall recovery prioritize actual playback over metadata probes (moov atom at EOF).
-      // Only update if this offset is earlier than the current primary, or if no primary is set,
-      // or if this is the first request after a seek.
+      // PRIMARY PLAYBACK TRACKING (STABILIZED):
+      // The player often fires multiple "Seek" requests (video, audio, etc.) to different offsets.
+      // We must lock onto the FIRST one (user's intent) and ignore subsequent divergent "seeks".
       final existingPrimary = _primaryPlaybackOffset[fileId];
+      final lastPrimaryUpdate = _lastPrimaryUpdateTime[fileId];
+
+      bool shouldUpdatePrimary = false;
+
       if (existingPrimary == null) {
+        shouldUpdatePrimary = true;
+      } else if (isSeekRequest) {
+        // Check for Rapid Divergence
+        if (lastPrimaryUpdate != null &&
+            DateTime.now().difference(lastPrimaryUpdate).inMilliseconds <
+                1000) {
+          // Rapid update! distinct from previous primary?
+          if ((start - existingPrimary).abs() > 10 * 1024 * 1024) {
+            // RECOVERY ADOPTION (Seek variant):
+            // If the player is "Thrashing" between two streams (e.g. 80MB and 180MB), both appear as
+            // "Seeks" because lastServedOffset jumps. This blocks Sequential Recovery.
+            // Force adoption if Primary has been stagnant for > 2000ms.
+            //
+            // RESUME-FROM-START FIX:
+            // If the existing Primary is currently near the start (< 50MB) and the new seek is
+            // significantly further (> 50MB), it's almost certainly a "Resume" or "User Seek".
+            // The initial "Primary at 0" was just the player probing metadata/start.
+            // We should ALWAYS adopt this new seek.
+            //
+            // MOOV FIX: Ensure we don't accidentally adopt the "Moov Atom" request (End of File)
+            // as the Primary, because that will block the actual playback request at the middle.
+            final isMoovRequestForCheck =
+                totalSize > 0 && (totalSize - start) < 100 * 1024 * 1024;
+
+            final isResumeFromStart =
+                !isMoovRequestForCheck &&
+                existingPrimary < 50 * 1024 * 1024 &&
+                start > 50 * 1024 * 1024;
+
+            if (isResumeFromStart) {
+              debugPrint(
+                'Proxy: RESUME DETECTED ($existingPrimary -> $start). Forcing Primary update.',
+              );
+              shouldUpdatePrimary = true;
+            } else if (DateTime.now()
+                    .difference(lastPrimaryUpdate)
+                    .inMilliseconds >
+                2000) {
+              debugPrint(
+                'Proxy: Recovering Primary Offset (Stagnant 2s in Seek) -> Adopting $start',
+              );
+              shouldUpdatePrimary = true;
+            } else {
+              debugPrint(
+                'Proxy: IGNORING rapid divergent seek to $start (kept primary at $existingPrimary)',
+              );
+              shouldUpdatePrimary = false;
+              // Reset isSeekRequest to false so this request doesn't bypass debounce!
+              isSeekRequest = false;
+            }
+          } else {
+            shouldUpdatePrimary = true; // Close enough, update it
+          }
+        } else {
+          shouldUpdatePrimary = true; // Stable seek
+        }
+      } else if (start < existingPrimary) {
+        // Only track lower offsets if they are reasonable (not huge jumps back which are likely zombie streams)
+        final jumpBack = existingPrimary - start;
+        if (jumpBack < 50 * 1024 * 1024) {
+          shouldUpdatePrimary = true;
+        } else {
+          debugPrint(
+            'Proxy: Ignoring primary offset reset $existingPrimary -> $start (diff: ${jumpBack ~/ (1024 * 1024)}MB) - likely zombie stream',
+          );
+        }
+      } else {
+        // SEQUENTIAL TRACKING:
+        // If legitimate playback progresses forward, we must advance the Primary Offset so the
+        // "Blocking Guard" (50MB radius) moves with the user.
+        final jumpForward = start - existingPrimary;
+        if (jumpForward > 0) {
+          // 1. Standard Sequential: within 50MB
+          if (jumpForward < 50 * 1024 * 1024) {
+            shouldUpdatePrimary = true;
+          }
+          // 2. READ-AHEAD DETECTION:
+          // If jump is > 50MB, it might be a Buffer Request (Parallel Read-Ahead).
+          // We should NOT update Primary immediately, because the player is likely still
+          // playing at 'existingPrimary'.
+          // However, if Primary is STAGNANT ( hasn't moved for > 2000ms),
+          // it might be a legitimate Seek that we misidentified.
+          else if (lastPrimaryUpdate != null &&
+              DateTime.now().difference(lastPrimaryUpdate).inMilliseconds >
+                  2000) {
+            debugPrint(
+              'Proxy: Recovering Primary Offset (Stagnant 2s on Forward Jump) -> Adopting $start',
+            );
+            shouldUpdatePrimary = true;
+          } else {
+            debugPrint(
+              'Proxy: Ignoring likely Read-Ahead Buffer Request at $start (Primary at $existingPrimary)',
+            );
+            shouldUpdatePrimary = false;
+            // Treat as background/buffer request, don't debounce as seek
+            isSeekRequest = false;
+          }
+        }
+      }
+
+      if (shouldUpdatePrimary) {
         _primaryPlaybackOffset[fileId] = start;
-      } else if (!isSeekRequest && start < existingPrimary) {
-        // Only track lower offsets if this is NOT a seek request
-        // (seek requests already set the primary above)
-        _primaryPlaybackOffset[fileId] = start;
+        _lastPrimaryUpdateTime[fileId] = DateTime.now();
+        if (isSeekRequest) {
+          // Only log if it was a seek
+          debugPrint('Proxy: Primary Target UPDATED to $start');
+        }
       }
 
       // 2. Ensure File Info is available
@@ -858,11 +984,18 @@ class LocalStreamingProxy {
       final effectiveTotalSize = totalSize > 0
           ? totalSize
           : (await file.length());
-      final effectiveEnd =
+      var effectiveEnd =
           end ?? (effectiveTotalSize > 0 ? effectiveTotalSize - 1 : 0);
 
+      // CRITICAL FIX: Clamp end to actual file size to prevent reading past EOF
+      if (effectiveTotalSize > 0 && effectiveEnd >= effectiveTotalSize) {
+        effectiveEnd = effectiveTotalSize - 1;
+      }
+
       // Validate Range
-      if (start > effectiveEnd) {
+      // Must start strictly before EOF (offset < size)
+      if (start > effectiveEnd ||
+          (effectiveTotalSize > 0 && start >= effectiveTotalSize)) {
         request.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
         request.response.headers.set(
           HttpHeaders.contentRangeHeader,
@@ -959,7 +1092,141 @@ class LocalStreamingProxy {
             _lastServedOffset[fileId] = currentReadOffset;
 
             // Ensure download is started at the exact offset the player needs
-            _startDownloadAtOffset(fileId, currentReadOffset);
+            // FIX: Only start download if we still have data to send.
+            // If we just finished the file (remainingToSend == 0), currentReadOffset == totalSize,
+            // which causes TDLib crash if we request it.
+            if (remainingToSend > 0) {
+              _startDownloadAtOffset(fileId, currentReadOffset);
+            }
+
+            // PRIMARY TRACKING FIX:
+            // Continuously update the Primary Offset as we serve data.
+            // This ensures the "Protection Bubble" moves with the playback head.
+            // FIX: We must THROTTLE this update to prevent "Buffering" from dragging the Primary
+            // Offset far ahead of the actual Playback (Time).
+            // If the player buffers 300MB in 1 second, we should NOT update Primary to +300MB,
+            // because if the player then requests data at +10MB (Playback), it would look like
+            // a "Distant Zombie" relative to the Buffer Head.
+            //
+            // Logic:
+            // 1. Only allow Primary to advance by MAX_SPEED (e.g. 5MB/s) relative to elapsed time.
+            // 2. Seeks (handled in _handleRequest) break this limit instantly.
+            if (data.length > 0) {
+              final lastPrimary = _primaryPlaybackOffset[fileId] ?? 0;
+              final lastUpdateTime = _lastPrimaryUpdateTime[fileId];
+
+              // If this is sequential (close to last known primary)
+              if (currentReadOffset > lastPrimary &&
+                  (currentReadOffset - lastPrimary) < 50 * 1024 * 1024) {
+                final now = DateTime.now();
+                // Determine allowed progress based on time elapsed
+                // Base 2MB allowed instantly
+                int allowedProgress = 2 * 1024 * 1024;
+                if (lastUpdateTime != null) {
+                  final elapsedMs = now
+                      .difference(lastUpdateTime)
+                      .inMilliseconds;
+                  // Allow up to 3MB per second of additional progress (approx 3x realtime 1080p)
+                  // Total max rate ~ 5MB/s roughly.
+                  // (elapsedMs / 1000 * 3MB)
+                  final timeBasedAllowance =
+                      (elapsedMs / 1000 * 3 * 1024 * 1024).round();
+                  allowedProgress += timeBasedAllowance;
+                }
+
+                // If the new offset is within the allowed progress window, update it.
+                // Otherwise, hold the Primary back (it lags behind buffer).
+                // If the new offset is within the allowed progress window, update it.
+                // Otherwise, hold the Primary back (it lags behind buffer).
+                if ((currentReadOffset - lastPrimary) <= allowedProgress) {
+                  // Throttle the actual map update to avoid spamming debug logs/maps
+                  // Update at most every 200ms
+                  if (lastUpdateTime == null ||
+                      now.difference(lastUpdateTime).inMilliseconds > 200) {
+                    _primaryPlaybackOffset[fileId] = currentReadOffset;
+                    _lastPrimaryUpdateTime[fileId] = now;
+                  }
+                }
+              } else if (currentReadOffset > lastPrimary &&
+                  (currentReadOffset - lastPrimary) > 50 * 1024 * 1024) {
+                // STAGNANT ADOPTION (Stream Loop):
+                // We are streaming far ahead of Primary (>50MB).
+                // If the Primary hasn't moved for > 2000ms, assume the user seeked here
+                // and the initial Seek Logic rejected it (or we missed it).
+                if (lastUpdateTime != null &&
+                    DateTime.now().difference(lastUpdateTime).inMilliseconds >
+                        2000) {
+                  debugPrint(
+                    'Proxy: Recovering Primary Offset (Stagnant 2s in StreamLoop) -> Adopting $currentReadOffset',
+                  );
+                  _primaryPlaybackOffset[fileId] = currentReadOffset;
+                  _lastPrimaryUpdateTime[fileId] = DateTime.now();
+                }
+              }
+            } else {
+              // NO DATA AVAILABLE -> BLOCKING WAIT
+              final cached = _filePaths[fileId];
+              debugPrint(
+                'Proxy: Waiting for data at $currentReadOffset for $fileId '
+                '(CachedOffset: ${cached?.downloadOffset}, CachedPrefix: ${cached?.downloadedPrefixSize})...',
+              );
+
+              // Ensure download is started at the exact offset the player needs
+              _startDownloadAtOffset(
+                fileId,
+                currentReadOffset,
+                isBlocking: true,
+              );
+
+              // Wait for updateFile that provides the data we need
+              // This is more like Unigram's event-based waiting
+              int waitAttempts = 0;
+
+              // EXTENDED TIMEOUT FOR MOOV ATOM: Requests near end of file need more time
+              // because TDLib must start a new download from a distant offset
+              final fileInfo = _filePaths[fileId];
+              final totalFileSize = fileInfo?.totalSize ?? 0;
+              final distanceFromEnd = totalFileSize > 0
+                  ? totalFileSize - currentReadOffset
+                  : 0;
+              final isMoovRequest =
+                  distanceFromEnd > 0 && distanceFromEnd < 10 * 1024 * 1024;
+
+              // Use 15 seconds for moov requests, 5 seconds for normal data
+              final maxWaitAttempts = isMoovRequest
+                  ? 75
+                  : 25; // 75 * 200ms = 15 seconds
+
+              while (waitAttempts < maxWaitAttempts) {
+                if (_abortedRequests.contains(fileId)) {
+                  debugPrint('Proxy: Wait aborted for $fileId');
+                  return;
+                }
+
+                // Check if we have data NOW
+                final currentCached = _filePaths[fileId];
+                final prefix = currentCached?.downloadedPrefixSize ?? 0;
+                final offset = currentCached?.downloadOffset ?? 0;
+
+                // Condition 1: Prefix covers our read offset (Continuous from start)
+                if (currentReadOffset < prefix) {
+                  break; // Data is available!
+                }
+
+                // Condition 2: Download offset covers our read offset (Sparse download)
+                if (currentReadOffset >= offset &&
+                    currentReadOffset < (currentCached?.totalSize ?? 0)) {
+                  // We might have data, but we need to verify if the file on disk typically
+                  // has it. TDLib reports downloaded_prefix_size reliably, but for
+                  // sparse parts, we rely on the file size growing.
+                  // For simplicity, if we are in the "active zone", we retry reading.
+                  break;
+                }
+
+                await Future.delayed(const Duration(milliseconds: 200));
+                waitAttempts++;
+              }
+            }
 
             // PHASE 5: Read-ahead DISABLED due to TDLib limitation
             // TDLib cancels any ongoing download when a new downloadFile is called
@@ -1263,6 +1530,16 @@ class LocalStreamingProxy {
       return;
     }
 
+    // CRITICAL FIX: Prevent requests beyond EOF which crash TDLib
+    // This happens if currentReadOffset reaches totalSize in the streaming loop
+    final totalSize = cached?.totalSize ?? 0;
+    if (totalSize > 0 && requestedOffset >= totalSize) {
+      debugPrint(
+        'Proxy: Ignoring request at EOF ($requestedOffset >= $totalSize) for $fileId',
+      );
+      return;
+    }
+
     // CHECK FORCED MOOV: If we are forcing a moov download, ignore requests for other offsets
     // This allows the moov download to complete without being intercepted by start-of-file requests
     final forcedOffset = _forcedMoovOffset[fileId];
@@ -1359,14 +1636,15 @@ class LocalStreamingProxy {
     // Instead of blocking all requests near end of file, distinguish:
     // 1. Actual moov atom requests (metadata, no sample table entry)
     // 2. Legitimate seeks to end of video (has sample table entry)
-    final totalSize = cached?.totalSize ?? 0;
-    if (totalSize > 0) {
-      final distanceFromEnd = totalSize - requestedOffset;
+    // variable 'totalSize' is already defined above, reuse it or use cached?.totalSize
+    final fileSize = cached?.totalSize ?? 0;
+    if (fileSize > 0) {
+      final distanceFromEnd = fileSize - requestedOffset;
 
       // PHASE 4: Use percentage-based threshold for large files
       // For 2GB file: 0.5% = 10MB, for 500MB file: 0.5% = 2.5MB
-      final moovThresholdBytes = totalSize > 500 * 1024 * 1024
-          ? (totalSize * 0.005)
+      final moovThresholdBytes = fileSize > 500 * 1024 * 1024
+          ? (fileSize * 0.005)
                 .round() // 0.5% for large files
           : 10 * 1024 * 1024; // 10MB for smaller files
 
@@ -1529,6 +1807,16 @@ class LocalStreamingProxy {
     // The general cooldown (500-1000ms) and distance threshold (2-5MB) provide
     // sufficient protection against rapid offset changes.
 
+    // Determine if this is a Seek Request (jump > 1MB from last served offset)
+    bool isSeekRequest = false;
+    final lastServedForCheck = _lastServedOffset[fileId];
+    if (lastServedForCheck != null) {
+      final jump = (requestedOffset - lastServedForCheck).abs();
+      if (jump > 1024 * 1024) {
+        isSeekRequest = true;
+      }
+    }
+
     // PARTSMANAGER FIX: Increased cooldown to prevent TDLib crashes
     // TDLib's PartsManager can crash if offset changes happen too rapidly
     final lastChange = _lastOffsetChangeTime[fileId];
@@ -1585,8 +1873,51 @@ class LocalStreamingProxy {
     // TELEGRAM ANDROID-INSPIRED: Calculate dynamic priority based on distance
     // to primary playback position. Closer = higher priority.
     // FORCE PRIORITY 32 for Moov downloads AND Blocking waits.
-    final priority = (isMoovDownload || isBlocking)
-        ? 32
+    // EXCEPTION: If "Blocking" request is extremely far (>50MB) from Primary Playback,
+    // it's likely a stalled zombie stream. IGNORE the blocking flag to prevent hijacking.
+    bool shouldForcePriority = isMoovDownload;
+    if (isBlocking) {
+      final primary = _primaryPlaybackOffset[fileId];
+      // Trust blocking if:
+      // 1. No primary set yet (start of playback)
+      // 2. Explicit Moov request (End of File)
+      // 3. We are close to primary (<50MB)
+      // 4. We are sequentially ahead of primary (normal playback)
+      if (primary == null || isMoovDownload) {
+        shouldForcePriority = true;
+      } else {
+        final dist = requestedOffset - primary;
+        // RELAXED LIMIT: Allow buffering up to 500MB ahead (Deep Buffering)
+        // Modern players/network can easily buffer hundreds of MBs.
+        // Blocking requests within this range are critical.
+        if (dist >= 0 && dist < 500 * 1024 * 1024) {
+          shouldForcePriority = true; // Normal forward playback buffer
+        } else if (dist < 0 && dist.abs() < 10 * 1024 * 1024) {
+          shouldForcePriority = true; // Slight overlap behind
+        } else {
+          debugPrint(
+            'Proxy: DENIED Blocking Priority for $requestedOffset (Primary: $primary, Dist: ${dist ~/ 1024}KB). Treated as background.',
+          );
+          shouldForcePriority = false;
+        }
+      }
+    }
+
+    // PRIORITY HIERARCHY FIX:
+    // Split Blocking Priority into "Critical" (32) and "Deep Buffering" (28).
+    // This prevents a "Deep Buffer" request (e.g. 500MB ahead) from displacing an
+    // "Immediate Playback" request (e.g. 1MB ahead), which is also Prio 32.
+    // They used to fight and cancel each other. Now Prio 32 wins.
+    int blockingPriority = 32;
+    if (shouldForcePriority) {
+      final distToPrimary = (requestedOffset - primaryOffset).abs();
+      if (distToPrimary > 20 * 1024 * 1024 && !isMoovDownload) {
+        blockingPriority = 28; // Urgent, but interruptible by Critical
+      }
+    }
+
+    final priority = shouldForcePriority
+        ? blockingPriority
         : _calculateDynamicPriority(fileId, distanceToPlayback);
 
     // SAME-FILE DISPLACEMENT PROTECTION:
@@ -1606,6 +1937,131 @@ class LocalStreamingProxy {
         lastActiveChange != null &&
         now.difference(lastActiveChange).inMilliseconds < 1000;
 
+    // VIRTUAL ACTIVE STATE:
+    // Even if isHighPriorityActive is false (TDLib says inactive), we might be
+    // in a tiny gap between chunks (e.g. 50ms). We must simulate "Active" status
+    // during this gap to keep shielding against zombies.
+    // If we were active recently (<500ms ago) near Primary, treat as Active.
+    bool isVirtualActive = isHighPriorityActive;
+    if (!isVirtualActive) {
+      final lastActiveTime = _lastActiveDownloadEndTime[fileId];
+      if (lastActiveTime != null &&
+          now.difference(lastActiveTime).inMilliseconds < 500) {
+        // Check if the LAST known active offset was close to primary
+        final lastActiveOffset = _lastActiveDownloadOffset[fileId] ?? -1;
+        // reuse primaryOffset from scope
+        if ((lastActiveOffset - primaryOffset).abs() < 5 * 1024 * 1024) {
+          isVirtualActive = true;
+          // Inherit priority from previous active state (assume high)
+          // This effectively extends the shield
+        }
+      }
+    }
+
+    // ZOMBIE KILLER: Blacklist logic
+    // If we have a High Priority Active download near Primary, and we see a persistent
+    // divergent request, we BLACKLIST the divergent region to prevent it from ever
+    // slipping through during a momentary state gap.
+
+    // ACTIVE STREAM PROTECTION VARIABLES RE-CALCULATION:
+    // Need these for Zombie Killer logic below
+    final distToPrimary = (requestedOffset - primaryOffset).abs();
+    final isActiveCloseToPrimary =
+        (_activeDownloadOffset[fileId] ?? -1 - primaryOffset).abs() <
+        5 * 1024 * 1024;
+
+    // TIGHTENED THRESHOLD: Any request > 2MB away from primary is considered divergent
+    // if we have a locked-in High Priority stream.
+    final isRequestFarFromPrimary =
+        distToPrimary > 2 * 1024 * 1024; // Tightened from 10MB
+    if (isHighPriorityActive &&
+        isActiveCloseToPrimary &&
+        isRequestFarFromPrimary &&
+        !isBlocking) {
+      // EXEMPTION: Never blacklist a Blocking Request
+      debugPrint(
+        'Proxy: PROTECTED active download (prio $activePriority) near Primary from divergent request '
+        'at $requestedOffset (diff: ${distToPrimary ~/ 1024}KB). Ignoring to prevent ping-pong.',
+      );
+
+      // Add to blacklist so future requests (even if active drops) are blocked
+      _zombieBlacklist[fileId] = requestedOffset;
+      return;
+    }
+
+    // DOWNLOAD DEBOUNCE:
+    // If we just started a download (<500ms ago), DO NOT switch to a different offset
+    // unless it is extremely close (sequential) or an explicit Seek.
+    // This prevents "Thrashing" where multiple parallel requests (e.g. from player trying to find
+    // a good spot) cause the proxy to rapidly switch between offsets 1, 2, 3... never completing any.
+    // EXCEPTION: Blocking requests (waiting for data) MUST bypass debounce to upgrade priority.
+    final lastStart = _lastOffsetChangeTime[fileId];
+    if (lastStart != null &&
+        now.difference(lastStart).inMilliseconds < 500 &&
+        !isBlocking) {
+      final activeOffset = _activeDownloadOffset[fileId] ?? -1;
+      // Allow if sequential (reading forward)
+      if (requestedOffset >= activeOffset &&
+          requestedOffset < activeOffset + 2 * 1024 * 1024) {
+        // Sequential: Allowed
+      } else if (isSeekRequest) {
+        // STRICT DEBOUNCE EXCEPTION:
+        // Only allow the seek to break the lock if it targets the PRIMARY offset (User's Intent).
+        // If it's a "fake seek" (divergent probe), it must wait.
+        final primary = _primaryPlaybackOffset[fileId];
+        if (primary != null &&
+            (requestedOffset - primary).abs() > 2 * 1024 * 1024) {
+          // SAFETY VALVE:
+          // If the Primary has been stagnant for > 2000ms, and this "Divergent Seek" is persistent,
+          // it likely means the Primary is WRONG (zombie false positive).
+          // Force adoption to correct the Primary.
+          final lastPrimaryUpdate = _lastPrimaryUpdateTime[fileId];
+          if (lastPrimaryUpdate != null &&
+              DateTime.now().difference(lastPrimaryUpdate).inMilliseconds >
+                  2000) {
+            debugPrint(
+              'Proxy: SAFETY VALVE - Adopting Divergent Seek $requestedOffset (Primary stagnant > 2s)',
+            );
+            _primaryPlaybackOffset[fileId] = requestedOffset;
+            _lastPrimaryUpdateTime[fileId] = DateTime.now();
+            // Allow this request to proceed (break debounce)
+          } else {
+            debugPrint(
+              'Proxy: DEBOUNCED divergent seek $requestedOffset (Primary is $primary). Ignoring.',
+            );
+            return;
+          }
+        }
+        // Explicit Valid Seek: Allowed
+      } else {
+        debugPrint(
+          'Proxy: DEBOUNCED rapid switch from $activeOffset to $requestedOffset (too fast). Ignoring.',
+        );
+        return;
+      }
+    }
+
+    // Check Blacklist: blocked if within 2MB of a known zombie offset
+    // UNLESS it interacts with the new Primary (user seeked back to it)
+    final blacklistOffset = _zombieBlacklist[fileId];
+    if (blacklistOffset != null) {
+      final distToBlacklist = (requestedOffset - blacklistOffset).abs();
+      final blacklistDistToPrimary = (blacklistOffset - primaryOffset).abs();
+
+      // If blacklist is far from Primary (still irrelevant) AND request is near blacklist
+      if (blacklistDistToPrimary > 10 * 1024 * 1024 &&
+          distToBlacklist < 2 * 1024 * 1024) {
+        debugPrint(
+          'Proxy: BLOCKED request at $requestedOffset due to Zombie Blacklist (Zombie at $blacklistOffset)',
+        );
+        return;
+      } else if (blacklistDistToPrimary <= 10 * 1024 * 1024) {
+        // User seeked back to the zombie region! Unblock it.
+        _zombieBlacklist.remove(fileId);
+      }
+    }
+
+    // Standard low-priority protection (existing logic, refactored)
     if (!isBlocking &&
         isHighPriorityActive &&
         priority >= 20 &&
@@ -1618,14 +2074,25 @@ class LocalStreamingProxy {
       return;
     }
 
-    // If we have a critical download running, and this new request is low priority,
+    // If we have a critical download running, and this new request is LOWER priority,
     // IGNORE IT (unless it's actually the same offset we want, or close to it).
     // Allowing if new request is also high priority (e.g. user seeked).
+    // FIX: Respect Priority Hierarchy (32 vs 28). Even if both are "High" (>20),
+    // we must protect "Critical" (32) from "Urgent" (28).
+    //
+    // EXCEPTION: If the new request is Blocking (Wait for Data) AND is significantly
+    // AHEAD of the active download (>5MB), we assume the player jumped forward (e.g. via Cache)
+    // and the old active download is stale/slow. We MUST allow the jump.
+    bool cxIsForwardJump =
+        isBlocking &&
+        (requestedOffset > activeDownloadTarget + 5 * 1024 * 1024);
+
     if (isHighPriorityActive &&
-        priority < 20 &&
+        priority < activePriority &&
+        !cxIsForwardJump &&
         (requestedOffset - activeDownloadTarget).abs() > 1024 * 1024) {
       debugPrint(
-        'Proxy: PROTECTED active download (prio $activePriority) from low-priority request '
+        'Proxy: PROTECTED active download (prio $activePriority) from lower-priority request '
         'at $requestedOffset (prio $priority). Ignoring.',
       );
       return;
