@@ -31,6 +31,7 @@ class PlayerNotifier extends _$PlayerNotifier {
   Timer? _moovCheckTimer;
   int? _currentProxyFileId;
   bool _mounted = true;
+  bool _isInitialLoading = false;
 
   // Stable Telegram identifiers for progress persistence
   int? _telegramChatId;
@@ -78,6 +79,13 @@ class PlayerNotifier extends _$PlayerNotifier {
       // Es inmutable (en este caso), por lo que usamos copyWith para actualizarlo.
       // Al asignar un nuevo valor a 'state', se notifica a los listeners.
       state = state.copyWith(position: pos);
+
+      // UX FIX: If we were in initial loading state and position advances,
+      // it means playback has started. Clear the forced buffering state.
+      if (_isInitialLoading && pos.inMilliseconds > 200) {
+        _isInitialLoading = false;
+        state = state.copyWith(isBuffering: false);
+      }
     });
     _durationSub = _repository.durationStream.listen((dur) {
       state = state.copyWith(duration: dur);
@@ -103,6 +111,18 @@ class PlayerNotifier extends _$PlayerNotifier {
         _stopMoovCheckTimer();
       }
 
+      // UX FIX: Ignore "not buffering" events during initial load
+      // The player might flicker buffering=false while metadata is loading,
+      // but we want to keep the spinner until real playback starts.
+      if (_isInitialLoading && !buffering) {
+        return;
+      }
+
+      // If we receive a TRUE buffering event, hand over control to the real player state
+      if (buffering) {
+        _isInitialLoading = false;
+      }
+
       state = state.copyWith(
         isBuffering: buffering,
         isVideoNotOptimizedForStreaming: isNotOptimized,
@@ -115,7 +135,8 @@ class PlayerNotifier extends _$PlayerNotifier {
     // Listen for player errors and update state
     _errorSub = _repository.errorStream.listen((error) {
       debugPrint('PlayerNotifier: Player error received: $error');
-      state = state.copyWith(error: error);
+      _isInitialLoading = false; // Stop forced loading on error
+      state = state.copyWith(error: error, isBuffering: false);
     });
   }
 
@@ -170,12 +191,11 @@ class PlayerNotifier extends _$PlayerNotifier {
         position: Duration.zero,
         duration: Duration.zero,
         isPlaying: false,
+        // UX FIX: Force buffering state for network videos immediately
+        isBuffering: isNetwork,
       );
 
-      // ... (existing code for proxy fix) ...
-      // I will use replace_file_content so I don't need to copy 80 lines.
-      // Wait, replacement content must match target content exactly.
-      // I will use multi_replace.
+      _isInitialLoading = isNetwork;
 
       // Store Telegram context for stable progress persistence
       _telegramChatId = telegramChatId;
