@@ -398,6 +398,12 @@ class LocalStreamingProxy {
   // This helps avoid canceling initial download when moov atom is requested
   final Map<int, DateTime> _downloadStartTime = {};
 
+  // P1 FIX: EXPLICIT USER SEEK SIGNALING
+  // When MediaKit calls seekTo(), it notifies the proxy explicitly.
+  // This helps distinguish user seeks from read-ahead/buffer requests.
+  final Set<int> _userSeekInProgress = {};
+  final Map<int, int> _userSeekTargetMs = {}; // Target time in milliseconds
+
   // MOOV STABILIZE: Track when moov requests should be allowed (after delay)
   final Map<int, DateTime> _moovUnblockTime = {};
 
@@ -640,6 +646,29 @@ class LocalStreamingProxy {
     _streamingCaches[fileId]?.clear();
     _streamingCaches.remove(fileId);
     _forcedMoovOffset.remove(fileId);
+  }
+
+  /// P1 FIX: Signal that user explicitly initiated a seek.
+  /// This helps the proxy distinguish between user seeks and read-ahead/buffer requests.
+  /// Call this from MediaKitVideoRepository.seekTo() BEFORE the player seeks.
+  void signalUserSeek(int fileId, int targetTimeMs) {
+    _userSeekInProgress.add(fileId);
+    _userSeekTargetMs[fileId] = targetTimeMs;
+
+    // Clear zombie blacklist on user seek - user intent takes priority
+    _zombieBlacklist.remove(fileId);
+    _zombieBlacklistTime.remove(fileId);
+
+    debugPrint('Proxy: USER SEEK SIGNALED for $fileId to ${targetTimeMs}ms');
+
+    // Auto-clear after 5 seconds if not consumed
+    Future.delayed(const Duration(seconds: 5), () {
+      if (_userSeekInProgress.contains(fileId)) {
+        debugPrint('Proxy: USER SEEK EXPIRED for $fileId (not consumed in 5s)');
+        _userSeekInProgress.remove(fileId);
+        _userSeekTargetMs.remove(fileId);
+      }
+    });
   }
 
   Future<void> start() async {
@@ -955,6 +984,22 @@ class LocalStreamingProxy {
 
       if (existingPrimary == null) {
         shouldUpdatePrimary = true;
+      } else if (_userSeekInProgress.contains(fileId)) {
+        // P1: User explicitly seeked via MediaKit - force Primary update
+        // Don't require isSeekRequest because lastServedOffset may not be set yet
+        // Accept any offset significantly different from current Primary (>50MB)
+        final distFromPrimary = (start - existingPrimary).abs();
+        if (distFromPrimary > 50 * 1024 * 1024) {
+          debugPrint(
+            'Proxy: EXPLICIT USER SEEK for $fileId. Primary $existingPrimary -> $start.',
+          );
+          shouldUpdatePrimary = true;
+          _userSeekInProgress.remove(fileId);
+        } else {
+          debugPrint(
+            'Proxy: USER SEEK SIGNAL active but offset $start too close to Primary $existingPrimary (${distFromPrimary ~/ 1024}KB)',
+          );
+        }
       } else if (isSeekRequest) {
         // Check for Rapid Divergence
         if (lastPrimaryUpdate != null &&

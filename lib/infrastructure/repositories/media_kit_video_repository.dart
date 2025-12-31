@@ -201,6 +201,23 @@ class MediaKitVideoRepository implements VideoRepository {
   Future<void> seekTo(Duration position) async {
     if (_player == null) return;
 
+    // P1 FIX: Signal explicit user seek to proxy BEFORE player seeks
+    // This helps proxy prioritize the first offset request after seek
+    if (_videoUrl != null && _videoUrl!.contains('/stream?file_id=')) {
+      try {
+        final uri = Uri.parse(_videoUrl!);
+        final idStr = uri.queryParameters['file_id'];
+        if (idStr != null) {
+          LocalStreamingProxy().signalUserSeek(
+            int.parse(idStr),
+            position.inMilliseconds,
+          );
+        }
+      } catch (e) {
+        debugPrint('MediaKit: Error signaling seek to proxy: $e');
+      }
+    }
+
     // TELEGRAM ANDROID-INSPIRED: Temporarily reduce buffer requirement for faster seek
     // Similar to ExoPlayer's bufferForPlaybackMs being lower than minBufferMs
     try {
