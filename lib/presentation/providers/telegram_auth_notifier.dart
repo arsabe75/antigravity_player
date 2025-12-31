@@ -6,41 +6,10 @@ import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
 
+import 'state/telegram_auth_state.dart';
+export 'state/telegram_auth_state.dart';
+
 part 'telegram_auth_notifier.g.dart';
-
-enum AuthState {
-  initial,
-  waitPhoneNumber,
-  waitCode,
-  waitPassword,
-  ready,
-  closed,
-  error,
-}
-
-class TelegramAuthState {
-  final AuthState list;
-  final String? error;
-  final bool isLoading;
-
-  TelegramAuthState({
-    this.list = AuthState.initial,
-    this.error,
-    this.isLoading = false,
-  });
-
-  TelegramAuthState copyWith({
-    AuthState? list,
-    String? error,
-    bool? isLoading,
-  }) {
-    return TelegramAuthState(
-      list: list ?? this.list,
-      error: error, // Clear error if not provided
-      isLoading: isLoading ?? this.isLoading,
-    );
-  }
-}
 
 @Riverpod(keepAlive: true)
 class TelegramAuth extends _$TelegramAuth {

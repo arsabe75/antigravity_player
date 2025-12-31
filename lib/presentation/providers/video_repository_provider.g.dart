@@ -196,9 +196,13 @@ final class VideoRepositoryProvider
         retry: null,
         name: r'videoRepositoryProvider',
         isAutoDispose: true,
-        dependencies: null,
-        $allTransitiveDependencies: null,
+        dependencies: const <ProviderOrFamily>[playerBackendProvider],
+        $allTransitiveDependencies: const <ProviderOrFamily>[
+          VideoRepositoryProvider.$allTransitiveDependencies0,
+        ],
       );
+
+  static const $allTransitiveDependencies0 = playerBackendProvider;
 
   @override
   String debugGetCreateSourceHash() => _$videoRepositoryHash();
@@ -222,7 +226,7 @@ final class VideoRepositoryProvider
   }
 }
 
-String _$videoRepositoryHash() => r'3effe97f220dab9082441b04bc58b5dbf5aec320';
+String _$videoRepositoryHash() => r'6c18f811792dc2947beb0278320ef8018a4b053d';
 
 /// Provider for the streaming repository
 
@@ -300,9 +304,24 @@ final class LoadVideoUseCaseProvider
         retry: null,
         name: r'loadVideoUseCaseProvider',
         isAutoDispose: true,
-        dependencies: null,
-        $allTransitiveDependencies: null,
+        dependencies: const <ProviderOrFamily>[
+          videoRepositoryProvider,
+          streamingRepositoryProvider,
+          playbackStorageServiceProvider,
+        ],
+        $allTransitiveDependencies: const <ProviderOrFamily>{
+          LoadVideoUseCaseProvider.$allTransitiveDependencies0,
+          LoadVideoUseCaseProvider.$allTransitiveDependencies1,
+          LoadVideoUseCaseProvider.$allTransitiveDependencies2,
+          LoadVideoUseCaseProvider.$allTransitiveDependencies3,
+        },
       );
+
+  static const $allTransitiveDependencies0 = videoRepositoryProvider;
+  static const $allTransitiveDependencies1 =
+      VideoRepositoryProvider.$allTransitiveDependencies0;
+  static const $allTransitiveDependencies2 = streamingRepositoryProvider;
+  static const $allTransitiveDependencies3 = playbackStorageServiceProvider;
 
   @override
   String debugGetCreateSourceHash() => _$loadVideoUseCaseHash();
@@ -326,7 +345,7 @@ final class LoadVideoUseCaseProvider
   }
 }
 
-String _$loadVideoUseCaseHash() => r'25497967385453d7f4e2b3722a578927cdf4a4ba';
+String _$loadVideoUseCaseHash() => r'df5be8259ce916af0c476c6eb5e449330d39954a';
 
 /// Provider for SeekVideoUseCase with injected dependencies
 
@@ -351,9 +370,21 @@ final class SeekVideoUseCaseProvider
         retry: null,
         name: r'seekVideoUseCaseProvider',
         isAutoDispose: true,
-        dependencies: null,
-        $allTransitiveDependencies: null,
+        dependencies: const <ProviderOrFamily>[
+          videoRepositoryProvider,
+          playbackStorageServiceProvider,
+        ],
+        $allTransitiveDependencies: const <ProviderOrFamily>[
+          SeekVideoUseCaseProvider.$allTransitiveDependencies0,
+          SeekVideoUseCaseProvider.$allTransitiveDependencies1,
+          SeekVideoUseCaseProvider.$allTransitiveDependencies2,
+        ],
       );
+
+  static const $allTransitiveDependencies0 = videoRepositoryProvider;
+  static const $allTransitiveDependencies1 =
+      VideoRepositoryProvider.$allTransitiveDependencies0;
+  static const $allTransitiveDependencies2 = playbackStorageServiceProvider;
 
   @override
   String debugGetCreateSourceHash() => _$seekVideoUseCaseHash();
@@ -377,7 +408,7 @@ final class SeekVideoUseCaseProvider
   }
 }
 
-String _$seekVideoUseCaseHash() => r'b305a980ce8dabe336526efda8d1bbf3721caa55';
+String _$seekVideoUseCaseHash() => r'64cefbca7ce3f36b6f138fb5b869305b9f7a482f';
 
 /// Provider for TogglePlaybackUseCase with injected dependencies
 
@@ -402,9 +433,21 @@ final class TogglePlaybackUseCaseProvider
         retry: null,
         name: r'togglePlaybackUseCaseProvider',
         isAutoDispose: true,
-        dependencies: null,
-        $allTransitiveDependencies: null,
+        dependencies: const <ProviderOrFamily>[
+          videoRepositoryProvider,
+          playbackStorageServiceProvider,
+        ],
+        $allTransitiveDependencies: const <ProviderOrFamily>[
+          TogglePlaybackUseCaseProvider.$allTransitiveDependencies0,
+          TogglePlaybackUseCaseProvider.$allTransitiveDependencies1,
+          TogglePlaybackUseCaseProvider.$allTransitiveDependencies2,
+        ],
       );
+
+  static const $allTransitiveDependencies0 = videoRepositoryProvider;
+  static const $allTransitiveDependencies1 =
+      VideoRepositoryProvider.$allTransitiveDependencies0;
+  static const $allTransitiveDependencies2 = playbackStorageServiceProvider;
 
   @override
   String debugGetCreateSourceHash() => _$togglePlaybackUseCaseHash();
@@ -430,4 +473,4 @@ final class TogglePlaybackUseCaseProvider
 }
 
 String _$togglePlaybackUseCaseHash() =>
-    r'1c3b7e46a3893ca3d9be63d31ca249a52f0ad104';
+    r'f53a341733f13e39a150b434bbf9d996b970a417';

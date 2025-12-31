@@ -50,7 +50,7 @@ class PlayerBackend extends _$PlayerBackend {
 // ============================================================================
 
 /// The active VideoRepository based on the backend
-@riverpod
+@Riverpod(dependencies: [PlayerBackend])
 VideoRepository videoRepository(Ref ref) {
   final backend = ref.watch(playerBackendProvider);
 
@@ -76,7 +76,9 @@ StreamingRepository streamingRepository(Ref ref) {
 // ============================================================================
 
 /// Provider for LoadVideoUseCase with injected dependencies
-@riverpod
+@Riverpod(
+  dependencies: [videoRepository, streamingRepository, playbackStorageService],
+)
 LoadVideoUseCase loadVideoUseCase(Ref ref) {
   return LoadVideoUseCase(
     videoRepository: ref.watch(videoRepositoryProvider),
@@ -87,7 +89,7 @@ LoadVideoUseCase loadVideoUseCase(Ref ref) {
 }
 
 /// Provider for SeekVideoUseCase with injected dependencies
-@riverpod
+@Riverpod(dependencies: [videoRepository, playbackStorageService])
 SeekVideoUseCase seekVideoUseCase(Ref ref) {
   return SeekVideoUseCase(
     videoRepository: ref.watch(videoRepositoryProvider),
@@ -96,7 +98,7 @@ SeekVideoUseCase seekVideoUseCase(Ref ref) {
 }
 
 /// Provider for TogglePlaybackUseCase with injected dependencies
-@riverpod
+@Riverpod(dependencies: [videoRepository, playbackStorageService])
 TogglePlaybackUseCase togglePlaybackUseCase(Ref ref) {
   return TogglePlaybackUseCase(
     videoRepository: ref.watch(videoRepositoryProvider),

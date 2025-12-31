@@ -2,63 +2,10 @@ import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../infrastructure/services/telegram_service.dart';
 
+import 'state/telegram_chat_state.dart';
+export 'state/telegram_chat_state.dart';
+
 part 'telegram_chat_notifier.g.dart';
-
-class TelegramChatState {
-  final List<Map<String, dynamic>> messages;
-  final bool isLoading;
-  final bool isLoadingMore;
-  final bool hasMore;
-  final String? error;
-
-  const TelegramChatState({
-    this.messages = const [],
-    this.isLoading = false,
-    this.isLoadingMore = false,
-    this.hasMore = true,
-    this.error,
-  });
-
-  TelegramChatState copyWith({
-    List<Map<String, dynamic>>? messages,
-    bool? isLoading,
-    bool? isLoadingMore,
-    bool? hasMore,
-    String? error,
-  }) {
-    return TelegramChatState(
-      messages: messages ?? this.messages,
-      isLoading: isLoading ?? this.isLoading,
-      isLoadingMore: isLoadingMore ?? this.isLoadingMore,
-      hasMore: hasMore ?? this.hasMore,
-      error: error,
-    );
-  }
-}
-
-/// Parameters for TelegramChatNotifier
-/// Supports both regular chats and forum topic threads
-class TelegramChatParams {
-  final int chatId;
-  final int? messageThreadId; // For forum topics
-
-  const TelegramChatParams({required this.chatId, this.messageThreadId});
-
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    return other is TelegramChatParams &&
-        other.chatId == chatId &&
-        other.messageThreadId == messageThreadId;
-  }
-
-  @override
-  int get hashCode => Object.hash(chatId, messageThreadId);
-
-  @override
-  String toString() =>
-      'TelegramChatParams(chatId: $chatId, threadId: $messageThreadId)';
-}
 
 @Riverpod(keepAlive: true)
 class TelegramChat extends _$TelegramChat {

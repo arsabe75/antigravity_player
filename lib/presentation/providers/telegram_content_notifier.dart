@@ -4,31 +4,10 @@ import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../infrastructure/services/telegram_service.dart';
 import '../../infrastructure/services/local_streaming_proxy.dart';
 
+import 'state/telegram_content_state.dart';
+export 'state/telegram_content_state.dart';
+
 part 'telegram_content_notifier.g.dart';
-
-class TelegramContentState {
-  final List<Map<String, dynamic>> chats;
-  final bool isLoading;
-  final String? error;
-
-  TelegramContentState({
-    this.chats = const [],
-    this.isLoading = false,
-    this.error,
-  });
-
-  TelegramContentState copyWith({
-    List<Map<String, dynamic>>? chats,
-    bool? isLoading,
-    String? error,
-  }) {
-    return TelegramContentState(
-      chats: chats ?? this.chats,
-      isLoading: isLoading ?? this.isLoading,
-      error: error,
-    );
-  }
-}
 
 @Riverpod(keepAlive: true)
 class TelegramContent extends _$TelegramContent {
