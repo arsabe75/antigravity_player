@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
 import '../widgets/window_controls.dart';
 import '../providers/telegram_forum_notifier.dart';
 import '../widgets/custom_emoji_icon.dart';
+import '../../config/router/routes.dart';
 
 class TelegramTopicsScreen extends ConsumerWidget {
   final int chatId;
@@ -227,13 +227,11 @@ class TelegramTopicsScreen extends ConsumerWidget {
                           : null,
                       trailing: const Icon(LucideIcons.chevronRight, size: 20),
                       onTap: () {
-                        context.push(
-                          '/telegram/chat/$chatId',
-                          extra: {
-                            'title': topicName,
-                            'messageThreadId': forumTopicId,
-                          },
-                        );
+                        TelegramChatRoute(
+                          chatId: chatId,
+                          title: topicName,
+                          messageThreadId: forumTopicId,
+                        ).push(context);
                       },
                     ),
                   );

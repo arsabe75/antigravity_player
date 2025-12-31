@@ -1,9 +1,10 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
+
+import '../../config/router/routes.dart';
 
 import '../../domain/entities/playlist_entity.dart';
 import '../providers/playlist_notifier.dart';
@@ -39,7 +40,9 @@ class HomeScreen extends ConsumerWidget {
         if (items.isNotEmpty) {
           // Set playlist and start playing first item
           ref.read(playlistProvider.notifier).setPlaylist(items);
-          context.go('/player', extra: items.first.path);
+          PlayerRoute(
+            $extra: PlayerRouteExtra(url: items.first.path),
+          ).go(context);
         }
       }
     }
@@ -50,7 +53,7 @@ class HomeScreen extends ConsumerWidget {
 
     if (url != null && url.isNotEmpty) {
       if (context.mounted) {
-        context.go('/player', extra: url);
+        PlayerRoute($extra: PlayerRouteExtra(url: url)).go(context);
       }
     }
   }
@@ -140,8 +143,8 @@ class HomeScreen extends ConsumerWidget {
                                         width: 200,
                                         height: 50,
                                         child: OutlinedButton.icon(
-                                          onPressed: () =>
-                                              context.push('/telegram'),
+                                          onPressed: () => const TelegramRoute()
+                                              .push(context),
                                           icon: const Icon(LucideIcons.send),
                                           label: const Text('Telegram'),
                                         ),
@@ -167,7 +170,9 @@ class HomeScreen extends ConsumerWidget {
                       panelWidth: panelWidth,
                       // showTelegramVideos: false (default) - only local/network videos
                       onVideoSelected: (video) {
-                        context.go('/player', extra: video.path);
+                        PlayerRoute(
+                          $extra: PlayerRouteExtra(url: video.path),
+                        ).go(context);
                       },
                     ),
                   ),
