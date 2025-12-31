@@ -21,9 +21,25 @@ final class PlayerNotifierProvider
         retry: null,
         name: r'playerProvider',
         isAutoDispose: true,
-        dependencies: null,
-        $allTransitiveDependencies: null,
+        dependencies: const <ProviderOrFamily>[
+          videoRepositoryProvider,
+          playbackStorageServiceProvider,
+          streamingRepositoryProvider,
+          playerBackendProvider,
+        ],
+        $allTransitiveDependencies: const <ProviderOrFamily>{
+          PlayerNotifierProvider.$allTransitiveDependencies0,
+          PlayerNotifierProvider.$allTransitiveDependencies1,
+          PlayerNotifierProvider.$allTransitiveDependencies2,
+          PlayerNotifierProvider.$allTransitiveDependencies3,
+        },
       );
+
+  static const $allTransitiveDependencies0 = videoRepositoryProvider;
+  static const $allTransitiveDependencies1 =
+      VideoRepositoryProvider.$allTransitiveDependencies0;
+  static const $allTransitiveDependencies2 = playbackStorageServiceProvider;
+  static const $allTransitiveDependencies3 = streamingRepositoryProvider;
 
   @override
   String debugGetCreateSourceHash() => _$playerNotifierHash();
@@ -41,7 +57,7 @@ final class PlayerNotifierProvider
   }
 }
 
-String _$playerNotifierHash() => r'ff597bd8c63676ea0fa6fb85e7bff9547e6a8998';
+String _$playerNotifierHash() => r'f6dc6f4ccedcbf6c1e9020c2d8e459c2345ca9b8';
 
 abstract class _$PlayerNotifier extends $Notifier<PlayerState> {
   PlayerState build();

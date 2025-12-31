@@ -16,7 +16,14 @@ part 'player_notifier.g.dart';
 // Player Notifier
 // Riverpod 3: @riverpod sobre una clase genera un NotifierProvider (o AsyncNotifierProvider si build devuelve Future).
 // La clase debe extender de _$NombreDeLaClase (generated mixin).
-@riverpod
+@Riverpod(
+  dependencies: [
+    videoRepository,
+    playbackStorageService,
+    streamingRepository,
+    PlayerBackend,
+  ],
+)
 class PlayerNotifier extends _$PlayerNotifier {
   late final VideoRepository _repository;
   late final PlaybackStorageService _storageService;
