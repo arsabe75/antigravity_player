@@ -340,9 +340,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 // Video Layer
                 _buildVideoLayer(controller, state, notifier),
 
-                // Buffering Indicator
+                // Buffering Indicator - shows during initial load OR buffering
                 BufferingIndicator(
-                  isBuffering: state.isBuffering,
+                  isBuffering: state.isBuffering || state.isInitialLoading,
                   isVideoNotOptimizedForStreaming:
                       state.isVideoNotOptimizedForStreaming,
                 ),
