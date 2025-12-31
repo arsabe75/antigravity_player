@@ -22,7 +22,7 @@ abstract class StreamingRepository {
   /// Returns true if the video requires extra loading time due to metadata placement
   bool isVideoNotOptimizedForStreaming(int fileId);
 
-  /// OPTIMIZATION 2: Preload first 2MB of video when it appears in list view
-  /// Call this when a video thumbnail becomes visible to pre-download data
-  void preloadVideoStart(int fileId, int? totalSize);
+  /// P1: Two-tier preloading when videos appear in list view
+  /// isVisible=true: Priority 5, 2MB + MOOV | isVisible=false: Priority 1, 512KB only
+  void preloadVideoStart(int fileId, int? totalSize, {bool isVisible = false});
 }

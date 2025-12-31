@@ -410,6 +410,11 @@ class LocalStreamingProxy {
   // MOOV STABILIZE: Track files that have completed stabilization (don't re-trigger)
   final Set<int> _moovStabilizeCompleted = {};
 
+  // P1 FIX: MOOV DOWNLOAD LOCK - Track active MOOV downloads to prevent cancellation
+  // When MOOV is downloading, block requests for low offsets (< 50MB)
+  final Map<int, DateTime> _moovDownloadStart = {};
+  static const int _moovDownloadTimeoutMs = 15000; // Allow up to 15s for MOOV
+
   // ============================================================
   // PHASE 1: DRKLO-INSPIRED OPTIMIZATIONS
   // ============================================================
@@ -503,40 +508,54 @@ class LocalStreamingProxy {
 
   // OPTIMIZATION 2: Track files we've started preloading from list view
   final Set<int> _listPreloadStarted = {};
+  int _activePreloads = 0;
+  static const int _maxConcurrentPreloads = 3;
 
-  /// Preload the first 2MB of a video when it appears in the list view
-  /// This enables faster start when user clicks to play
-  void preloadVideoStart(int fileId, int? totalSize) {
+  /// P1: Two-tier preloading when videos appear in list view
+  /// - isVisible=true: Priority 5, first 2MB (for visible videos)
+  /// - isVisible=false: Priority 1, first 512KB only (for next-in-list)
+  /// Limited to 3 concurrent preloads to avoid TDLib conflicts
+  void preloadVideoStart(int fileId, int? totalSize, {bool isVisible = false}) {
     // Only preload once per file
     if (_listPreloadStarted.contains(fileId)) return;
 
+    // Limit concurrent preloads to prevent TDLib download conflicts
+    if (_activePreloads >= _maxConcurrentPreloads) {
+      return;
+    }
+
     // Skip if already cached or downloading
     final cached = _filePaths[fileId];
+    final minSize = isVisible ? 2 * 1024 * 1024 : 512 * 1024;
     if (cached != null &&
-        (cached.downloadedPrefixSize > 2 * 1024 * 1024 || cached.isCompleted)) {
+        (cached.downloadedPrefixSize > minSize || cached.isCompleted)) {
       return;
     }
 
     _listPreloadStarted.add(fileId);
+    _activePreloads++;
+
+    final priority = isVisible ? 5 : 1;
+    final limit = isVisible ? 2 * 1024 * 1024 : 512 * 1024;
 
     debugPrint(
-      'Proxy: OPTIMIZATION 2 - Preloading first 2MB for $fileId from list view',
+      'Proxy: TWO-TIER PRELOAD for $fileId (visible: $isVisible, prio: $priority, active: $_activePreloads/$_maxConcurrentPreloads)',
     );
 
-    // Start background download with MINIMUM priority (1)
+    // Start background download
     TelegramService().send({
       '@type': 'downloadFile',
       'file_id': fileId,
-      'priority': 1, // Minimum priority - background task (1-10 range)
+      'priority': priority,
       'offset': 0,
-      'limit': 2 * 1024 * 1024, // Just first 2MB
+      'limit': limit,
       'synchronous': false,
     });
 
-    // Also preload moov if we know the total size
-    if (totalSize != null && totalSize > 50 * 1024 * 1024) {
-      _preloadMoovAtom(fileId, totalSize);
-    }
+    // Reduce active count after a delay (preload is fire-and-forget)
+    Future.delayed(const Duration(seconds: 3), () {
+      if (_activePreloads > 0) _activePreloads--;
+    });
   }
 
   void abortRequest(int fileId) {
@@ -880,11 +899,14 @@ class LocalStreamingProxy {
       _activeHttpRequestOffsets[fileId]!.add(start);
 
       // ============================================================
-      // P0 FIX: MOOV-FIRST STATE MACHINE LOGIC
+      // P0/P1 FIX: MOOV-FIRST STATE MACHINE LOGIC
       // ============================================================
       // After cache clear, saved playback positions are stale.
       // If player requests a seek position > 1MB, we MUST load MOOV first.
       // This prevents TDLib crashes when jumping to far offsets without metadata.
+      //
+      // P1 FIX: Handle both MOOV-at-start AND MOOV-at-end files correctly.
+      // For MOOV-at-end, we let the moov detection logic handle it normally.
       bool moovFirstRedirect = false;
 
       if (_stalePlaybackPositions.contains(fileId) && start > 1024 * 1024) {
@@ -898,20 +920,32 @@ class LocalStreamingProxy {
           _pendingSeekAfterMoov[fileId] = start;
           _fileLoadStates[fileId] = FileLoadState.loadingMoov;
 
-          debugPrint(
-            'Proxy: P0 FIX - Stale position detected for $fileId. '
-            'Requested: ${start ~/ 1024}KB, but forcing MOOV-first. '
-            'Pending seek stored.',
-          );
+          // P1: Check if we know MOOV location for this file
+          final isMoovAtEnd = _isMoovAtEnd[fileId] ?? false;
 
-          // Redirect to start of file to load MOOV
-          // The player will need to re-request after MOOV is ready
-          moovFirstRedirect = true;
-          start = 0;
+          if (isMoovAtEnd) {
+            // MOOV is at end - don't redirect to 0, let the existing
+            // moov-at-end handling logic fetch from the correct offset.
+            // We just mark the state and store pending seek.
+            debugPrint(
+              'Proxy: P1 FIX - Stale position for $fileId (MOOV at END). '
+              'Requested: ${start ~/ 1024}KB. Pending seek stored. '
+              'Letting moov-at-end logic handle MOOV fetch.',
+            );
+            // Don't redirect - moov will be fetched when player requests end of file
+          } else {
+            // MOOV is at start (or unknown) - redirect to 0
+            debugPrint(
+              'Proxy: P1 FIX - Stale position for $fileId (MOOV at START). '
+              'Requested: ${start ~/ 1024}KB, forcing start from 0.',
+            );
+            moovFirstRedirect = true;
+            start = 0;
+          }
         } else if (currentState == FileLoadState.moovReady) {
           // MOOV is loaded, we can now process the stale seek
           debugPrint(
-            'Proxy: P0 FIX - MOOV ready for $fileId. Processing pending seek to ${start ~/ 1024}KB',
+            'Proxy: P1 FIX - MOOV ready for $fileId. Processing pending seek to ${start ~/ 1024}KB',
           );
           _fileLoadStates[fileId] = FileLoadState.seeking;
           _stalePlaybackPositions.remove(fileId);
@@ -2088,6 +2122,43 @@ class LocalStreamingProxy {
         totalSize > 0 &&
         (totalSize - requestedOffset) <
             (totalSize * 0.01).round().clamp(5 * 1024 * 1024, 50 * 1024 * 1024);
+
+    // P1 FIX: MOOV DOWNLOAD PROTECTION
+    // Prevent low-offset requests from canceling MOOV download.
+    // When MOOV download is in progress, block requests for offsets < 50MB.
+    final moovLockStart = _moovDownloadStart[fileId];
+    final isMoovLocked =
+        moovLockStart != null &&
+        now.difference(moovLockStart).inMilliseconds < _moovDownloadTimeoutMs;
+
+    if (isMoovDownload) {
+      // Mark MOOV download start time
+      if (!_moovDownloadStart.containsKey(fileId)) {
+        _moovDownloadStart[fileId] = now;
+        debugPrint('Proxy: P1 MOOV LOCK started for $fileId');
+      }
+    } else if (isMoovLocked && requestedOffset < 50 * 1024 * 1024) {
+      // Block low-offset requests while MOOV is downloading
+      debugPrint(
+        'Proxy: P1 MOOV LOCK - Blocking request at ${requestedOffset ~/ 1024}KB while MOOV downloads',
+      );
+      return; // Don't start this download, wait for MOOV to complete
+    }
+
+    // Clear MOOV lock if we have MOOV data (moov typically downloads quickly)
+    if (_moovDownloadStart.containsKey(fileId)) {
+      final cached = _filePaths[fileId];
+      // MOOV is considered complete if:
+      // 1. We have data at the end of file (moov region)
+      // 2. OR the download at MOOV offset has completed/progressed
+      if (cached != null &&
+          cached.downloadOffset > totalSize - 10 * 1024 * 1024) {
+        _moovDownloadStart.remove(fileId);
+        debugPrint(
+          'Proxy: P1 MOOV LOCK released for $fileId (MOOV data available)',
+        );
+      }
+    }
 
     // TELEGRAM ANDROID-INSPIRED: Calculate dynamic priority based on distance
     // to primary playback position. Closer = higher priority.
