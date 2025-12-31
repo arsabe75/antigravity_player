@@ -1,10 +1,12 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../infrastructure/services/telegram_service.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
+
+part 'telegram_auth_notifier.g.dart';
 
 enum AuthState {
   initial,
@@ -40,7 +42,8 @@ class TelegramAuthState {
   }
 }
 
-class TelegramAuthNotifier extends Notifier<TelegramAuthState> {
+@Riverpod(keepAlive: true)
+class TelegramAuth extends _$TelegramAuth {
   late final TelegramService _service;
 
   // Read from environment variables
@@ -179,8 +182,3 @@ class TelegramAuthNotifier extends Notifier<TelegramAuthState> {
     _service.send({'@type': 'logOut'});
   }
 }
-
-final telegramAuthProvider =
-    NotifierProvider<TelegramAuthNotifier, TelegramAuthState>(
-      TelegramAuthNotifier.new,
-    );
