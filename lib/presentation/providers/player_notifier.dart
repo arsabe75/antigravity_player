@@ -31,7 +31,10 @@ class PlayerNotifier extends _$PlayerNotifier {
   Timer? _moovCheckTimer;
   int? _currentProxyFileId;
 
-  bool _isInitialLoading = false;
+  // Track the position when initial loading started to detect actual playback
+  Duration? _initialLoadingStartPosition;
+
+  // Note: isInitialLoading is now exposed in PlayerState for UI visibility
 
   // Stable Telegram identifiers for progress persistence
   int? _telegramChatId;
@@ -79,11 +82,18 @@ class PlayerNotifier extends _$PlayerNotifier {
       // Al asignar un nuevo valor a 'state', se notifica a los listeners.
       state = state.copyWith(position: pos);
 
-      // UX FIX: If we were in initial loading state and position advances,
-      // it means playback has started. Clear the forced buffering state.
-      if (_isInitialLoading && pos.inMilliseconds > 200) {
-        _isInitialLoading = false;
-        state = state.copyWith(isBuffering: false);
+      // UX FIX: Only clear initial loading when position has ACTUALLY ADVANCED.
+      // Compare against the starting position to detect real playback progress.
+      if (state.isInitialLoading && state.isPlaying) {
+        final startPos = _initialLoadingStartPosition ?? Duration.zero;
+        // Position must have advanced by at least 100ms from start to confirm playback
+        if (pos.inMilliseconds > startPos.inMilliseconds + 100) {
+          debugPrint(
+            'PlayerNotifier: Playback confirmed, clearing initial loading',
+          );
+          _initialLoadingStartPosition = null;
+          state = state.copyWith(isInitialLoading: false, isBuffering: false);
+        }
       }
     });
     _durationSub = _repository.durationStream.listen((dur) {
@@ -91,6 +101,7 @@ class PlayerNotifier extends _$PlayerNotifier {
     });
     _playingSub = _repository.isPlayingStream.listen((playing) {
       state = state.copyWith(isPlaying: playing);
+      // Don't clear isInitialLoading here - let position listener handle it
     });
     _bufferingSub = _repository.isBufferingStream.listen((buffering) {
       // Check if current video is not optimized for streaming (moov atom at end)
@@ -110,16 +121,16 @@ class PlayerNotifier extends _$PlayerNotifier {
         _stopMoovCheckTimer();
       }
 
-      // UX FIX: Ignore "not buffering" events during initial load
-      // The player might flicker buffering=false while metadata is loading,
-      // but we want to keep the spinner until real playback starts.
-      if (_isInitialLoading && !buffering) {
+      // UX FIX: Ignore ALL buffering state changes during initial load
+      // The player flickers buffering=true/false while loading metadata,
+      // but we want to keep the spinner until real playback starts (position > 200ms).
+      // The isInitialLoading flag is only cleared in the position listener.
+      if (state.isInitialLoading) {
+        // During initial load, only update moov optimization status, not buffering
+        if (isNotOptimized && !state.isVideoNotOptimizedForStreaming) {
+          state = state.copyWith(isVideoNotOptimizedForStreaming: true);
+        }
         return;
-      }
-
-      // If we receive a TRUE buffering event, hand over control to the real player state
-      if (buffering) {
-        _isInitialLoading = false;
       }
 
       state = state.copyWith(
@@ -134,7 +145,7 @@ class PlayerNotifier extends _$PlayerNotifier {
     // Listen for player errors and update state
     _errorSub = _repository.errorStream.listen((error) {
       debugPrint('PlayerNotifier: Player error received: $error');
-      _isInitialLoading = false; // Stop forced loading on error
+      // Stop forced loading on error
       state = state.copyWith(error: error, isBuffering: false);
     });
   }
@@ -192,9 +203,8 @@ class PlayerNotifier extends _$PlayerNotifier {
         isPlaying: false,
         // UX FIX: Force buffering state for network videos immediately
         isBuffering: isNetwork,
+        isInitialLoading: isNetwork, // New: exposed to UI for loading indicator
       );
-
-      _isInitialLoading = isNetwork;
 
       // Store Telegram context for stable progress persistence
       _telegramChatId = telegramChatId;
@@ -255,6 +265,10 @@ class PlayerNotifier extends _$PlayerNotifier {
         state = state.copyWith(position: startPosition);
       }
 
+      // Track starting position for detecting actual playback (position must advance)
+      if (isNetwork) {
+        _initialLoadingStartPosition = startPosition;
+      }
       final video = VideoEntity(path: path, isNetwork: isNetwork);
 
       // OPTIMIZATION: Pass startPosition to play()
@@ -282,8 +296,7 @@ class PlayerNotifier extends _$PlayerNotifier {
       // CRITICAL: Ensure buffering state clears if not actually buffering
       // Sometimes MediaKit doesn't emit 'buffering=false' if we start with 'start' property
       if (state.isBuffering && !isNetwork) {
-        state = state.copyWith(isBuffering: false);
-        _isInitialLoading = false;
+        state = state.copyWith(isBuffering: false, isInitialLoading: false);
       }
 
       _startSaveTimer();

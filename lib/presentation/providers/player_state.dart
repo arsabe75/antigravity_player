@@ -7,6 +7,9 @@ abstract class PlayerState with _$PlayerState {
   const factory PlayerState({
     @Default(false) bool isPlaying,
     @Default(false) bool isBuffering,
+    @Default(false)
+    bool
+    isInitialLoading, // New: True when loading network video before playback starts
     @Default(Duration.zero) Duration position,
     @Default(Duration.zero) Duration duration,
     @Default(1.0) double volume,
