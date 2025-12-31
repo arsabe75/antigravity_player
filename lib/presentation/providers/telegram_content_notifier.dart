@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../infrastructure/services/telegram_service.dart';
 import '../../infrastructure/services/local_streaming_proxy.dart';
+
+part 'telegram_content_notifier.g.dart';
 
 class TelegramContentState {
   final List<Map<String, dynamic>> chats;
@@ -28,7 +30,8 @@ class TelegramContentState {
   }
 }
 
-class TelegramContentNotifier extends Notifier<TelegramContentState> {
+@Riverpod(keepAlive: true)
+class TelegramContent extends _$TelegramContent {
   late final TelegramService _service;
   final Map<int, Map<String, dynamic>> _bufferedChats = {}; // Buffer by Chat ID
   Timer? _debounceTimer;
@@ -243,8 +246,3 @@ class TelegramContentNotifier extends Notifier<TelegramContentState> {
     return LocalStreamingProxy().getUrl(fileId, size);
   }
 }
-
-final telegramContentProvider =
-    NotifierProvider<TelegramContentNotifier, TelegramContentState>(
-      TelegramContentNotifier.new,
-    );

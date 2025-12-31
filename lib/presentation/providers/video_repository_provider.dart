@@ -1,4 +1,4 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../domain/repositories/video_repository.dart';
 import '../../infrastructure/repositories/media_kit_video_repository.dart';
 import '../../infrastructure/repositories/fvp_video_repository.dart';
@@ -11,27 +11,32 @@ import '../../application/use_cases/load_video_use_case.dart';
 import '../../application/use_cases/seek_video_use_case.dart';
 import '../../application/use_cases/toggle_playback_use_case.dart';
 
-// Helper provider to read settings
-final playerSettingsServiceProvider = Provider(
-  (ref) => PlayerSettingsService(),
-);
+part 'video_repository_provider.g.dart';
 
-// Provider for playback storage service
-final playbackStorageServiceProvider = Provider(
-  (ref) => PlaybackStorageService(),
-);
+// ============================================================================
+// Service Providers
+// ============================================================================
 
-// The generic video repository provider
-// It needs to be initialized asynchronously or check settings synchronously if possible.
-// Riverpod recommended way for async initialization is FutureProvider,
-// but PlayerNotifier needs the repo.
-// We will use a FutureProvider for the *type* of backend, and then a Provider logic to return the instance.
-// OR simpler: PlayerNotifier reads settings on build and instantiates the repo.
+/// Helper provider to read settings
+@riverpod
+PlayerSettingsService playerSettingsService(Ref ref) {
+  return PlayerSettingsService();
+}
 
-// Holds the active player backend preference.
-// Can be overridden in main() with initial value.
-// Holds the active player backend preference.
-class PlayerBackendNotifier extends Notifier<String> {
+/// Provider for playback storage service
+@riverpod
+PlaybackStorageService playbackStorageService(Ref ref) {
+  return PlaybackStorageService();
+}
+
+// ============================================================================
+// Player Backend Provider (keepAlive for overrides in main.dart)
+// ============================================================================
+
+/// Holds the active player backend preference.
+/// Can be overridden in main() with initial value.
+@Riverpod(keepAlive: true)
+class PlayerBackend extends _$PlayerBackend {
   @override
   String build() => throw UnimplementedError();
 
@@ -40,12 +45,13 @@ class PlayerBackendNotifier extends Notifier<String> {
   }
 }
 
-final playerBackendProvider = NotifierProvider<PlayerBackendNotifier, String>(
-  PlayerBackendNotifier.new,
-);
+// ============================================================================
+// Repository Providers
+// ============================================================================
 
-// The active VideoRepository based on the backend
-final videoRepositoryProvider = Provider.autoDispose<VideoRepository>((ref) {
+/// The active VideoRepository based on the backend
+@riverpod
+VideoRepository videoRepository(Ref ref) {
   final backend = ref.watch(playerBackendProvider);
 
   final repository = (backend == PlayerSettingsService.engineFvp)
@@ -57,40 +63,43 @@ final videoRepositoryProvider = Provider.autoDispose<VideoRepository>((ref) {
   });
 
   return repository;
-});
+}
 
-// Provider for the streaming repository
-final streamingRepositoryProvider = Provider<StreamingRepository>((ref) {
+/// Provider for the streaming repository
+@Riverpod(keepAlive: true)
+StreamingRepository streamingRepository(Ref ref) {
   return LocalStreamingRepository();
-});
+}
 
 // ============================================================================
 // Use Case Providers
 // ============================================================================
 
 /// Provider for LoadVideoUseCase with injected dependencies
-final loadVideoUseCaseProvider = Provider.autoDispose<LoadVideoUseCase>((ref) {
+@riverpod
+LoadVideoUseCase loadVideoUseCase(Ref ref) {
   return LoadVideoUseCase(
     videoRepository: ref.watch(videoRepositoryProvider),
     streamingRepository: ref.watch(streamingRepositoryProvider),
     storageService: ref.watch(playbackStorageServiceProvider),
     recentVideosService: RecentVideosService(),
   );
-});
+}
 
 /// Provider for SeekVideoUseCase with injected dependencies
-final seekVideoUseCaseProvider = Provider.autoDispose<SeekVideoUseCase>((ref) {
+@riverpod
+SeekVideoUseCase seekVideoUseCase(Ref ref) {
   return SeekVideoUseCase(
     videoRepository: ref.watch(videoRepositoryProvider),
     storageService: ref.watch(playbackStorageServiceProvider),
   );
-});
+}
 
 /// Provider for TogglePlaybackUseCase with injected dependencies
-final togglePlaybackUseCaseProvider =
-    Provider.autoDispose<TogglePlaybackUseCase>((ref) {
-      return TogglePlaybackUseCase(
-        videoRepository: ref.watch(videoRepositoryProvider),
-        storageService: ref.watch(playbackStorageServiceProvider),
-      );
-    });
+@riverpod
+TogglePlaybackUseCase togglePlaybackUseCase(Ref ref) {
+  return TogglePlaybackUseCase(
+    videoRepository: ref.watch(videoRepositoryProvider),
+    storageService: ref.watch(playbackStorageServiceProvider),
+  );
+}

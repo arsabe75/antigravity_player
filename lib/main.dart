@@ -12,7 +12,7 @@ import 'presentation/providers/theme_provider.dart';
 import 'infrastructure/services/player_settings_service.dart';
 import 'presentation/providers/video_repository_provider.dart';
 
-class _PreloadedBackendNotifier extends PlayerBackendNotifier {
+class _PreloadedBackendNotifier extends PlayerBackend {
   final String initialBackend;
   _PreloadedBackendNotifier(this.initialBackend);
 
