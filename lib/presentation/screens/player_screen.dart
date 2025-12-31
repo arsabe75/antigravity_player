@@ -10,6 +10,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import 'package:video_player/video_player.dart';
 import 'package:window_manager/window_manager.dart';
 
+import '../../config/router/routes.dart';
 import '../../config/constants/app_constants.dart';
 import '../../domain/entities/player_error.dart';
 
@@ -203,7 +204,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       if (context.canPop()) {
         context.pop();
       } else {
-        context.go('/');
+        const HomeRoute().go(context);
       }
     }
   }

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+
+import '../../config/router/routes.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'package:window_manager/window_manager.dart';
@@ -170,9 +172,8 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
           IconButton(
             icon: const Icon(LucideIcons.plus),
             onPressed: () async {
-              final result = await context.push<Map<String, dynamic>>(
-                '/telegram/selection',
-              );
+              final result = await const TelegramSelectionRoute()
+                  .push<Map<String, dynamic>>(context);
 
               if (result != null) {
                 setState(() {
@@ -188,7 +189,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
             icon: const Icon(LucideIcons.hardDrive),
             tooltip: 'Storage',
             onPressed: () {
-              context.push('/telegram/storage');
+              const TelegramStorageRoute().push(context);
             },
           ),
           IconButton(
@@ -278,16 +279,16 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                               onTap: () {
                                 if (isForum) {
                                   // Navigate to topics screen for forum groups
-                                  context.push(
-                                    '/telegram/topics/${chat['id']}',
-                                    extra: title,
-                                  );
+                                  TelegramTopicsRoute(
+                                    chatId: chat['id'],
+                                    title: title,
+                                  ).push(context);
                                 } else {
                                   // Navigate directly to chat screen for channels/regular groups
-                                  context.push(
-                                    '/telegram/chat/${chat['id']}',
-                                    extra: {'title': title},
-                                  );
+                                  TelegramChatRoute(
+                                    chatId: chat['id'],
+                                    title: title,
+                                  ).push(context);
                                 }
                               },
                               trailing: IconButton(
@@ -478,21 +479,18 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
 
                     if (!context.mounted) return;
 
-                    context
-                        .push(
-                          '/player',
-                          extra: {
-                            'url': url,
-                            'title': video.title,
-                            'telegramChatId': video.telegramChatId,
-                            'telegramMessageId': video.telegramMessageId,
-                            'telegramFileSize': video.telegramFileSize,
-                          },
-                        )
-                        .then((_) {
-                          // Refresh recent videos when returning from player
-                          _recentVideosKey.currentState?.refresh();
-                        });
+                    PlayerRoute(
+                      $extra: PlayerRouteExtra(
+                        url: url,
+                        title: video.title,
+                        telegramChatId: video.telegramChatId,
+                        telegramMessageId: video.telegramMessageId,
+                        telegramFileSize: video.telegramFileSize,
+                      ),
+                    ).push(context).then((_) {
+                      // Refresh recent videos when returning from player
+                      _recentVideosKey.currentState?.refresh();
+                    });
                   },
                 ),
               ),

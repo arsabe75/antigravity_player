@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
 import '../widgets/window_controls.dart';
 import '../providers/telegram_chat_notifier.dart';
 import '../providers/telegram_content_notifier.dart'; // For getStreamUrl helper if needed
 import '../../infrastructure/services/local_streaming_proxy.dart';
+import '../../config/router/routes.dart';
 
 class TelegramChatScreen extends ConsumerStatefulWidget {
   final int chatId;
@@ -190,21 +190,20 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                               final messageId = msg['id'] as int?;
 
                               if (context.mounted) {
-                                context.push(
-                                  '/player',
-                                  extra: {
-                                    'url': url,
-                                    'title': fileName,
-                                    'telegramChatId': widget.chatId,
-                                    'telegramMessageId': messageId,
-                                    'telegramFileSize': size,
-                                    'telegramTopicId': widget.messageThreadId,
-                                    'telegramTopicName':
+                                PlayerRoute(
+                                  $extra: PlayerRouteExtra(
+                                    url: url,
+                                    title: fileName,
+                                    telegramChatId: widget.chatId,
+                                    telegramMessageId: messageId,
+                                    telegramFileSize: size,
+                                    telegramTopicId: widget.messageThreadId,
+                                    telegramTopicName:
                                         widget.messageThreadId != null
                                         ? widget.title
                                         : null,
-                                  },
-                                );
+                                  ),
+                                ).push(context);
                               }
                             },
                             child: Column(

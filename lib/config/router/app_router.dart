@@ -1,82 +1,29 @@
 import 'package:go_router/go_router.dart';
-import '../../presentation/screens/player_screen.dart';
-import '../../presentation/screens/home_screen.dart';
-import '../../presentation/screens/telegram_screen.dart';
-import '../../presentation/screens/telegram_selection_screen.dart';
-import '../../presentation/screens/telegram_storage_screen.dart';
-import '../../presentation/screens/telegram_topics_screen.dart';
-import '../../presentation/screens/telegram_chat_screen.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
 
-final appRouter = GoRouter(
-  initialLocation: '/',
-  routes: [
-    GoRoute(path: '/', builder: (context, state) => const HomeScreen()),
-    GoRoute(
-      path: '/player',
-      builder: (context, state) {
-        String? url;
-        String? title;
-        int? telegramChatId;
-        int? telegramMessageId;
-        int? telegramFileSize;
-        int? telegramTopicId;
-        String? telegramTopicName;
+import 'routes.dart';
 
-        if (state.extra is Map) {
-          final map = state.extra as Map;
-          url = map['url'] as String?;
-          title = map['title'] as String?;
-          telegramChatId = map['telegramChatId'] as int?;
-          telegramMessageId = map['telegramMessageId'] as int?;
-          telegramFileSize = map['telegramFileSize'] as int?;
-          telegramTopicId = map['telegramTopicId'] as int?;
-          telegramTopicName = map['telegramTopicName'] as String?;
-        } else if (state.extra is String) {
-          url = state.extra as String?;
-        }
+part 'app_router.g.dart';
 
-        return PlayerScreen(
-          videoUrl: url,
-          title: title,
-          telegramChatId: telegramChatId,
-          telegramMessageId: telegramMessageId,
-          telegramFileSize: telegramFileSize,
-          telegramTopicId: telegramTopicId,
-          telegramTopicName: telegramTopicName,
-        );
-      },
-    ),
-    GoRoute(
-      path: '/telegram',
-      builder: (context, state) => const TelegramScreen(),
-    ),
-    GoRoute(
-      path: '/telegram/selection',
-      builder: (context, state) => const TelegramSelectionScreen(),
-    ),
-    GoRoute(
-      path: '/telegram/storage',
-      builder: (context, state) => const TelegramStorageScreen(),
-    ),
-    GoRoute(
-      path: '/telegram/topics/:chatId',
-      builder: (context, state) {
-        final chatId = int.parse(state.pathParameters['chatId']!);
-        final title = state.extra as String? ?? 'Topics';
-        return TelegramTopicsScreen(chatId: chatId, title: title);
-      },
-    ),
-    GoRoute(
-      path: '/telegram/chat/:chatId',
-      builder: (context, state) {
-        final chatId = int.parse(state.pathParameters['chatId']!);
-        final extra = state.extra as Map<String, dynamic>? ?? {};
-        return TelegramChatScreen(
-          chatId: chatId,
-          title: extra['title'] as String? ?? 'Chat',
-          messageThreadId: extra['messageThreadId'] as int?,
-        );
-      },
-    ),
-  ],
-);
+// ============================================================================
+// Type-Safe Router with Riverpod Integration
+// ============================================================================
+
+/// Provides the GoRouter instance with type-safe routes.
+///
+/// Usage:
+/// ```dart
+/// // In a widget
+/// final router = ref.watch(appRouterProvider);
+///
+/// // Navigation with type-safety
+/// const PlayerRoute(url: 'http://...', title: 'Video').go(context);
+/// ```
+@Riverpod(keepAlive: true)
+GoRouter appRouter(Ref ref) {
+  return GoRouter(
+    initialLocation: '/',
+    debugLogDiagnostics: true,
+    routes: $appRoutes, // Generated from routes.g.dart
+  );
+}
