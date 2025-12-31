@@ -46,6 +46,30 @@ class PlayerRouteExtra {
   final int? telegramFileSize;
   final int? telegramTopicId;
   final String? telegramTopicName;
+
+  /// Serialization for GoRouter codec
+  Map<String, dynamic> toJson() => {
+    'url': url,
+    'title': title,
+    'telegramChatId': telegramChatId,
+    'telegramMessageId': telegramMessageId,
+    'telegramFileSize': telegramFileSize,
+    'telegramTopicId': telegramTopicId,
+    'telegramTopicName': telegramTopicName,
+  };
+
+  /// Deserialization for GoRouter codec
+  factory PlayerRouteExtra.fromJson(Map<String, dynamic> json) {
+    return PlayerRouteExtra(
+      url: json['url'] as String?,
+      title: json['title'] as String?,
+      telegramChatId: json['telegramChatId'] as int?,
+      telegramMessageId: json['telegramMessageId'] as int?,
+      telegramFileSize: json['telegramFileSize'] as int?,
+      telegramTopicId: json['telegramTopicId'] as int?,
+      telegramTopicName: json['telegramTopicName'] as String?,
+    );
+  }
 }
 
 /// Player Route - Video playback
