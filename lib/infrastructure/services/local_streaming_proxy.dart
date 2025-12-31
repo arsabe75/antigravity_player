@@ -1526,6 +1526,14 @@ class LocalStreamingProxy {
                   if (currentPrefix <= lastPrefix &&
                       !updatedCache.isDownloadingActive) {
                     // No progress in last 2 seconds and download not active - restart
+                    // P2: Record stall for adaptive buffer escalation
+                    final metrics = _downloadMetrics[fileId];
+                    if (metrics != null) {
+                      metrics.recordStall();
+                      debugPrint(
+                        'Proxy: P2 STALL RECORDED for $fileId (total: ${metrics.recentStallCount})',
+                      );
+                    }
                     _startDownloadAtOffset(fileId, currentReadOffset);
                   }
                   _lastDownloadProgress[fileId] = currentPrefix;
