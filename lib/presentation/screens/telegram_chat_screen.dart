@@ -6,6 +6,7 @@ import 'package:window_manager/window_manager.dart';
 import '../widgets/window_controls.dart';
 import '../providers/telegram_chat_notifier.dart';
 import '../providers/telegram_content_notifier.dart'; // For getStreamUrl helper if needed
+import '../../infrastructure/services/local_streaming_proxy.dart';
 
 class TelegramChatScreen extends ConsumerStatefulWidget {
   final int chatId;
@@ -130,9 +131,25 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                         final msg = videoMessages[index];
                         final content = msg['content'];
                         final video = content['video'];
-                        final fileId = video['video']['id'];
-                        final size = video['video']['size'];
-                        // final thumbnail = ... (handle thumbnail later)
+                        final fileId = video['video']['id'] as int;
+                        final size = video['video']['size'] as int?;
+
+                        // P1: Two-tier preloading
+                        // Visible items (first 10) get higher priority preload
+                        final isVisible = index < 10;
+                        LocalStreamingProxy().preloadVideoStart(
+                          fileId,
+                          size,
+                          isVisible: isVisible,
+                        );
+                        // Also preload next 10 items at lower priority
+                        if (index >= 10 && index < 20) {
+                          LocalStreamingProxy().preloadVideoStart(
+                            fileId,
+                            size,
+                            isVisible: false,
+                          );
+                        }
 
                         // Get video title with multiple fallbacks:
                         // 1. caption text from message (priority)
@@ -167,7 +184,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                               // Get Stream URL
                               final url = await ref
                                   .read(telegramContentProvider.notifier)
-                                  .getStreamUrl(fileId, size);
+                                  .getStreamUrl(fileId, size ?? 0);
 
                               // Get message ID for stable progress persistence
                               final messageId = msg['id'] as int?;

@@ -40,7 +40,7 @@ class LocalStreamingRepository implements StreamingRepository {
   }
 
   @override
-  void preloadVideoStart(int fileId, int? totalSize) {
-    _proxy.preloadVideoStart(fileId, totalSize);
+  void preloadVideoStart(int fileId, int? totalSize, {bool isVisible = false}) {
+    _proxy.preloadVideoStart(fileId, totalSize, isVisible: isVisible);
   }
 }
