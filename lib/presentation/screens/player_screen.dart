@@ -19,6 +19,7 @@ import '../providers/player_state.dart';
 import '../providers/playlist_notifier.dart';
 import '../providers/recent_videos_refresh_provider.dart';
 import '../providers/video_repository_provider.dart';
+import '../providers/telegram_cache_notifier.dart';
 import '../widgets/player/player_widgets.dart';
 import '../widgets/player/track_selection_sheet.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
@@ -267,6 +268,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     final controller = ref.read(videoRepositoryProvider).platformController;
     final playlist = ref.watch(playlistProvider);
     final playlistNotifier = ref.read(playlistProvider.notifier);
+    final telegramCacheState = ref.watch(telegramCacheProvider);
 
     // Auto-advance listener
     ref.listen(playerProvider, (previous, next) {
@@ -452,6 +454,64 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         }
                       },
                       onClose: () => setState(() => _showPlaylist = false),
+                    ),
+                  ),
+
+                // Critical Disk Warning Overlay
+                if (telegramCacheState.isDiskCriticallyLow)
+                  Positioned(
+                    top: state.isFullscreen ? 40 : 80,
+                    left: 24,
+                    right: 24,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withValues(alpha: 0.9),
+                          borderRadius: BorderRadius.circular(8),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.5),
+                              blurRadius: 8,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              LucideIcons.alertTriangle,
+                              color: Colors.white,
+                              size: 24,
+                            ),
+                            const SizedBox(width: 16),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Critical Disk Space',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                  Text(
+                                    'Downloads paused to prevent system crash. Please free up disk space.',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
               ],

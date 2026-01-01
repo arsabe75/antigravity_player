@@ -15,6 +15,7 @@ class TelegramCacheState {
   final int totalDiskSpace;
   final bool isLoading;
   final bool isClearing;
+  final bool isDiskCriticallyLow;
   final String? error;
 
   const TelegramCacheState({
@@ -25,6 +26,7 @@ class TelegramCacheState {
     this.totalDiskSpace = 0,
     this.isLoading = false,
     this.isClearing = false,
+    this.isDiskCriticallyLow = false,
     this.error,
   });
 
@@ -51,6 +53,7 @@ class TelegramCacheState {
     int? totalDiskSpace,
     bool? isLoading,
     bool? isClearing,
+    bool? isDiskCriticallyLow,
     String? error,
     bool clearError = false,
   }) {
@@ -62,6 +65,7 @@ class TelegramCacheState {
       totalDiskSpace: totalDiskSpace ?? this.totalDiskSpace,
       isLoading: isLoading ?? this.isLoading,
       isClearing: isClearing ?? this.isClearing,
+      isDiskCriticallyLow: isDiskCriticallyLow ?? this.isDiskCriticallyLow,
       error: clearError ? null : (error ?? this.error),
     );
   }
@@ -74,6 +78,13 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
   @override
   TelegramCacheState build() {
     _service = TelegramCacheService();
+
+    // Subscribe to disk safety stream
+    final subscription = _service.onDiskCriticalState.listen((isCritical) {
+      state = state.copyWith(isDiskCriticallyLow: isCritical);
+    });
+    ref.onDispose(subscription.cancel);
+
     // Load data on build
     Future.microtask(() => loadStatistics());
     return const TelegramCacheState(isLoading: true);
