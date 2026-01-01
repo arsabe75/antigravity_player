@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'telegram_service.dart';
 import 'mp4_sample_table.dart';
+import 'telegram_cache_service.dart';
 
 class ProxyFileInfo {
   final String path;
@@ -1762,11 +1763,20 @@ class LocalStreamingProxy {
   /// Following Telegram Android's FileStreamLoadOperation pattern.
   /// IMPROVED: Dynamic priority based on distance to playback position.
   /// STABILIZED: Longer cooldown post-seek to prevent ping-pong downloads.
-  void _startDownloadAtOffset(
+  Future<void> _startDownloadAtOffset(
     int fileId,
     int requestedOffset, {
     bool isBlocking = false,
-  }) {
+  }) async {
+    // DISK SAFETY CHECK: Prevent crash if disk is full (< 50MB)
+    // This allows the Binlog write to fail gracefully or just stops filling disk
+    if (!await TelegramCacheService().checkDiskSafety()) {
+      debugPrint(
+        'Proxy: CRITICAL DISK SPACE - Aborting new download request for $fileId',
+      );
+      return;
+    }
+
     // Check if file is already complete - no download needed
     final cached = _filePaths[fileId];
     if (cached != null && cached.isCompleted) {

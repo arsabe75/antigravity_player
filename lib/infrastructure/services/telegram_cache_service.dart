@@ -122,37 +122,57 @@ class TelegramCacheService {
   /// Enforces the video cache size limit using NVR-style cleanup.
   ///
   /// Deletes oldest video files until cache is within the limit.
-  /// Only affects video files, not photos, documents, or other media.
+  /// Also enforces a "Safety Buffer" - ensures at least 500MB of disk space remains free.
   Future<bool> enforceVideoSizeLimit() async {
     try {
-      final limit = await getCacheSizeLimit();
+      final userLimit = await getCacheSizeLimit();
+      final stats = await getStorageStatistics();
+      final availableDisk = await getAvailableDiskSpace();
 
-      if (limit.isUnlimited) {
-        debugPrint(
-          'TelegramCacheService: Video cache limit is unlimited, skipping enforcement',
-        );
-        return true;
+      // Safety Buffer: Always keep at least 500MB free on disk
+      const safetyBuffer = 500 * 1024 * 1024; // 500 MB
+
+      // Calculate the maximum cache size allowed by physical disk space
+      // MaxPossible = CurrentVideoSize + AvailableSpace - Buffer
+      // We use CurrentVideoSize because 'AvailableSpace' doesn't count space currently used by cache
+      final maxPhysicalLimit = stats.videoSize + availableDisk - safetyBuffer;
+
+      // Determine effective limit (min of User Preference AND Physical Limit)
+      int effectiveLimitBytes;
+
+      if (userLimit.isUnlimited) {
+        effectiveLimitBytes = maxPhysicalLimit;
+      } else {
+        effectiveLimitBytes = userLimit.sizeInBytes;
+        // If physical space is tight, lower the limit
+        if (maxPhysicalLimit < effectiveLimitBytes) {
+          debugPrint(
+            'TelegramCacheService: Disk space tight! Lowering limit from ${_formatBytes(effectiveLimitBytes)} to ${_formatBytes(maxPhysicalLimit)}',
+          );
+          effectiveLimitBytes = maxPhysicalLimit;
+        }
       }
 
-      final stats = await getStorageStatistics();
+      // Ensure limit is not negative
+      if (effectiveLimitBytes < 0) effectiveLimitBytes = 0;
 
-      // Check if video size exceeds limit
-      if (stats.videoSize <= limit.sizeInBytes) {
+      // Check if video size exceeds effective limit
+      if (stats.videoSize <= effectiveLimitBytes) {
         debugPrint(
-          'TelegramCacheService: Video cache (${_formatBytes(stats.videoSize)}) within limit (${limit.label})',
+          'TelegramCacheService: Video cache (${_formatBytes(stats.videoSize)}) within effective limit (${_formatBytes(effectiveLimitBytes)})',
         );
         return true;
       }
 
       debugPrint(
-        'TelegramCacheService: Video cache (${_formatBytes(stats.videoSize)}) exceeds limit (${limit.label}), cleaning up...',
+        'TelegramCacheService: Video cache (${_formatBytes(stats.videoSize)}) exceeds effective limit (${_formatBytes(effectiveLimitBytes)}), cleaning up...',
       );
 
       // Use optimizeStorage with size parameter for videos only
       // TDLib will delete least-recently-accessed videos to reach target size
       final result = await _telegramService.sendWithResult({
         '@type': 'optimizeStorage',
-        'size': limit.sizeInBytes, // Target size for video cache
+        'size': effectiveLimitBytes, // Target size for video cache
         'ttl': -1, // Use default TTL
         'count': -1, // No file count limit
         'immunity_delay': 120, // Don't delete files accessed in last 2 minutes
@@ -186,6 +206,49 @@ class TelegramCacheService {
       debugPrint('TelegramCacheService: Error enforcing video size limit: $e');
       return false;
     }
+  }
+
+  // ADDED: Static stream for global disk safety state
+  static final _diskCriticalController = StreamController<bool>.broadcast();
+  Stream<bool> get onDiskCriticalState => _diskCriticalController.stream;
+
+  static DateTime _lastSafetyCheck = DateTime.fromMillisecondsSinceEpoch(0);
+
+  /// Checks if disk space is safe for writing.
+  ///
+  /// Returns `false` if disk space is CRITICALLY low (< 50MB) and writing should stop immediately.
+  /// Triggers [enforceVideoSizeLimit] if space is in the warning zone (< 500MB).
+  Future<bool> checkDiskSafety() async {
+    // Throttle checks to avoid overhead
+    final now = DateTime.now();
+    if (now.difference(_lastSafetyCheck).inMilliseconds < 1000) {
+      // Return true conservatively (assume safe if checked recently) or cache result?
+      // For now, allow proceed to avoid blocking high-speed loops too often.
+      return true;
+    }
+    _lastSafetyCheck = now;
+
+    final available = await getAvailableDiskSpace();
+
+    // CRITICAL: Stop everything if < 50MB free
+    // This allows Binlog to breathe and prevents OS crash
+    if (available < 50 * 1024 * 1024) {
+      debugPrint(
+        'TelegramCacheService: CRITICAL DISK SPACE ($available bytes). Blocking write.',
+      );
+      _diskCriticalController.add(true); // Emit critical state
+      return false;
+    }
+
+    _diskCriticalController.add(false); // Emit safe state
+
+    // WARNING: If < 500MB, trigger cleanup but allow writing
+    if (available < 500 * 1024 * 1024) {
+      // Don't await this, let it run in background
+      enforceVideoSizeLimit();
+    }
+
+    return true;
   }
 
   String _formatBytes(int bytes) {
