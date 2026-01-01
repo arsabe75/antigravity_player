@@ -329,9 +329,12 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                 ),
               ),
               // Delete button
-              GestureDetector(
-                onTap: () => _removeVideo(video),
-                child: Icon(LucideIcons.x, size: 14, color: Colors.grey[500]),
+              Tooltip(
+                message: 'Remove video',
+                child: GestureDetector(
+                  onTap: () => _removeVideo(video),
+                  child: Icon(LucideIcons.x, size: 14, color: Colors.grey[500]),
+                ),
               ),
             ],
           ),

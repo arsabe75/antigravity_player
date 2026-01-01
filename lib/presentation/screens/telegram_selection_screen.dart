@@ -181,6 +181,7 @@ class _TelegramSelectionScreenState
                         ),
                       IconButton(
                         icon: const Icon(LucideIcons.plus),
+                        tooltip: 'Select',
                         onPressed: () {
                           Navigator.of(context).pop(chat);
                         },
