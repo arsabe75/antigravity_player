@@ -161,6 +161,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(LucideIcons.arrowLeft),
+          tooltip: 'Back',
           onPressed: () => context.pop(),
         ),
         title: const Text('Telegram Channels'),
@@ -171,6 +172,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
         actions: [
           IconButton(
             icon: const Icon(LucideIcons.plus),
+            tooltip: 'Add Channel',
             onPressed: () async {
               final result = await const TelegramSelectionRoute()
                   .push<Map<String, dynamic>>(context);
@@ -194,6 +196,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
           ),
           IconButton(
             icon: const Icon(LucideIcons.logOut),
+            tooltip: 'Logout',
             onPressed: () {
               ref.read(telegramAuthProvider.notifier).logout();
             },
@@ -293,6 +296,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                               },
                               trailing: IconButton(
                                 icon: const Icon(LucideIcons.trash2, size: 20),
+                                tooltip: 'Remove',
                                 onPressed: () {
                                   setState(() {
                                     _favorites.removeAt(index);

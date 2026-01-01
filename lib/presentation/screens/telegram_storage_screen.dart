@@ -28,6 +28,7 @@ class TelegramStorageScreen extends ConsumerWidget {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(LucideIcons.arrowLeft),
+          tooltip: 'Back',
           onPressed: () => Navigator.of(context).pop(),
         ),
         title: const Text('Storage Usage'),
