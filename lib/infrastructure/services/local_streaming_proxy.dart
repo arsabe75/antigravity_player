@@ -442,6 +442,15 @@ class LocalStreamingProxy {
   // Used to avoid ping-pong downloads between multiple concurrent requests
   final Map<int, int> _lastDownloadProgress = {};
 
+  // RESUME PHASE DETECTION
+  // When resuming from a saved position, temporarily serialize downloads
+  // to prevent ping-pong between resume point and cache edge
+  final Map<int, DateTime> _resumePhaseStart = {};
+  final Map<int, int> _resumePrimaryOffset = {}; // The target resume offset
+  final Set<int> _pendingQueuedOffsets =
+      {}; // Offsets waiting for resume to stabilize
+  static const int _resumePhaseMs = 15000; // 15 seconds resume window
+
   /// Check if a file has moov atom at the end (not optimized for streaming)
   /// Returns true if the video needs extra loading time due to metadata placement
   bool isVideoNotOptimizedForStreaming(int fileId) =>
@@ -575,6 +584,8 @@ class LocalStreamingProxy {
     _downloadStartTime.remove(fileId);
     _isMoovAtEnd.remove(fileId);
     _moovPreloadStarted.remove(fileId);
+    _resumePhaseStart.remove(fileId);
+    _resumePrimaryOffset.remove(fileId);
 
     // NOTE: Following Unigram's pattern - we do NOT call cancelDownloadFile here.
     // Unigram intentionally lets downloads continue in the background.
@@ -1068,6 +1079,13 @@ class LocalStreamingProxy {
                 'Proxy: RESUME DETECTED ($existingPrimary -> $start). Forcing Primary update.',
               );
               shouldUpdatePrimary = true;
+
+              // NEW: Mark resume phase - serialize downloads for 3 seconds
+              _resumePhaseStart[fileId] = DateTime.now();
+              _resumePrimaryOffset[fileId] = start;
+              debugPrint(
+                'Proxy: RESUME PHASE started for $fileId at offset ${start ~/ (1024 * 1024)}MB',
+              );
             } else if (DateTime.now()
                     .difference(lastPrimaryUpdate)
                     .inMilliseconds >
@@ -1135,6 +1153,28 @@ class LocalStreamingProxy {
       }
 
       if (shouldUpdatePrimary) {
+        // RESUME PHASE DETECTION:
+        // Check if this update represents a resume from start (primary near 0 jumping far ahead)
+        final previousPrimary = existingPrimary ?? 0;
+        final isResumeJump =
+            previousPrimary < 50 * 1024 * 1024 &&
+            start > 100 * 1024 * 1024 &&
+            (start - previousPrimary) > 50 * 1024 * 1024;
+
+        // Also check it's not a MOOV request (end of file)
+        final isMoovArea =
+            totalSize > 0 && (totalSize - start) < 100 * 1024 * 1024;
+
+        if (isResumeJump &&
+            !isMoovArea &&
+            !_resumePhaseStart.containsKey(fileId)) {
+          debugPrint(
+            'Proxy: RESUME PHASE started for $fileId: ${previousPrimary ~/ (1024 * 1024)}MB -> ${start ~/ (1024 * 1024)}MB',
+          );
+          _resumePhaseStart[fileId] = DateTime.now();
+          _resumePrimaryOffset[fileId] = start;
+        }
+
         _primaryPlaybackOffset[fileId] = start;
         _lastPrimaryUpdateTime[fileId] = DateTime.now();
         if (isSeekRequest) {
@@ -2228,6 +2268,31 @@ class LocalStreamingProxy {
               // to buffer contiguous data from the start. TDLib may report a
               // different downloadOffset if we jumped ahead for resume, but the
               // file data at the start still exists on disk.
+              //
+              // RESUME PHASE CHECK: During resume, defer low-offset requests
+              // to prevent ping-pong with the resume target
+              final resumeStart = _resumePhaseStart[fileId];
+              final resumePrimary = _resumePrimaryOffset[fileId];
+              final isInResumePhase =
+                  resumeStart != null &&
+                  DateTime.now().difference(resumeStart).inMilliseconds <
+                      _resumePhaseMs;
+
+              if (isInResumePhase && resumePrimary != null) {
+                // During resume phase, only allow requests close to resume target
+                final distToResume = (requestedOffset - resumePrimary).abs();
+                if (distToResume > 20 * 1024 * 1024) {
+                  // Request is far from resume target - queue it
+                  debugPrint(
+                    'Proxy: RESUME QUEUE - Deferring request at ${requestedOffset ~/ 1024}KB '
+                    'during resume phase (target: ${resumePrimary ~/ (1024 * 1024)}MB)',
+                  );
+                  // Queue this request to retry after resume phase ends
+                  _queueDeferredDownload(fileId, requestedOffset);
+                  return; // Don't start this download now
+                }
+              }
+
               debugPrint(
                 'Proxy: LOW OFFSET ALLOWED for $requestedOffset (early file data)',
               );
@@ -2831,6 +2896,43 @@ class LocalStreamingProxy {
       });
 
       _moovPreFetchCompleted[fileId] = true;
+    });
+  }
+
+  // ============================================================
+  // RESUME PHASE: DEFERRED DOWNLOAD QUEUE
+  // ============================================================
+
+  /// Queue a download request to be retried after resume phase ends.
+  /// This prevents low-offset requests from ping-ponging with the resume target.
+  void _queueDeferredDownload(int fileId, int offset) {
+    final key =
+        fileId * 1000000000 + offset; // Unique key combining fileId and offset
+    if (_pendingQueuedOffsets.contains(key)) return; // Already queued
+
+    _pendingQueuedOffsets.add(key);
+
+    // Schedule retry after resume phase ends
+    Future.delayed(Duration(milliseconds: _resumePhaseMs + 500), () {
+      _pendingQueuedOffsets.remove(key);
+
+      // Clear resume phase if expired
+      final resumeStart = _resumePhaseStart[fileId];
+      if (resumeStart != null &&
+          DateTime.now().difference(resumeStart).inMilliseconds >
+              _resumePhaseMs) {
+        _resumePhaseStart.remove(fileId);
+        _resumePrimaryOffset.remove(fileId);
+        debugPrint('Proxy: RESUME PHASE ended for $fileId');
+      }
+
+      // Retry the download if file still active
+      if (!_abortedRequests.contains(fileId)) {
+        debugPrint(
+          'Proxy: DEFERRED DOWNLOAD retry for $fileId at ${offset ~/ 1024}KB',
+        );
+        _startDownloadAtOffset(fileId, offset);
+      }
     });
   }
 
