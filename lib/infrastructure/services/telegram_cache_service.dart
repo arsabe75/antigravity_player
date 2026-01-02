@@ -5,6 +5,7 @@ import 'package:disk_space_2/disk_space_2.dart';
 import '../../domain/entities/storage_statistics.dart';
 import 'telegram_service.dart';
 import 'cache_settings.dart';
+import 'playback_storage_service.dart';
 
 /// Duration options for "Keep Media" setting (auto-delete cache after period).
 enum KeepMediaDuration {
@@ -287,6 +288,13 @@ class TelegramCacheService {
 
       if (result['@type'] == 'storageStatistics') {
         debugPrint('TelegramCacheService: Cache cleared successfully');
+
+        // Also clear saved playback progress when clearing all cache
+        // This avoids resume-after-cache-clear issues
+        if (forceAll) {
+          await PlaybackStorageService().clearAllPositions();
+        }
+
         return true;
       }
 
