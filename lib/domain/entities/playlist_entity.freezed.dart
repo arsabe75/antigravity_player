@@ -274,7 +274,7 @@ as Duration?,
 /// @nodoc
 mixin _$PlaylistEntity {
 
- List<PlaylistItem> get items; int get currentIndex; bool get shuffle; RepeatMode get repeatMode;
+ List<PlaylistItem> get items; int get currentIndex; bool get shuffle; RepeatMode get repeatMode; String? get sourcePath;
 /// Create a copy of PlaylistEntity
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -285,16 +285,16 @@ $PlaylistEntityCopyWith<PlaylistEntity> get copyWith => _$PlaylistEntityCopyWith
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is PlaylistEntity&&const DeepCollectionEquality().equals(other.items, items)&&(identical(other.currentIndex, currentIndex) || other.currentIndex == currentIndex)&&(identical(other.shuffle, shuffle) || other.shuffle == shuffle)&&(identical(other.repeatMode, repeatMode) || other.repeatMode == repeatMode));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is PlaylistEntity&&const DeepCollectionEquality().equals(other.items, items)&&(identical(other.currentIndex, currentIndex) || other.currentIndex == currentIndex)&&(identical(other.shuffle, shuffle) || other.shuffle == shuffle)&&(identical(other.repeatMode, repeatMode) || other.repeatMode == repeatMode)&&(identical(other.sourcePath, sourcePath) || other.sourcePath == sourcePath));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(items),currentIndex,shuffle,repeatMode);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(items),currentIndex,shuffle,repeatMode,sourcePath);
 
 @override
 String toString() {
-  return 'PlaylistEntity(items: $items, currentIndex: $currentIndex, shuffle: $shuffle, repeatMode: $repeatMode)';
+  return 'PlaylistEntity(items: $items, currentIndex: $currentIndex, shuffle: $shuffle, repeatMode: $repeatMode, sourcePath: $sourcePath)';
 }
 
 
@@ -305,7 +305,7 @@ abstract mixin class $PlaylistEntityCopyWith<$Res>  {
   factory $PlaylistEntityCopyWith(PlaylistEntity value, $Res Function(PlaylistEntity) _then) = _$PlaylistEntityCopyWithImpl;
 @useResult
 $Res call({
- List<PlaylistItem> items, int currentIndex, bool shuffle, RepeatMode repeatMode
+ List<PlaylistItem> items, int currentIndex, bool shuffle, RepeatMode repeatMode, String? sourcePath
 });
 
 
@@ -322,13 +322,14 @@ class _$PlaylistEntityCopyWithImpl<$Res>
 
 /// Create a copy of PlaylistEntity
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? items = null,Object? currentIndex = null,Object? shuffle = null,Object? repeatMode = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? items = null,Object? currentIndex = null,Object? shuffle = null,Object? repeatMode = null,Object? sourcePath = freezed,}) {
   return _then(_self.copyWith(
 items: null == items ? _self.items : items // ignore: cast_nullable_to_non_nullable
 as List<PlaylistItem>,currentIndex: null == currentIndex ? _self.currentIndex : currentIndex // ignore: cast_nullable_to_non_nullable
 as int,shuffle: null == shuffle ? _self.shuffle : shuffle // ignore: cast_nullable_to_non_nullable
 as bool,repeatMode: null == repeatMode ? _self.repeatMode : repeatMode // ignore: cast_nullable_to_non_nullable
-as RepeatMode,
+as RepeatMode,sourcePath: freezed == sourcePath ? _self.sourcePath : sourcePath // ignore: cast_nullable_to_non_nullable
+as String?,
   ));
 }
 
@@ -410,10 +411,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<PlaylistItem> items,  int currentIndex,  bool shuffle,  RepeatMode repeatMode)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<PlaylistItem> items,  int currentIndex,  bool shuffle,  RepeatMode repeatMode,  String? sourcePath)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _PlaylistEntity() when $default != null:
-return $default(_that.items,_that.currentIndex,_that.shuffle,_that.repeatMode);case _:
+return $default(_that.items,_that.currentIndex,_that.shuffle,_that.repeatMode,_that.sourcePath);case _:
   return orElse();
 
 }
@@ -431,10 +432,10 @@ return $default(_that.items,_that.currentIndex,_that.shuffle,_that.repeatMode);c
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<PlaylistItem> items,  int currentIndex,  bool shuffle,  RepeatMode repeatMode)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<PlaylistItem> items,  int currentIndex,  bool shuffle,  RepeatMode repeatMode,  String? sourcePath)  $default,) {final _that = this;
 switch (_that) {
 case _PlaylistEntity():
-return $default(_that.items,_that.currentIndex,_that.shuffle,_that.repeatMode);}
+return $default(_that.items,_that.currentIndex,_that.shuffle,_that.repeatMode,_that.sourcePath);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -448,10 +449,10 @@ return $default(_that.items,_that.currentIndex,_that.shuffle,_that.repeatMode);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<PlaylistItem> items,  int currentIndex,  bool shuffle,  RepeatMode repeatMode)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<PlaylistItem> items,  int currentIndex,  bool shuffle,  RepeatMode repeatMode,  String? sourcePath)?  $default,) {final _that = this;
 switch (_that) {
 case _PlaylistEntity() when $default != null:
-return $default(_that.items,_that.currentIndex,_that.shuffle,_that.repeatMode);case _:
+return $default(_that.items,_that.currentIndex,_that.shuffle,_that.repeatMode,_that.sourcePath);case _:
   return null;
 
 }
@@ -463,7 +464,7 @@ return $default(_that.items,_that.currentIndex,_that.shuffle,_that.repeatMode);c
 
 
 class _PlaylistEntity extends PlaylistEntity {
-  const _PlaylistEntity({final  List<PlaylistItem> items = const [], this.currentIndex = 0, this.shuffle = false, this.repeatMode = RepeatMode.none}): _items = items,super._();
+  const _PlaylistEntity({final  List<PlaylistItem> items = const [], this.currentIndex = 0, this.shuffle = false, this.repeatMode = RepeatMode.none, this.sourcePath}): _items = items,super._();
   
 
  final  List<PlaylistItem> _items;
@@ -476,6 +477,7 @@ class _PlaylistEntity extends PlaylistEntity {
 @override@JsonKey() final  int currentIndex;
 @override@JsonKey() final  bool shuffle;
 @override@JsonKey() final  RepeatMode repeatMode;
+@override final  String? sourcePath;
 
 /// Create a copy of PlaylistEntity
 /// with the given fields replaced by the non-null parameter values.
@@ -487,16 +489,16 @@ _$PlaylistEntityCopyWith<_PlaylistEntity> get copyWith => __$PlaylistEntityCopyW
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _PlaylistEntity&&const DeepCollectionEquality().equals(other._items, _items)&&(identical(other.currentIndex, currentIndex) || other.currentIndex == currentIndex)&&(identical(other.shuffle, shuffle) || other.shuffle == shuffle)&&(identical(other.repeatMode, repeatMode) || other.repeatMode == repeatMode));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _PlaylistEntity&&const DeepCollectionEquality().equals(other._items, _items)&&(identical(other.currentIndex, currentIndex) || other.currentIndex == currentIndex)&&(identical(other.shuffle, shuffle) || other.shuffle == shuffle)&&(identical(other.repeatMode, repeatMode) || other.repeatMode == repeatMode)&&(identical(other.sourcePath, sourcePath) || other.sourcePath == sourcePath));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_items),currentIndex,shuffle,repeatMode);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_items),currentIndex,shuffle,repeatMode,sourcePath);
 
 @override
 String toString() {
-  return 'PlaylistEntity(items: $items, currentIndex: $currentIndex, shuffle: $shuffle, repeatMode: $repeatMode)';
+  return 'PlaylistEntity(items: $items, currentIndex: $currentIndex, shuffle: $shuffle, repeatMode: $repeatMode, sourcePath: $sourcePath)';
 }
 
 
@@ -507,7 +509,7 @@ abstract mixin class _$PlaylistEntityCopyWith<$Res> implements $PlaylistEntityCo
   factory _$PlaylistEntityCopyWith(_PlaylistEntity value, $Res Function(_PlaylistEntity) _then) = __$PlaylistEntityCopyWithImpl;
 @override @useResult
 $Res call({
- List<PlaylistItem> items, int currentIndex, bool shuffle, RepeatMode repeatMode
+ List<PlaylistItem> items, int currentIndex, bool shuffle, RepeatMode repeatMode, String? sourcePath
 });
 
 
@@ -524,13 +526,14 @@ class __$PlaylistEntityCopyWithImpl<$Res>
 
 /// Create a copy of PlaylistEntity
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? items = null,Object? currentIndex = null,Object? shuffle = null,Object? repeatMode = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? items = null,Object? currentIndex = null,Object? shuffle = null,Object? repeatMode = null,Object? sourcePath = freezed,}) {
   return _then(_PlaylistEntity(
 items: null == items ? _self._items : items // ignore: cast_nullable_to_non_nullable
 as List<PlaylistItem>,currentIndex: null == currentIndex ? _self.currentIndex : currentIndex // ignore: cast_nullable_to_non_nullable
 as int,shuffle: null == shuffle ? _self.shuffle : shuffle // ignore: cast_nullable_to_non_nullable
 as bool,repeatMode: null == repeatMode ? _self.repeatMode : repeatMode // ignore: cast_nullable_to_non_nullable
-as RepeatMode,
+as RepeatMode,sourcePath: freezed == sourcePath ? _self.sourcePath : sourcePath // ignore: cast_nullable_to_non_nullable
+as String?,
   ));
 }
 

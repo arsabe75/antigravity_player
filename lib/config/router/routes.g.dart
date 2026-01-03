@@ -14,6 +14,7 @@ List<RouteBase> get $appRoutes => [
   $telegramStorageRoute,
   $telegramTopicsRoute,
   $telegramChatRoute,
+  $playlistManagerRoute,
 ];
 
 RouteBase get $homeRoute =>
@@ -225,4 +226,30 @@ T? _$convertMapValue<T>(
 ) {
   final value = map[key];
   return value == null ? null : converter(value);
+}
+
+RouteBase get $playlistManagerRoute => GoRouteData.$route(
+  path: '/playlist-manager',
+  factory: $PlaylistManagerRoute._fromState,
+);
+
+mixin $PlaylistManagerRoute on GoRouteData {
+  static PlaylistManagerRoute _fromState(GoRouterState state) =>
+      const PlaylistManagerRoute();
+
+  @override
+  String get location => GoRouteData.$location('/playlist-manager');
+
+  @override
+  void go(BuildContext context) => context.go(location);
+
+  @override
+  Future<T?> push<T>(BuildContext context) => context.push<T>(location);
+
+  @override
+  void pushReplacement(BuildContext context) =>
+      context.pushReplacement(location);
+
+  @override
+  void replace(BuildContext context) => context.replace(location);
 }

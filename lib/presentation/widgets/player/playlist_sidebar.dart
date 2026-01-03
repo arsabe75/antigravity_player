@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -32,6 +33,47 @@ class PlaylistSidebar extends ConsumerWidget {
     }
   }
 
+  Future<void> _savePlaylist(
+    BuildContext context,
+    PlaylistEntity playlist,
+    WidgetRef ref,
+  ) async {
+    String? targetPath = playlist.sourcePath;
+
+    if (targetPath == null) {
+      targetPath = await FilePicker.platform.saveFile(
+        dialogTitle: 'Save Playlist',
+        fileName: 'playlist.txt',
+        type: FileType.custom,
+        allowedExtensions: ['txt', 'm3u'],
+      );
+    }
+
+    if (targetPath != null) {
+      if (!targetPath.endsWith('.txt') && !targetPath.endsWith('.m3u')) {
+        targetPath += '.txt';
+      }
+
+      final file = File(targetPath);
+      final content = playlist.items.map((item) => item.path).join('\n');
+      try {
+        await file.writeAsString(content);
+        ref.read(playlistProvider.notifier).setSourcePath(targetPath);
+        if (context.mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(const SnackBar(content: Text('Playlist saved')));
+        }
+      } catch (e) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(
+            context,
+          ).showSnackBar(SnackBar(content: Text('Error saving playlist: $e')));
+        }
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final playlist = ref.watch(playlistProvider);
@@ -43,7 +85,7 @@ class PlaylistSidebar extends ConsumerWidget {
       child: Column(
         children: [
           // Header
-          _buildHeader(context, playlist, notifier),
+          _buildHeader(context, playlist, notifier, ref),
 
           // Playlist items
           Expanded(
@@ -60,6 +102,7 @@ class PlaylistSidebar extends ConsumerWidget {
     BuildContext context,
     PlaylistEntity playlist,
     PlaylistNotifier notifier,
+    WidgetRef ref,
   ) {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -114,6 +157,18 @@ class PlaylistSidebar extends ConsumerWidget {
                 ),
                 onPressed: () => _addFiles(notifier),
                 tooltip: 'Add files',
+              ),
+              // Save
+              IconButton(
+                icon: const Icon(
+                  LucideIcons.save,
+                  color: Colors.white54,
+                  size: 18,
+                ),
+                onPressed: playlist.isEmpty
+                    ? null
+                    : () => _savePlaylist(context, playlist, ref),
+                tooltip: 'Save playlist',
               ),
               // Shuffle
               IconButton(
