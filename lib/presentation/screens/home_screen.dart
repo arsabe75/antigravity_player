@@ -116,19 +116,84 @@ class HomeScreen extends ConsumerWidget {
                                     runSpacing: 16,
                                     alignment: WrapAlignment.center,
                                     children: [
-                                      SizedBox(
-                                        width: 200,
-                                        height: 50,
-                                        child: OutlinedButton.icon(
-                                          onPressed: () =>
-                                              _pickFile(context, ref),
-                                          icon: const Icon(
-                                            LucideIcons.folderOpen,
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          SizedBox(
+                                            width: 155,
+                                            height: 50,
+                                            child: OutlinedButton.icon(
+                                              onPressed: () =>
+                                                  _pickFile(context, ref),
+                                              style: OutlinedButton.styleFrom(
+                                                shape: const RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.horizontal(
+                                                        left: Radius.circular(
+                                                          8,
+                                                        ), // Standard radius
+                                                        right: Radius.circular(
+                                                          2,
+                                                        ), // Tight fit
+                                                      ),
+                                                ),
+                                              ),
+                                              icon: const Icon(
+                                                LucideIcons.folderOpen,
+                                              ),
+                                              label: const Text(
+                                                'Local Files',
+                                                maxLines: 1,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ),
                                           ),
-                                          label: const Text(
-                                            'Open Local File(s)',
+                                          const SizedBox(
+                                            width: 2,
+                                          ), // Small separation
+                                          SizedBox(
+                                            width: 60,
+                                            height: 50,
+                                            child: OutlinedButton(
+                                              onPressed: () =>
+                                                  const PlaylistManagerRoute()
+                                                      .go(context),
+                                              style: OutlinedButton.styleFrom(
+                                                padding: EdgeInsets.zero,
+                                                shape:
+                                                    const RoundedRectangleBorder(
+                                                      borderRadius:
+                                                          BorderRadius.horizontal(
+                                                            left:
+                                                                Radius.circular(
+                                                                  2,
+                                                                ),
+                                                            right:
+                                                                Radius.circular(
+                                                                  8,
+                                                                ),
+                                                          ),
+                                                    ),
+                                              ),
+                                              child: const Column(
+                                                mainAxisAlignment:
+                                                    MainAxisAlignment.center,
+                                                children: [
+                                                  Icon(
+                                                    LucideIcons.list,
+                                                    size: 18,
+                                                  ),
+                                                  Text(
+                                                    'Lists',
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
                                           ),
-                                        ),
+                                        ],
                                       ),
                                       SizedBox(
                                         width: 200,

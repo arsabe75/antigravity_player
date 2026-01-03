@@ -30,6 +30,7 @@ sealed class PlaylistEntity with _$PlaylistEntity {
     @Default(0) int currentIndex,
     @Default(false) bool shuffle,
     @Default(RepeatMode.none) RepeatMode repeatMode,
+    String? sourcePath,
   }) = _PlaylistEntity;
 
   /// Video actual

@@ -8,6 +8,7 @@ import '../../presentation/screens/telegram_selection_screen.dart';
 import '../../presentation/screens/telegram_storage_screen.dart';
 import '../../presentation/screens/telegram_topics_screen.dart';
 import '../../presentation/screens/telegram_chat_screen.dart';
+import '../../presentation/screens/playlist_manager_screen.dart';
 
 part 'routes.g.dart';
 
@@ -163,5 +164,16 @@ class TelegramChatRoute extends GoRouteData with $TelegramChatRoute {
       title: title ?? 'Chat',
       messageThreadId: messageThreadId,
     );
+  }
+}
+
+/// Playlist Manager Route
+@TypedGoRoute<PlaylistManagerRoute>(path: '/playlist-manager')
+class PlaylistManagerRoute extends GoRouteData with $PlaylistManagerRoute {
+  const PlaylistManagerRoute();
+
+  @override
+  Widget build(BuildContext context, GoRouterState state) {
+    return const PlaylistManagerScreen();
   }
 }
