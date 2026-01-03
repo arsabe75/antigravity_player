@@ -471,6 +471,11 @@ class LocalStreamingProxy {
   final Set<int> _userSeekInProgress = {};
   final Map<int, int> _userSeekTargetMs = {}; // Target time in milliseconds
 
+  // P1 FIX: BACKWARD SEEK PROTECTION
+  // Track the last explicit user seek so stagnant adoption doesn't override it
+  final Map<int, int> _lastExplicitSeekOffset = {};
+  final Map<int, DateTime> _lastExplicitSeekTime = {};
+
   // MOOV STABILIZE: Track when moov requests should be allowed (after delay)
   final Map<int, DateTime> _moovUnblockTime = {};
 
@@ -481,6 +486,18 @@ class LocalStreamingProxy {
   // When MOOV is downloading, block requests for low offsets (< 50MB)
   final Map<int, DateTime> _moovDownloadStart = {};
   static const int _moovDownloadTimeoutMs = 15000; // Allow up to 15s for MOOV
+
+  // P2 FIX: HIGH-PRIORITY DOWNLOAD LOCK
+  // After starting a priority 32 download at offset X, wait until it accumulates
+  // 512KB before allowing another high-priority download at a DIFFERENT offset.
+  // This prevents multiple high-priority requests from thrashing TDLib.
+  final Map<int, int> _highPrioLockOffset = {}; // Offset that has the lock
+  final Map<int, DateTime> _highPrioLockTime = {}; // When the lock was acquired
+  final Map<int, int> _highPrioLockStartPrefix =
+      {}; // CachedPrefix when lock started
+  static const int _highPrioLockMinBytes = 512 * 1024; // Require 512KB progress
+  static const int _highPrioLockTimeoutMs =
+      2000; // Release lock after 2s if stuck (longer to prevent thrashing)
 
   // ============================================================
   // PHASE 1: DRKLO-INSPIRED OPTIMIZATIONS
@@ -1096,6 +1113,9 @@ class LocalStreamingProxy {
           );
           shouldUpdatePrimary = true;
           _userSeekInProgress.remove(fileId);
+          // P1 FIX: Track this seek to protect from stagnant adoption
+          _lastExplicitSeekOffset[fileId] = start;
+          _lastExplicitSeekTime[fileId] = DateTime.now();
         } else {
           debugPrint(
             'Proxy: USER SEEK SIGNAL active but offset $start too close to Primary $existingPrimary (${distFromPrimary ~/ 1024}KB)',
@@ -1455,7 +1475,34 @@ class LocalStreamingProxy {
                 // We are streaming far ahead of Primary (>50MB).
                 // If the Primary hasn't moved for > 2000ms, assume the user seeked here
                 // and the initial Seek Logic rejected it (or we missed it).
-                if (lastUpdateTime != null &&
+                //
+                // P1 FIX: BACKWARD SEEK PROTECTION (POSITION-BASED)
+                // If there was an explicit user seek and the proposed adoption offset
+                // is significantly FORWARD of that seek, DON'T adopt.
+                // Protection stays active until Primary moves >100MB from seek position.
+                final lastExplicitSeek = _lastExplicitSeekOffset[fileId];
+
+                // Block adoption if:
+                // - There was an explicit seek AND
+                // - Current Primary is still near the seek position (within 100MB) AND
+                // - The proposed offset is significantly forward of seek (>50MB)
+                final primaryNearSeek =
+                    lastExplicitSeek != null &&
+                    (lastPrimary - lastExplicitSeek).abs() < 100 * 1024 * 1024;
+                final proposedIsFarForward =
+                    lastExplicitSeek != null &&
+                    currentReadOffset > lastExplicitSeek &&
+                    (currentReadOffset - lastExplicitSeek) > 50 * 1024 * 1024;
+                final isOverridingBackwardSeek =
+                    primaryNearSeek && proposedIsFarForward;
+
+                if (isOverridingBackwardSeek) {
+                  debugPrint(
+                    'Proxy: BLOCKED Stagnant Adoption for $fileId. Would override recent backward seek '
+                    '(seekTarget: ${lastExplicitSeek ~/ (1024 * 1024)}MB, primary: ${lastPrimary ~/ (1024 * 1024)}MB, proposed: ${currentReadOffset ~/ (1024 * 1024)}MB)',
+                  );
+                  // Don't adopt - keep the user's seek position\r\n                  // Reset stagnant timer to prevent repeated adoption attempts\r\n                  _lastPrimaryUpdateTime[fileId] = DateTime.now();
+                } else if (lastUpdateTime != null &&
                     DateTime.now().difference(lastUpdateTime).inMilliseconds >
                         2000) {
                   debugPrint(
@@ -2346,9 +2393,25 @@ class LocalStreamingProxy {
         distToPrimaryForFloor < 20 * 1024 * 1024; // Within 20MB of primary
 
     int priority;
-    if (isLowOffsetRequest && calculatedPriority < 20) {
-      // Apply floor, but differentiate between closest-to-primary and others
-      priority = isClosestToPrimary ? 32 : 20;
+    if (isLowOffsetRequest) {
+      // LOW OFFSET priority logic
+      // Check if there's an active lock at a playback position
+      final activeLockOffset = _highPrioLockOffset[fileId];
+      final hasPlaybackLock =
+          activeLockOffset != null && activeLockOffset >= 300 * 1024 * 1024;
+
+      if (hasPlaybackLock) {
+        // When there's a playback lock, LOW OFFSET NEVER gets priority >= 28
+        // This prevents LOW OFFSET from canceling critical playback downloads
+        priority = (calculatedPriority < 20)
+            ? 20
+            : (calculatedPriority > 27 ? 20 : calculatedPriority);
+      } else if (calculatedPriority < 20) {
+        // Apply floor, but differentiate between closest-to-primary and others
+        priority = isClosestToPrimary ? 32 : 20;
+      } else {
+        priority = calculatedPriority;
+      }
     } else {
       priority = calculatedPriority;
     }
@@ -2510,6 +2573,73 @@ class LocalStreamingProxy {
       }
     }
 
+    // P2 FIX: HIGH-PRIORITY DOWNLOAD LOCK CHECK
+    // Prevent multiple priority 32 downloads from thrashing TDLib.
+    // If there's an active lock at a DIFFERENT offset, check if it has accumulated
+    // enough data before allowing a new high-priority download.
+    final isLowOffset = requestedOffset < 300 * 1024 * 1024;
+    final lockOffset = _highPrioLockOffset[fileId];
+    final lockTime = _highPrioLockTime[fileId];
+    final isLockAtPlaybackPosition =
+        lockOffset != null && lockOffset >= 300 * 1024 * 1024;
+
+    // LOW OFFSET PROTECTION: If there was a recent backward seek to a playback position,
+    // LOW OFFSET must be COMPLETELY BLOCKED for a fixed time period.
+    // The byte accumulation check was unreliable due to lockOffset/downloadOffset mismatches.
+    // Instead, we use a simple time-based block after backward seeks.
+    //
+    // Logic: Block LOW OFFSET for 10 seconds after any backward seek to prevent
+    // it from canceling the critical playback download.
+    if (isLowOffset && isLockAtPlaybackPosition) {
+      final lastSeekTime = _lastExplicitSeekTime[fileId];
+      final lastSeekOffset = _lastExplicitSeekOffset[fileId];
+
+      if (lastSeekTime != null && lastSeekOffset != null) {
+        final timeSinceSeek = now.difference(lastSeekTime).inMilliseconds;
+
+        // Block for 10 seconds after any explicit seek to a playback position
+        if (timeSinceSeek < 10000) {
+          debugPrint(
+            'Proxy: LOW OFFSET BLOCKED - Request at ${requestedOffset ~/ 1024}KB blocked '
+            'while recent seek at ${lastSeekOffset ~/ 1024}KB stabilizes '
+            '(${timeSinceSeek}ms/10000ms since seek)',
+          );
+          return; // Completely block - don't even send to TDLib
+        }
+      }
+    }
+
+    if (priority >= 28 && !isLowOffset) {
+      // Only applies to high-priority requests at playback positions
+      final lockStartPrefix = _highPrioLockStartPrefix[fileId] ?? 0;
+
+      if (lockOffset != null &&
+          lockTime != null &&
+          (lockOffset - requestedOffset).abs() > 512 * 1024) {
+        // Lock exists at a different offset
+        final lockAgeMs = now.difference(lockTime).inMilliseconds;
+        final cachedNow = _filePaths[fileId];
+        final currentPrefix = cachedNow?.availableBytesFrom(lockOffset) ?? 0;
+        final bytesAccumulated = currentPrefix - lockStartPrefix;
+
+        // Release lock if: timeout reached OR enough data accumulated
+        if (lockAgeMs >= _highPrioLockTimeoutMs ||
+            bytesAccumulated >= _highPrioLockMinBytes) {
+          // Lock released - allow new download
+          _highPrioLockOffset.remove(fileId);
+          _highPrioLockTime.remove(fileId);
+          _highPrioLockStartPrefix.remove(fileId);
+        } else {
+          // Lock still active - block this high-priority request
+          debugPrint(
+            'Proxy: DOWNLOAD LOCK - Blocking high-prio request at ${requestedOffset ~/ 1024}KB '
+            '(locked at ${lockOffset ~/ 1024}KB, accumulated ${bytesAccumulated ~/ 1024}KB/${_highPrioLockMinBytes ~/ 1024}KB, age ${lockAgeMs}ms)',
+          );
+          return;
+        }
+      }
+    }
+
     // Standard low-priority protection (existing logic, refactored)
     if (!isBlocking &&
         isHighPriorityActive &&
@@ -2536,15 +2666,15 @@ class LocalStreamingProxy {
         isBlocking &&
         (requestedOffset > activeDownloadTarget + 5 * 1024 * 1024);
 
-    // LOW OFFSET EXCEPTION: If request is for early file data (<150MB),
+    // LOW OFFSET EXCEPTION: If request is for early file data (<300MB),
     // allow it to interrupt even high-priority downloads because this
     // represents contiguous cache data that the player needs.
-    bool cxIsLowOffsetRequest = requestedOffset < 300 * 1024 * 1024;
+    // (Reuse isLowOffset defined above)
 
     if (isHighPriorityActive &&
         priority < activePriority &&
         !cxIsForwardJump &&
-        !cxIsLowOffsetRequest && // Allow low offset requests through
+        !isLowOffset && // Allow low offset requests through
         (requestedOffset - activeDownloadTarget).abs() > 1024 * 1024) {
       debugPrint(
         'Proxy: PROTECTED active download (prio $activePriority) from lower-priority request '
@@ -2569,6 +2699,18 @@ class LocalStreamingProxy {
     _activeDownloadOffset[fileId] = requestedOffset;
     _activePriority[fileId] = priority; // Track priority
     _lastOffsetChangeTime[fileId] = now;
+
+    // P2 FIX: Acquire high-priority download lock
+    // This prevents other high-prio requests from thrashing this download
+    // IMPORTANT: Do NOT acquire lock for LOW OFFSET requests (<300MB)
+    // Those are background cache fills and should not block playback position
+    // (Reuse isLowOffset defined above)
+    if (priority >= 28 && !isLowOffset) {
+      _highPrioLockOffset[fileId] = requestedOffset;
+      _highPrioLockTime[fileId] = now;
+      _highPrioLockStartPrefix[fileId] =
+          _filePaths[fileId]?.availableBytesFrom(requestedOffset) ?? 0;
+    }
 
     // PARTSMANAGER FIX: Use synchronous mode for moov atom downloads
     // This prevents parallel range conflicts that cause PartsManager crashes
