@@ -55,11 +55,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   bool _isDisposing = false;
   bool _showPlaylist = false;
   final _mediaControl = MediaControlService();
+  final _focusNode = FocusNode();
 
   @override
   void initState() {
     super.initState();
     windowManager.addListener(this);
+    // Request focus initially
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _focusNode.requestFocus();
+    });
 
     if (widget.videoUrl != null) {
       final isNetwork = widget.videoUrl!.startsWith('http');
@@ -145,6 +150,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     windowManager.removeListener(this);
     windowManager.setPreventClose(false);
     _hideTimer?.cancel();
+    _focusNode.dispose();
     super.dispose();
   }
 
@@ -308,6 +314,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       }
     });
 
+    // Also request focus whenever the video path changes (video switch)
+    ref.listen(playerProvider.select((s) => s.currentVideoPath), (_, __) {
+      // Small delay to allow new video widget to mount, then steal focus back
+      Future.delayed(const Duration(milliseconds: 500), () {
+        if (_focusNode.canRequestFocus) {
+          debugPrint('Requesting Focus back for PlayerScreen...');
+          _focusNode.requestFocus();
+        }
+      });
+    });
+
     void playNext() {
       if (playlistNotifier.next()) {
         final newItem = ref.read(playlistProvider).currentItem;
@@ -336,9 +353,18 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           playPrevious,
         ),
         child: Focus(
+          focusNode: _focusNode,
           autofocus: true,
+          onFocusChange: (hasFocus) {
+            debugPrint('PlayerScreen Focus Changed: $hasFocus');
+            if (!hasFocus) {
+              // Optional: try to regain focus immediately?
+              // _focusNode.requestFocus();
+            }
+          },
           onKeyEvent: (node, event) {
             if (event is KeyDownEvent) {
+              // Handle non-standard media keys detected from user logs
               // '±' (Plus-Minus) mapped to Previous (inverted based on user feedback)
               if (event.logicalKey.keyLabel == '±') {
                 playPrevious();
@@ -347,6 +373,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               // '°' (Degree) mapped to Next
               if (event.logicalKey.keyLabel == '°') {
                 playNext();
+                return KeyEventResult.handled;
+              }
+              // Explicitly handle Media Play/Pause to ensure reliability
+              if (event.logicalKey == LogicalKeyboardKey.mediaPlayPause) {
+                notifier.togglePlay();
                 return KeyEventResult.handled;
               }
             }
@@ -604,23 +635,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           _seekToPercent(80, state, notifier),
       const SingleActivator(LogicalKeyboardKey.digit9): () =>
           _seekToPercent(90, state, notifier),
-
-      // Multimedia Keys
-      const SingleActivator(LogicalKeyboardKey.mediaPlay): notifier.togglePlay,
-      const SingleActivator(LogicalKeyboardKey.mediaPause): notifier.togglePlay,
-      const SingleActivator(LogicalKeyboardKey.mediaPlayPause):
-          notifier.togglePlay,
-      const SingleActivator(LogicalKeyboardKey.mediaTrackNext): onNext,
-      const SingleActivator(LogicalKeyboardKey.mediaTrackPrevious): onPrevious,
-      // Variant: Skip
-      const SingleActivator(LogicalKeyboardKey.mediaSkipForward): onNext,
-      const SingleActivator(LogicalKeyboardKey.mediaSkipBackward): onPrevious,
-      // Variant: Step
-      const SingleActivator(LogicalKeyboardKey.mediaStepForward): onNext,
-      const SingleActivator(LogicalKeyboardKey.mediaStepBackward): onPrevious,
-      // Variant: Navigate
-      const SingleActivator(LogicalKeyboardKey.navigateNext): onNext,
-      const SingleActivator(LogicalKeyboardKey.navigatePrevious): onPrevious,
     };
   }
 

@@ -312,14 +312,29 @@ class PlayerNotifier extends _$PlayerNotifier {
     }
   }
 
+  /// Mutex lock for togglePlay() to prevent double-triggering.
+  /// Some keyboards send multiple KeyDown events for a single physical press.
+  /// This static flag ensures only one toggle operation runs at a time,
+  /// with a 500ms cooldown after completion.
+  static bool _isToggling = false;
+
   Future<void> togglePlay() async {
-    if (state.isPlaying) {
-      await _repository.pause();
-      await _savePosition();
-      _saveTimer?.cancel();
-    } else {
-      await _repository.resume();
-      _startSaveTimer();
+    // Mutex-style lock: reject if already toggling (prevents double-press hardware quirks)
+    if (_isToggling) return;
+    _isToggling = true;
+
+    try {
+      if (state.isPlaying) {
+        await _repository.pause();
+        await _savePosition();
+      } else {
+        await _repository.resume();
+      }
+    } finally {
+      // Keep lock for 500ms after operation completes to prevent rapid re-triggering
+      Future.delayed(const Duration(milliseconds: 500), () {
+        _isToggling = false;
+      });
     }
   }
 
