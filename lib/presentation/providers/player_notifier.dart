@@ -225,8 +225,16 @@ class PlayerNotifier extends _$PlayerNotifier {
   /// This catches late detection of moov-at-end during initial buffering
   void _startMoovCheckTimer() {
     _stopMoovCheckTimer();
-    _moovCheckTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
-      if (!state.isBuffering || _currentProxyFileId == null) {
+    // FIX: Run every 100ms (not 500ms) to catch MOOV detection before playback confirms
+    _moovCheckTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (_currentProxyFileId == null) {
+        _stopMoovCheckTimer();
+        return;
+      }
+
+      // FIX: Keep checking during initial loading OR buffering
+      // Don't stop just because buffering is false - we need to detect during initial load
+      if (!state.isBuffering && !state.isInitialLoading) {
         _stopMoovCheckTimer();
         return;
       }
@@ -235,6 +243,7 @@ class PlayerNotifier extends _$PlayerNotifier {
           .isVideoNotOptimizedForStreaming(_currentProxyFileId!);
 
       if (isNotOptimized && !state.isVideoNotOptimizedForStreaming) {
+        debugPrint('PlayerNotifier: Detected MOOV-at-end, updating state');
         state = state.copyWith(isVideoNotOptimizedForStreaming: true);
         _stopMoovCheckTimer(); // Stop once we've detected it
       }
@@ -411,6 +420,13 @@ class PlayerNotifier extends _$PlayerNotifier {
       // This allows the player (MediaKit/libmpv) to start directly at this timestamp
       // avoiding the "start at 0 -> seek to X" pattern which causes double-loading and proxy crashes.
       await _repository.play(video, startPosition: startPosition);
+
+      // FIX: Start MOOV check timer immediately for network videos
+      // This ensures we detect MOOV-at-end before playback confirms,
+      // so the "not optimized for streaming" message appears during loading.
+      if (isNetwork && _currentProxyFileId != null) {
+        _startMoovCheckTimer();
+      }
 
       // Give player a moment to load initial tracks (for local files)
       await Future.delayed(const Duration(milliseconds: 300));
