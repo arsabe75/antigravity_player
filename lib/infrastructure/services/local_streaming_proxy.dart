@@ -322,6 +322,72 @@ class _StreamingLRUCache {
   int get chunkCount => _chunks.length;
 }
 
+// =============================================================================
+// LocalStreamingProxy - HTTP Proxy for Telegram Video Streaming
+// =============================================================================
+//
+// PURPOSE:
+// Bridges HTTP video players (VLC, MediaKit, FVP) with TDLib's file download API.
+// Converts HTTP Range requests into TDLib downloadFile() calls.
+//
+// ARCHITECTURE:
+// ┌─────────────────┐     HTTP/1.1     ┌──────────────────┐     TDLib FFI     ┌─────────────┐
+// │  Video Player   │────Range Req────▶│ LocalStreamingProxy│───downloadFile──▶│  Telegram   │
+// │  (MediaKit)     │◀───206 Partial───│  (HTTP Server)   │◀──updateFile────│   Servers   │
+// └─────────────────┘                  └──────────────────┘                 └─────────────┘
+//
+// KEY MECHANISMS:
+//
+// 1. MOOV ATOM DETECTION:
+//    MP4 files have a "moov" atom containing video metadata (duration, keyframes).
+//    - moov-at-START: Optimized for streaming, player gets metadata immediately
+//    - moov-at-END: NOT optimized, player must download end of file first
+//    The proxy detects this via player behavior (request for end of file early).
+//
+// 2. MOOV-FIRST STATE MACHINE (FileLoadState):
+//    For files with saved playback position after cache clear:
+//    idle → loadingMoov → moovReady → seeking → playing
+//    This prevents "stale seek" where player seeks before metadata is loaded.
+//
+// 3. PRIORITY SYSTEM:
+//    - Priority 32: User-initiated seeks (highest, protected from cancellation)
+//    - Priority 16: Active playback (normal viewing)
+//    - Priority 5: Visible videos in list view (preload)
+//    - Priority 1: Background preload
+//
+// 4. LRU STREAMING CACHE:
+//    32MB per-file cache with 512KB chunks for instant backward seeks.
+//    Eliminates network round-trip for small backward seeks (<32MB).
+//
+// 5. ZOMBIE PROTECTION:
+//    "Zombie" requests are HTTP connections that remain open after seek.
+//    The proxy blacklists old offsets to prevent them from hijacking downloads.
+//
+// 6. STALL DETECTION:
+//    Tracks download speed and detects stalls (<50KB/s for >2s).
+//    Triggers adaptive buffer escalation when stalls are detected.
+//
+// =============================================================================
+
+/// HTTP proxy server that streams Telegram videos to local video players.
+///
+/// Singleton pattern ensures single port allocation and consistent state.
+///
+/// ## URL Format:
+/// ```
+/// http://127.0.0.1:{port}/stream?file_id={id}&size={bytes}
+/// ```
+///
+/// ## Key Methods:
+/// - [start]: Initialize HTTP server on random port
+/// - [getUrl]: Generate streaming URL for a file
+/// - [abortRequest]: Cancel streaming for a file (e.g., on video change)
+/// - [invalidateAllFiles]: Clear all state after cache clear
+/// - [signalUserSeek]: Tell proxy a user-initiated seek is coming
+///
+/// ## Integration:
+/// Works with [StreamingRepository] interface for clean architecture.
+/// PlayerNotifier uses this via [StreamingRepository.port].
 class LocalStreamingProxy {
   static final LocalStreamingProxy _instance = LocalStreamingProxy._internal();
   factory LocalStreamingProxy() => _instance;

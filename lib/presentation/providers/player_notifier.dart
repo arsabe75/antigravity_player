@@ -13,9 +13,73 @@ import 'player_state.dart';
 
 part 'player_notifier.g.dart';
 
-// Player Notifier
-// Riverpod 3: @riverpod sobre una clase genera un NotifierProvider (o AsyncNotifierProvider si build devuelve Future).
-// La clase debe extender de _$NombreDeLaClase (generated mixin).
+// =============================================================================
+// PlayerNotifier - Core Video Playback Controller
+// =============================================================================
+//
+// ARCHITECTURE OVERVIEW:
+// ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+// │  PlayerScreen   │────▶│  PlayerNotifier  │────▶│ VideoRepository │
+// │  (UI Layer)     │     │  (State Layer)   │     │ (Domain Layer)  │
+// └─────────────────┘     └──────────────────┘     └─────────────────┘
+//                                │
+//                                ▼
+//                         ┌──────────────────┐
+//                         │ StreamingRepo    │
+//                         │ (Proxy Control)  │
+//                         └──────────────────┘
+//
+// DATA FLOW:
+// 1. UI calls loadVideo() → Notifier updates state → Repository plays video
+// 2. Repository emits streams → Notifier updates state → UI rebuilds
+// 3. User seeks/pauses → Notifier → Repository → Streams update state
+//
+// STREAM SUBSCRIPTIONS (6 total):
+// - positionStream: Current playback position (updates ~200ms)
+// - durationStream: Total video duration
+// - isPlayingStream: Play/pause state
+// - isBufferingStream: Network buffering state
+// - tracksChangedStream: Audio/subtitle track availability
+// - errorStream: Playback errors (codec, network, etc.)
+//
+// STABLE STORAGE KEYS (for progress persistence):
+// Priority order for identifying videos across sessions:
+// 1. Telegram message ID (telegram_{chatId}_{messageId}) - survives cache clears
+// 2. Proxy file_id (file_{id}) - session-stable but changes after cache clear
+// 3. File path - for local files only
+//
+// =============================================================================
+
+/// Manages video playback state and coordinates between UI and video backends.
+///
+/// This notifier uses Riverpod 3's code generation pattern with `@Riverpod`.
+/// The `build()` method initializes dependencies and returns initial state.
+/// State updates are broadcast to all widgets watching [playerProvider].
+///
+/// ## Key Features:
+/// - **Multi-backend support**: Works with both FVP (libmpv) and MediaKit
+/// - **Progress persistence**: Saves playback position every 5 seconds
+/// - **Telegram integration**: Uses stable message IDs for progress keys
+/// - **Proxy port correction**: Fixes stale URLs after app restart
+/// - **UX optimizations**: Buffering indicators, initial loading state
+///
+/// ## Usage:
+/// ```dart
+/// // In a widget
+/// final state = ref.watch(playerProvider);
+/// final notifier = ref.read(playerProvider.notifier);
+///
+/// // Load a video
+/// notifier.loadVideo(
+///   'http://example.com/video.mp4',
+///   isNetwork: true,
+///   title: 'My Video',
+/// );
+///
+/// // Control playback
+/// notifier.togglePlay();
+/// notifier.seekTo(Duration(minutes: 5));
+/// ```
 @Riverpod(
   dependencies: [
     videoRepository,
@@ -215,7 +279,39 @@ class PlayerNotifier extends _$PlayerNotifier {
     }
   }
 
-  /// Load and play a video.
+  /// Loads and plays a video file or network stream.
+  ///
+  /// ## Flow Diagram:
+  /// ```
+  /// loadVideo()
+  ///     │
+  ///     ├── 1. Abort previous proxy request (if any)
+  ///     ├── 2. Reset state (path, title, buffering indicators)
+  ///     ├── 3. Store Telegram context for stable progress keys
+  ///     ├── 4. Extract proxy file_id and correct port if stale
+  ///     ├── 5. Validate local file exists (if not network)
+  ///     ├── 6. Restore saved position (unless startAtZero)
+  ///     ├── 7. Start playback via VideoRepository
+  ///     ├── 8. Load audio/subtitle tracks
+  ///     ├── 9. Save to recent videos history
+  ///     └── 10. Start auto-save timer (every 5 seconds)
+  /// ```
+  ///
+  /// ## Parameters:
+  /// - [path]: Video URL or local file path
+  /// - [isNetwork]: Set true for http/https URLs
+  /// - [title]: Display title (falls back to filename)
+  /// - [telegramChatId]: For stable progress persistence across cache clears
+  /// - [telegramMessageId]: Combined with chatId to create unique key
+  /// - [telegramFileSize]: Stored for history display
+  /// - [telegramTopicId]: Forum topic identifier
+  /// - [telegramTopicName]: Forum topic display name
+  /// - [startAtZero]: Force start from beginning (used by playlist restart)
+  ///
+  /// ## Proxy Port Correction:
+  /// When loading a stored URL (e.g., from "Recent Videos"), the proxy port
+  /// may have changed since app restart. This method detects stale ports
+  /// and corrects them using the active [StreamingRepository.port].
   Future<void> loadVideo(
     String path, {
     bool isNetwork = false,

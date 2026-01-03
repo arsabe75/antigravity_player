@@ -6,13 +6,64 @@ import '../../domain/entities/playlist_entity.dart';
 
 part 'playlist_notifier.g.dart';
 
-// Riverpod 3: keepAlive: true evita que el estado se destruya cuando no hay listeners.
-// Por defecto (sin keepAlive), Riverpod destruye el estado si nadie lo está "viendo" (watching).
+// =============================================================================
+// PlaylistNotifier - Playlist State Management
+// =============================================================================
+//
+// STATE MANAGEMENT:
+// - Uses immutable PlaylistEntity with Freezed
+// - All mutations create new state via copyWith()
+// - keepAlive: true ensures state persists across screen changes
+//
+// NAVIGATION LOGIC:
+// - next()/previous() respect RepeatMode
+// - RepeatMode.none: Stop at boundaries
+// - RepeatMode.all: Wrap around (end→start, start→end)
+// - RepeatMode.one: Return true but don't change index (player handles repeat)
+//
+// INTERACTION WITH PLAYERNOTIFIER:
+// - PlaylistNotifier manages WHAT to play (list, order, current index)
+// - PlayerNotifier manages HOW to play (load, seek, volume)
+// - PlayerScreen coordinates: when video ends, calls next() then loadVideo()
+//
+// INDEX MANAGEMENT:
+// - currentIndex is auto-adjusted when items are removed/moved
+// - Removing item before current → decrement index
+// - Moving current item → index follows the item
+//
+// =============================================================================
+
+/// Manages playlist state including items, current index, shuffle, and repeat mode.
+///
+/// This is a global notifier with `keepAlive: true`, meaning the playlist
+/// persists even when no widget is watching it. This allows users to
+/// switch between screens without losing their playlist.
+///
+/// ## Usage:
+/// ```dart
+/// // Read state
+/// final playlist = ref.watch(playlistProvider);
+/// print('Playing ${playlist.currentIndex + 1} of ${playlist.length}');
+///
+/// // Modify playlist
+/// final notifier = ref.read(playlistProvider.notifier);
+/// notifier.addItem('/path/to/video.mp4');
+/// notifier.next(); // Advance to next video
+/// ```
+///
+/// ## Coordination with PlayerNotifier:
+/// ```dart
+/// // In PlayerScreen's auto-advance listener:
+/// if (playlistNotifier.next()) {
+///   final nextItem = playlist.currentItem;
+///   playerNotifier.loadVideo(nextItem!.path, isNetwork: nextItem.isNetwork);
+/// }
+/// ```
 @Riverpod(keepAlive: true)
 class PlaylistNotifier extends _$PlaylistNotifier {
   @override
   PlaylistEntity build() {
-    // Retornamos el estado inicial de la playlist (vacía).
+    // Initial state is an empty playlist
     return const PlaylistEntity();
   }
 
