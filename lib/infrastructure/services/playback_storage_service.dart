@@ -14,6 +14,13 @@ class PlaybackStorageService {
     return prefs.getInt('$_prefix$videoPath');
   }
 
+  /// Clears the saved position for a specific video.
+  /// Called when video playback reaches the end.
+  Future<void> clearPosition(String videoPath) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('$_prefix$videoPath');
+  }
+
   /// Clears all saved playback positions.
   /// Called when cache is cleared to avoid resume-after-cache-clear issues.
   Future<void> clearAllPositions() async {

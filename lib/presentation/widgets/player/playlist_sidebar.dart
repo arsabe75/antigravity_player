@@ -40,14 +40,12 @@ class PlaylistSidebar extends ConsumerWidget {
   ) async {
     String? targetPath = playlist.sourcePath;
 
-    if (targetPath == null) {
-      targetPath = await FilePicker.platform.saveFile(
-        dialogTitle: 'Save Playlist',
-        fileName: 'playlist.txt',
-        type: FileType.custom,
-        allowedExtensions: ['txt', 'm3u'],
-      );
-    }
+    targetPath ??= await FilePicker.platform.saveFile(
+      dialogTitle: 'Save Playlist',
+      fileName: 'playlist.txt',
+      type: FileType.custom,
+      allowedExtensions: ['txt', 'm3u'],
+    );
 
     if (targetPath != null) {
       if (!targetPath.endsWith('.txt') && !targetPath.endsWith('.m3u')) {

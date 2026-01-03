@@ -334,7 +334,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     });
 
     // Also request focus whenever the video path changes (video switch)
-    ref.listen(playerProvider.select((s) => s.currentVideoPath), (_, __) {
+    ref.listen(playerProvider.select((s) => s.currentVideoPath), (_, _) {
       // Small delay to allow new video widget to mount, then steal focus back
       Future.delayed(const Duration(milliseconds: 500), () {
         if (_focusNode.canRequestFocus) {

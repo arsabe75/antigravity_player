@@ -112,6 +112,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
   }
 
   Future<void> _loadPlaylist() async {
+    final messenger = ScaffoldMessenger.of(context);
     if (_isDirty && _items.isNotEmpty) {
       final confirm = await showDialog<bool>(
         context: context,
@@ -165,17 +166,16 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
           _isDirty = false;
         });
       } catch (e) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Error loading playlist: $e')));
-        }
+        messenger.showSnackBar(
+          SnackBar(content: Text('Error loading playlist: $e')),
+        );
       }
     }
   }
 
   Future<void> _savePlaylist({bool asNew = false}) async {
     String? targetPath = _currentFilePath;
+    final messenger = ScaffoldMessenger.of(context);
 
     if (asNew || targetPath == null) {
       targetPath = await FilePicker.platform.saveFile(
@@ -200,17 +200,11 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
           _currentFilePath = targetPath;
           _isDirty = false;
         });
-        if (context.mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(const SnackBar(content: Text('Playlist saved')));
-        }
+        messenger.showSnackBar(const SnackBar(content: Text('Playlist saved')));
       } catch (e) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Error saving playlist: $e')));
-        }
+        messenger.showSnackBar(
+          SnackBar(content: Text('Error saving playlist: $e')),
+        );
       }
     }
   }

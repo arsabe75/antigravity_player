@@ -1,0 +1,9 @@
+Analyzing antigravity_player...                                 
+
+   info - Unnecessary use of multiple underscores - lib\presentation\screens\player_screen.dart:337:70 - unnecessary_underscores
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\presentation\screens\playlist_manager_screen.dart:170:13 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\presentation\screens\playlist_manager_screen.dart:205:13 - use_build_context_synchronously
+   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\presentation\screens\playlist_manager_screen.dart:211:13 - use_build_context_synchronously
+   info - The 'if' statement could be replaced by a null-aware assignment - lib\presentation\widgets\player\playlist_sidebar.dart:43:5 - prefer_conditional_assignment
+
+5 issues found. (ran in 2.5s)
