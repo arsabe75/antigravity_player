@@ -296,7 +296,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       if (previous?.isPlaying == true &&
           !next.isPlaying &&
           next.duration > Duration.zero &&
-          next.position >= next.duration) {
+          next.position >= next.duration - const Duration(milliseconds: 500)) {
         // Video finished, play next
         if (playlistNotifier.next()) {
           final newItem = ref.read(playlistProvider).currentItem;
