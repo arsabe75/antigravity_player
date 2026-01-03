@@ -42,18 +42,36 @@ class PlaylistSidebar extends ConsumerWidget {
 
     targetPath ??= await FilePicker.platform.saveFile(
       dialogTitle: 'Save Playlist',
-      fileName: 'playlist.txt',
+      fileName: 'playlist.m3u',
       type: FileType.custom,
-      allowedExtensions: ['txt', 'm3u'],
+      allowedExtensions: ['m3u', 'txt'],
     );
 
     if (targetPath != null) {
+      // Ensure extension - default to M3U for better interoperability
       if (!targetPath.endsWith('.txt') && !targetPath.endsWith('.m3u')) {
-        targetPath += '.txt';
+        targetPath += '.m3u';
       }
 
       final file = File(targetPath);
-      final content = playlist.items.map((item) => item.path).join('\n');
+
+      // Build content based on format
+      String content;
+      if (targetPath.endsWith('.m3u')) {
+        // M3U format with metadata
+        final buffer = StringBuffer('#EXTM3U\n');
+        for (final item in playlist.items) {
+          final durationSecs = item.duration?.inSeconds ?? -1;
+          final title = item.title ?? item.path.split('/').last;
+          buffer.writeln('#EXTINF:$durationSecs,$title');
+          buffer.writeln(item.path);
+        }
+        content = buffer.toString();
+      } else {
+        // Simple TXT format (one path per line)
+        content = playlist.items.map((item) => item.path).join('\n');
+      }
+
       try {
         await file.writeAsString(content);
         ref.read(playlistProvider.notifier).setSourcePath(targetPath);
