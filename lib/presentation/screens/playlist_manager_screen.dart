@@ -255,12 +255,14 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
           IconButton(
             icon: const Icon(LucideIcons.save),
             tooltip: 'Save Playlist',
-            onPressed: () => _savePlaylist(asNew: false),
+            onPressed: _items.isEmpty
+                ? null
+                : () => _savePlaylist(asNew: false),
           ),
           IconButton(
             icon: const Icon(LucideIcons.saveAll),
             tooltip: 'Save As...',
-            onPressed: () => _savePlaylist(asNew: true),
+            onPressed: _items.isEmpty ? null : () => _savePlaylist(asNew: true),
           ),
         ],
       ),

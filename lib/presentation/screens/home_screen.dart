@@ -157,7 +157,7 @@ class HomeScreen extends ConsumerWidget {
                                             child: OutlinedButton(
                                               onPressed: () =>
                                                   const PlaylistManagerRoute()
-                                                      .go(context),
+                                                      .push(context),
                                               style: OutlinedButton.styleFrom(
                                                 padding: EdgeInsets.zero,
                                                 shape:
