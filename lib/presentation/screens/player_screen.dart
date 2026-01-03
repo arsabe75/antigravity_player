@@ -68,8 +68,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     if (widget.videoUrl != null) {
       final isNetwork = widget.videoUrl!.startsWith('http');
-      Future.microtask(
-        () => ref
+      Future.microtask(() {
+        final playlist = ref.read(playlistProvider);
+        // If loading same video as current playlist item, use its config
+        final bool startAtZero = playlist.currentItem?.path == widget.videoUrl
+            ? playlist.startFromBeginning
+            : false;
+
+        ref
             .read(playerProvider.notifier)
             .loadVideo(
               widget.videoUrl!,
@@ -80,8 +86,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               telegramFileSize: widget.telegramFileSize,
               telegramTopicId: widget.telegramTopicId,
               telegramTopicName: widget.telegramTopicName,
-            ),
-      );
+              startAtZero: startAtZero,
+            );
+      });
     }
 
     // Prevent default close to handle cleanup
@@ -104,7 +111,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         if (newItem != null) {
           ref
               .read(playerProvider.notifier)
-              .loadVideo(newItem.path, isNetwork: newItem.isNetwork);
+              .loadVideo(
+                newItem.path,
+                isNetwork: newItem.isNetwork,
+                startAtZero: ref.read(playlistProvider).startFromBeginning,
+              );
         }
       }
     };
@@ -115,7 +126,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         if (newItem != null) {
           ref
               .read(playerProvider.notifier)
-              .loadVideo(newItem.path, isNetwork: newItem.isNetwork);
+              .loadVideo(
+                newItem.path,
+                isNetwork: newItem.isNetwork,
+                startAtZero: ref.read(playlistProvider).startFromBeginning,
+              );
         }
       }
     };
@@ -286,7 +301,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         if (playlistNotifier.next()) {
           final newItem = ref.read(playlistProvider).currentItem;
           if (newItem != null) {
-            notifier.loadVideo(newItem.path, isNetwork: newItem.isNetwork);
+            notifier.loadVideo(
+              newItem.path,
+              isNetwork: newItem.isNetwork,
+              startAtZero: ref.read(playlistProvider).startFromBeginning,
+            );
           }
         }
       }
@@ -329,7 +348,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       if (playlistNotifier.next()) {
         final newItem = ref.read(playlistProvider).currentItem;
         if (newItem != null) {
-          notifier.loadVideo(newItem.path, isNetwork: newItem.isNetwork);
+          notifier.loadVideo(
+            newItem.path,
+            isNetwork: newItem.isNetwork,
+            startAtZero: ref.read(playlistProvider).startFromBeginning,
+          );
         }
       }
     }
@@ -338,7 +361,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       if (playlistNotifier.previous()) {
         final newItem = ref.read(playlistProvider).currentItem;
         if (newItem != null) {
-          notifier.loadVideo(newItem.path, isNetwork: newItem.isNetwork);
+          notifier.loadVideo(
+            newItem.path,
+            isNetwork: newItem.isNetwork,
+            startAtZero: ref.read(playlistProvider).startFromBeginning,
+          );
         }
       }
     }
@@ -501,6 +528,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                           notifier.loadVideo(
                             item.path,
                             isNetwork: item.isNetwork,
+                            startAtZero: playlist.startFromBeginning,
                           );
                         }
                       },

@@ -188,6 +188,21 @@ class PlayerNotifier extends _$PlayerNotifier {
   /// For Telegram videos, provide [telegramChatId], [telegramMessageId], and
   /// [telegramFileSize] for stable progress persistence that survives cache clears.
   /// For forum topics, provide [telegramTopicId] and [telegramTopicName].
+  Future<void> _savePosition() async {
+    try {
+      if (state.currentVideoPath != null) {
+        final storageKey = _getStableStorageKey(state.currentVideoPath!);
+        await _storageService.savePosition(
+          storageKey,
+          state.position.inMilliseconds,
+        );
+      }
+    } catch (e) {
+      // Ignore errors during save, especially during dispose
+    }
+  }
+
+  /// Load and play a video.
   Future<void> loadVideo(
     String path, {
     bool isNetwork = false,
@@ -197,6 +212,7 @@ class PlayerNotifier extends _$PlayerNotifier {
     int? telegramFileSize,
     int? telegramTopicId,
     String? telegramTopicName,
+    bool startAtZero = false,
   }) async {
     _abortCurrentProxyRequest();
 
@@ -261,15 +277,19 @@ class PlayerNotifier extends _$PlayerNotifier {
       // Use stable Telegram message ID for progress key (survives cache clears)
       // Falls back to file_id for legacy, then path for local files
       final storageKey = _getStableStorageKey(path);
-      final savedPositionMs = await _storageService.getPosition(storageKey);
+
       Duration startPosition = Duration.zero;
 
-      if (savedPositionMs != null && savedPositionMs > 0) {
-        startPosition = Duration(milliseconds: savedPositionMs);
-        debugPrint('PlayerNotifier: Will resume from $startPosition');
-
-        // Optimistic update for UI to show correct time immediately
-        state = state.copyWith(position: startPosition);
+      if (!startAtZero) {
+        final savedPositionMs = await _storageService.getPosition(storageKey);
+        if (savedPositionMs != null && savedPositionMs > 0) {
+          startPosition = Duration(milliseconds: savedPositionMs);
+          debugPrint('PlayerNotifier: Will resume from $startPosition');
+          // Optimistic update for UI to show correct time immediately
+          state = state.copyWith(position: startPosition);
+        }
+      } else {
+        debugPrint('PlayerNotifier: Forced start at zero');
       }
 
       // Track starting position for detecting actual playback (position must advance)
@@ -393,20 +413,6 @@ class PlayerNotifier extends _$PlayerNotifier {
     }
     // Default: Use path for local files
     return path;
-  }
-
-  Future<void> _savePosition() async {
-    try {
-      if (state.currentVideoPath != null) {
-        final storageKey = _getStableStorageKey(state.currentVideoPath!);
-        await _storageService.savePosition(
-          storageKey,
-          state.position.inMilliseconds,
-        );
-      }
-    } catch (e) {
-      // Ignore errors during save, especially during dispose
-    }
   }
 
   Future<void> _loadTracks() async {
