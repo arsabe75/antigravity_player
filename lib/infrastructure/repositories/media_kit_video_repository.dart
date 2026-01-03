@@ -25,6 +25,8 @@ class MediaKitVideoRepository implements VideoRepository {
   bool _isPlaying = false;
   String? _videoUrl; // Track URL for cancellation
 
+  int _initId = 0; // Token to track active initialization
+
   @override
   Future<void> initialize() async {
     // MediaKit initialization is done in main.dart
@@ -32,6 +34,8 @@ class MediaKitVideoRepository implements VideoRepository {
 
   @override
   Future<void> dispose() async {
+    _initId++; // Cancel pending ops
+
     // If we were playing a proxy URL, extract file_id and abort proxy wait
     if (_videoUrl != null && _videoUrl!.contains('/stream?file_id=')) {
       try {
@@ -50,6 +54,7 @@ class MediaKitVideoRepository implements VideoRepository {
     await _player?.dispose();
     _player = null;
     _controller = null;
+    _videoUrl = null; // Clear video URL on dispose
     await _positionController.close();
     await _durationController.close();
     await _isPlayingController.close();
@@ -58,133 +63,180 @@ class MediaKitVideoRepository implements VideoRepository {
     await _errorController.close();
   }
 
-  @override
-  Future<void> play(VideoEntity video, {Duration? startPosition}) async {
-    // Clean up previous instance partially if needed, or re-use
-    // For now, let's create a new player per video for safety
-    if (_player != null) {
-      await _player!.dispose();
-    }
+  /// Helper to initialize player once and reuse it
+  Future<void> _ensurePlayerInitialized(int currentId) async {
+    if (_player != null) return;
 
-    _player = Player(
+    final player = Player(
       configuration: const PlayerConfiguration(bufferSize: 32 * 1024 * 1024),
     );
+    _player = player;
 
     String? hwdec;
     if (Platform.isWindows) {
       hwdec = 'd3d11';
     } else if (Platform.isLinux) {
-      // Explictly use 'vaapi' to offload CPU for TDLib
       hwdec = 'vaapi';
     } else {
-      hwdec = 'auto'; // Fallback
+      hwdec = 'auto';
     }
 
     _controller = VideoController(
-      _player!,
+      player,
       configuration: VideoControllerConfiguration(hwdec: hwdec),
     );
-    // Set properties directly on player for network caching
-    await (_player!.platform as dynamic).setProperty('cache', 'yes');
-    // Critical: Increase low-level stream buffer for TDLib proxy streaming
-    await (_player!.platform as dynamic).setProperty(
-      'stream-buffer-size',
-      (16 * 1024 * 1024).toString(),
-    ); // 16MB stream buffer
-    // Increase demuxer buffer to handle high-bitrate hiccups
-    await (_player!.platform as dynamic).setProperty(
-      'demuxer-max-bytes',
-      (64 * 1024 * 1024).toString(),
-    ); // 64MB demuxer (reduced from 128 to save RAM)
-    await (_player!.platform as dynamic).setProperty(
-      'demuxer-max-back-bytes',
-      (32 * 1024 * 1024).toString(),
-    ); // 32MB back buffer
-    await (_player!.platform as dynamic).setProperty(
-      'network-timeout',
-      '60',
-    ); // 60s timeout for network reads
-    await (_player!.platform as dynamic).setProperty(
-      'cache-pause',
-      'yes',
-    ); // Allow pause for buffering
-    await (_player!.platform as dynamic).setProperty(
-      'cache-pause-initial',
-      'yes',
-    ); // Pre-buffer before start
-    // Require 20 seconds of buffered content - prevents frame drops at start
-    await (_player!.platform as dynamic).setProperty(
-      'cache-secs',
-      '20',
-    ); // Listen to streams
 
-    // OPTIMIZATION: Start directly at the saved position if provided
-    if (startPosition != null && startPosition > Duration.zero) {
-      final startSeconds = startPosition.inMilliseconds / 1000.0;
-      await (_player!.platform as dynamic).setProperty(
-        'start',
-        startSeconds.toString(),
-      );
-      debugPrint('MediaKit: Starting playback at ${startSeconds}s');
-
-      // Update initial position state immediately so UI doesn't show 0:00
-      _currentPosition = startPosition;
-      _positionController.add(startPosition);
+    // One-time property setup
+    // Exception checks not strictly needed here as we just created it, but good practice
+    Future<void> setProp(String key, String value) async {
+      if (_initId != currentId) return;
+      try {
+        await (player.platform as dynamic).setProperty(key, value);
+      } catch (e) {
+        debugPrint(
+          'MediaKit: Error setting $key in _ensurePlayerInitialized: $e',
+        );
+      }
     }
 
-    _playerSub = _player!.stream.position.listen((pos) {
+    await setProp('cache', 'yes');
+    if (_initId != currentId) return;
+    await setProp('stream-buffer-size', (16 * 1024 * 1024).toString());
+    if (_initId != currentId) return;
+    await setProp('demuxer-max-bytes', (64 * 1024 * 1024).toString());
+    if (_initId != currentId) return;
+    await setProp('demuxer-max-back-bytes', (32 * 1024 * 1024).toString());
+    if (_initId != currentId) return;
+    await setProp('network-timeout', '60');
+    if (_initId != currentId) return;
+    await setProp('cache-pause', 'yes');
+    if (_initId != currentId) return;
+    await setProp('cache-pause-initial', 'yes');
+    if (_initId != currentId) return;
+    await setProp('cache-secs', '20');
+    if (_initId != currentId) return;
+
+    // One-time listener setup
+    _playerSub = player.stream.position.listen((pos) {
       _currentPosition = pos;
       _positionController.add(pos);
     });
 
-    _player!.stream.duration.listen((dur) {
+    player.stream.duration.listen((dur) {
       _totalDuration = dur;
       _durationController.add(dur);
     });
 
-    _player!.stream.playing.listen((playing) {
+    player.stream.playing.listen((playing) {
       _isPlaying = playing;
       _isPlayingController.add(playing);
     });
 
-    _player!.stream.buffering.listen((buffering) {
+    player.stream.buffering.listen((buffering) {
       _isBufferingController.add(buffering);
     });
 
-    // Listen to player errors and propagate them
-    _player!.stream.error.listen((error) {
+    player.stream.error.listen((error) {
       debugPrint('MediaKit Error: $error');
       _errorController.add(error);
     });
 
-    await _player!.open(Media(video.path));
-    _videoUrl = video.path;
-
-    // Force Unmute & Volume 100
-    await _player!.setVolume(100);
-
-    // Listen to track changes and notify (for streaming videos where tracks arrive late)
-    _tracksSub?.cancel();
-    _tracksSub = _player!.stream.tracks.listen((tracks) {
-      // Notify listeners that tracks have changed
+    // Track selection logic
+    _tracksSub = player.stream.tracks.listen((tracks) {
       _tracksChangedController.add(null);
 
       // Auto-select first audio track if "no" is selected
       if (tracks.audio.isNotEmpty) {
-        if (_player!.state.track.audio.id == 'no' && tracks.audio.length > 2) {
+        if (player.state.track.audio.id == 'no' && tracks.audio.length > 2) {
           final realTrack = tracks.audio.firstWhere(
             (t) => t.id != 'no' && t.id != 'auto',
             orElse: () => tracks.audio.last,
           );
           if (realTrack.id != 'no') {
-            debugPrint(
-              'MediaKitVideoRepository: Auto-selecting audio track: ${realTrack.id}',
-            );
-            _player!.setAudioTrack(realTrack);
+            debugPrint('MediaKit: Auto-selecting audio: ${realTrack.id}');
+            player.setAudioTrack(realTrack);
           }
         }
       }
     });
+  }
+
+  @override
+  Future<void> play(VideoEntity video, {Duration? startPosition}) async {
+    // 1. Generate new Initialization ID
+    _initId++;
+    final int currentId = _initId;
+
+    // 2. Ensure Player exists (create if null)
+    await _ensurePlayerInitialized(currentId);
+    if (_initId != currentId) return;
+    final player = _player!;
+
+    // 3. Set Per-Video Properties
+    // 'start' property must be set before open to take effect
+    if (startPosition != null && startPosition > Duration.zero) {
+      final startSeconds = startPosition.inMilliseconds / 1000.0;
+      try {
+        await (player.platform as dynamic).setProperty(
+          'start',
+          startSeconds.toString(),
+        );
+        debugPrint('MediaKit: Starting playback at ${startSeconds}s');
+      } catch (e) {
+        debugPrint('MediaKit: Error setting start property: $e');
+      }
+
+      // Update UI immediately
+      _currentPosition = startPosition;
+      _positionController.add(startPosition);
+    } else {
+      // Reset start pos to 0 for next video if not specified
+      try {
+        await (player.platform as dynamic).setProperty('start', '0');
+      } catch (e) {
+        debugPrint('MediaKit: Error resetting start property: $e');
+      }
+    }
+
+    if (_initId != currentId) return;
+
+    // 4. Open Media
+    try {
+      await player.open(Media(video.path));
+    } catch (e) {
+      if (_initId == currentId) {
+        debugPrint('MediaKit: Open failed: $e');
+        _errorController.add(e.toString());
+      }
+      return;
+    }
+
+    if (_initId != currentId) return;
+
+    // RESUME FIX: Explicitly seek if start position was requested.
+    // The 'start' property (mpv --start) is sometimes ignored when reusing the player instance.
+    // This semantic seek ensures we definitely start at the right place.
+    if (startPosition != null && startPosition > Duration.zero) {
+      // Allow mpv to initialize media info (helps with some formats)
+      if (_initId == currentId) {
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
+
+      // Check cancellation again after delay
+      if (_initId == currentId) {
+        debugPrint(
+          'MediaKit: Explicitly seeking to $startPosition (resume fallback)',
+        );
+        await player.seek(startPosition);
+      }
+    }
+
+    _videoUrl = video.path;
+
+    if (_initId != currentId) return;
+
+    // Force Unmute & Volume 100
+    await player.setVolume(100);
   }
 
   @override
