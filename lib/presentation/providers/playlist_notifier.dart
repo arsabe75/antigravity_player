@@ -39,11 +39,13 @@ class PlaylistNotifier extends _$PlaylistNotifier {
     List<PlaylistItem> items, {
     int startIndex = 0,
     String? sourcePath,
+    bool startFromBeginning = false,
   }) {
     state = state.copyWith(
       items: items,
       currentIndex: startIndex.clamp(0, items.isEmpty ? 0 : items.length - 1),
       sourcePath: sourcePath,
+      startFromBeginning: startFromBeginning,
     );
   }
 
@@ -165,5 +167,10 @@ class PlaylistNotifier extends _$PlaylistNotifier {
   /// Establece el path del archivo fuente de la playlist
   void setSourcePath(String? path) {
     state = state.copyWith(sourcePath: path);
+  }
+
+  /// Establece si los videos deben iniciar desde el principio
+  void setStartFromBeginning(bool value) {
+    state = state.copyWith(startFromBeginning: value);
   }
 }

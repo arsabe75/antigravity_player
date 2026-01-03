@@ -22,6 +22,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
   List<PlaylistItem> _items = [];
   String? _currentFilePath;
   bool _isDirty = false;
+  bool _startFromBeginning = false;
 
   @override
   void initState() {
@@ -220,7 +221,11 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
     // Update global playlist state
     ref
         .read(playlistProvider.notifier)
-        .setPlaylist(_items, sourcePath: _currentFilePath);
+        .setPlaylist(
+          _items,
+          sourcePath: _currentFilePath,
+          startFromBeginning: _startFromBeginning,
+        );
 
     // Navigate to player
     PlayerRoute($extra: PlayerRouteExtra(url: _items.first.path)).go(context);
@@ -345,6 +350,33 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
                     onPressed: _pickVideos,
                     icon: const Icon(LucideIcons.plus),
                     label: const Text('Add'),
+                  ),
+                  const SizedBox(width: 16),
+                  // Restart checkbox
+                  Container(
+                    height: 48,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Checkbox(
+                          value: _startFromBeginning,
+                          onChanged: (v) =>
+                              setState(() => _startFromBeginning = v ?? false),
+                        ),
+                        Text(
+                          'Restart',
+                          style: Theme.of(context).textTheme.labelMedium,
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                    ),
                   ),
                   const SizedBox(width: 16),
                   FloatingActionButton.extended(
