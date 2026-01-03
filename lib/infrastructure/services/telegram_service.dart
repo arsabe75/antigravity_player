@@ -38,6 +38,76 @@ typedef TdJsonClientExecuteC =
       ffi.Pointer<ffi.Int8> request,
     );
 
+// =============================================================================
+// TelegramService - TDLib FFI Bridge with Background Isolate
+// =============================================================================
+//
+// ARCHITECTURE OVERVIEW:
+// ┌────────────────┐     FFI      ┌─────────────────┐
+// │  Main Isolate  │◄────────────►│    tdjson.dll   │
+// │  (Flutter UI)  │              │   (TDLib C++)   │
+// └───────┬────────┘              └─────────────────┘
+//         │
+//    SendPort/ReceivePort
+//         │
+// ┌───────▼────────┐     FFI      ┌─────────────────┐
+// │ Receive Isolate│◄────────────►│    tdjson.dll   │
+// │  (Background)  │              │   (TDLib C++)   │
+// └────────────────┘              └─────────────────┘
+//
+// WHY TWO ISOLATES?
+// - TDLib's receive() function is BLOCKING (waits for network data)
+// - Running it in Flutter's main isolate would freeze the UI
+// - Background isolate continuously polls TDLib and sends updates via port
+//
+// THREADING MODEL:
+// - Main Isolate: Creates client, sends requests via FFI
+// - Background Isolate: Calls receive() in blocking loop, forwards updates
+// - Both isolates load tdjson.dll independently (required by Dart FFI)
+//
+// REQUEST-RESPONSE CORRELATION:
+// - Each request gets a unique '@extra' ID
+// - Response with matching '@extra' is routed to waiting Completer
+// - Requests without '@extra' are broadcast to general update stream
+//
+// UPDATE FILTERING:
+// - High-frequency updates (updateOption, updateUserStatus) are filtered
+// - Only relevant updates (messages, files, auth) reach the UI
+//
+// =============================================================================
+
+/// Singleton service for communicating with Telegram via TDLib.
+///
+/// Uses Dart FFI to call native TDLib functions (tdjson.dll/libtdjson.so).
+/// A background isolate continuously receives updates without blocking the UI.
+///
+/// ## Initialization Flow:
+/// ```
+/// initialize()
+///     │
+///     ├── 1. Load tdjson library via FFI
+///     ├── 2. Lookup functions: create, send, receive
+///     ├── 3. Create TDLib client instance
+///     ├── 4. Spawn background isolate for receive loop
+///     └── 5. Set log verbosity to 1 (errors only)
+/// ```
+///
+/// ## Usage:
+/// ```dart
+/// final telegram = TelegramService();
+/// await telegram.initialize();
+///
+/// // Fire-and-forget request
+/// telegram.send({'@type': 'getMe'});
+///
+/// // Request with async response
+/// final me = await telegram.sendWithResult({'@type': 'getMe'});
+///
+/// // Listen to updates
+/// telegram.updates.listen((update) {
+///   print('Received: ${update['@type']}');
+/// });
+/// ```
 class TelegramService {
   static final TelegramService _instance = TelegramService._internal();
   factory TelegramService() => _instance;
