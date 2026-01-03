@@ -146,18 +146,44 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
       try {
         final lines = await file.readAsLines();
         final newItems = <PlaylistItem>[];
+        String? pendingTitle;
+        int? pendingDurationSecs;
+
         for (final line in lines) {
           final trimmed = line.trim();
-          if (trimmed.isNotEmpty && !trimmed.startsWith('#')) {
-            // Simple format: one path per line
-            newItems.add(
-              PlaylistItem(
-                path: trimmed,
-                isNetwork: trimmed.startsWith('http'),
-                title: path.basename(trimmed),
-              ),
-            );
+          if (trimmed.isEmpty) continue;
+
+          // Parse M3U EXTINF metadata line
+          if (trimmed.startsWith('#EXTINF:')) {
+            // Format: #EXTINF:duration,title
+            final content = trimmed.substring(8); // Remove '#EXTINF:'
+            final commaIndex = content.indexOf(',');
+            if (commaIndex > 0) {
+              pendingDurationSecs = int.tryParse(
+                content.substring(0, commaIndex),
+              );
+              pendingTitle = content.substring(commaIndex + 1).trim();
+            }
+            continue;
           }
+
+          // Skip other M3U directives
+          if (trimmed.startsWith('#')) continue;
+
+          // This is a path line
+          newItems.add(
+            PlaylistItem(
+              path: trimmed,
+              isNetwork: trimmed.startsWith('http'),
+              title: pendingTitle ?? path.basename(trimmed),
+              duration: pendingDurationSecs != null && pendingDurationSecs > 0
+                  ? Duration(seconds: pendingDurationSecs)
+                  : null,
+            ),
+          );
+          // Reset pending metadata
+          pendingTitle = null;
+          pendingDurationSecs = null;
         }
 
         setState(() {
@@ -180,20 +206,37 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
     if (asNew || targetPath == null) {
       targetPath = await FilePicker.platform.saveFile(
         dialogTitle: 'Save Playlist',
-        fileName: 'playlist.txt',
+        fileName: 'playlist.m3u',
         type: FileType.custom,
-        allowedExtensions: ['txt', 'm3u'],
+        allowedExtensions: ['m3u', 'txt'],
       );
     }
 
     if (targetPath != null) {
-      // Ensure extension
+      // Ensure extension - default to M3U for better interoperability
       if (!targetPath.endsWith('.txt') && !targetPath.endsWith('.m3u')) {
-        targetPath += '.txt';
+        targetPath += '.m3u';
       }
 
       final file = File(targetPath);
-      final content = _items.map((item) => item.path).join('\n');
+
+      // Build content based on format
+      String content;
+      if (targetPath.endsWith('.m3u')) {
+        // M3U format with metadata
+        final buffer = StringBuffer('#EXTM3U\n');
+        for (final item in _items) {
+          final durationSecs = item.duration?.inSeconds ?? -1;
+          final title = item.title ?? path.basename(item.path);
+          buffer.writeln('#EXTINF:$durationSecs,$title');
+          buffer.writeln(item.path);
+        }
+        content = buffer.toString();
+      } else {
+        // Simple TXT format (one path per line)
+        content = _items.map((item) => item.path).join('\n');
+      }
+
       try {
         await file.writeAsString(content);
         setState(() {
