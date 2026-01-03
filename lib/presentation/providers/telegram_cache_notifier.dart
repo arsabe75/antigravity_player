@@ -71,7 +71,7 @@ class TelegramCacheState {
   }
 }
 
-@riverpod
+@Riverpod()
 class TelegramCacheNotifier extends _$TelegramCacheNotifier {
   late final TelegramCacheService _service;
 

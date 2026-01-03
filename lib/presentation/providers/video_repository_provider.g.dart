@@ -59,7 +59,7 @@ final class PlayerSettingsServiceProvider
 }
 
 String _$playerSettingsServiceHash() =>
-    r'2871a9f47020b1960140a0871dd072f65d325268';
+    r'a311a6648a89ca95f0fe24a609a8a109cd05d7c7';
 
 /// Provider for playback storage service
 
@@ -112,7 +112,7 @@ final class PlaybackStorageServiceProvider
 }
 
 String _$playbackStorageServiceHash() =>
-    r'f296c36645a0c5f35e53bbcbf9a8d18cd0dd69b8';
+    r'f5a7094d7edc60f6b3eb63099d8de8a81b195746';
 
 /// Holds the active player backend preference.
 /// Can be overridden in main() with initial value.

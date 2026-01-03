@@ -18,13 +18,13 @@ part 'video_repository_provider.g.dart';
 // ============================================================================
 
 /// Helper provider to read settings
-@riverpod
+@Riverpod()
 PlayerSettingsService playerSettingsService(Ref ref) {
   return PlayerSettingsService();
 }
 
 /// Provider for playback storage service
-@riverpod
+@Riverpod()
 PlaybackStorageService playbackStorageService(Ref ref) {
   return PlaybackStorageService();
 }
