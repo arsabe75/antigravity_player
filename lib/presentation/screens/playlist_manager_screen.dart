@@ -138,7 +138,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
 
     final result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
-      allowedExtensions: ['txt', 'm3u'],
+      allowedExtensions: ['m3u'],
     );
 
     if (result != null && result.files.single.path != null) {
@@ -208,34 +208,27 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
         dialogTitle: 'Save Playlist',
         fileName: 'playlist.m3u',
         type: FileType.custom,
-        allowedExtensions: ['m3u', 'txt'],
+        allowedExtensions: ['m3u'],
       );
     }
 
     if (targetPath != null) {
-      // Ensure extension - default to M3U for better interoperability
-      if (!targetPath.endsWith('.txt') && !targetPath.endsWith('.m3u')) {
+      // Ensure .m3u extension
+      if (!targetPath.endsWith('.m3u')) {
         targetPath += '.m3u';
       }
 
       final file = File(targetPath);
 
-      // Build content based on format
-      String content;
-      if (targetPath.endsWith('.m3u')) {
-        // M3U format with metadata
-        final buffer = StringBuffer('#EXTM3U\n');
-        for (final item in _items) {
-          final durationSecs = item.duration?.inSeconds ?? -1;
-          final title = item.title ?? path.basename(item.path);
-          buffer.writeln('#EXTINF:$durationSecs,$title');
-          buffer.writeln(item.path);
-        }
-        content = buffer.toString();
-      } else {
-        // Simple TXT format (one path per line)
-        content = _items.map((item) => item.path).join('\n');
+      // M3U format with metadata
+      final buffer = StringBuffer('#EXTM3U\n');
+      for (final item in _items) {
+        final durationSecs = item.duration?.inSeconds ?? -1;
+        final title = item.title ?? path.basename(item.path);
+        buffer.writeln('#EXTINF:$durationSecs,$title');
+        buffer.writeln(item.path);
       }
+      final content = buffer.toString();
 
       try {
         await file.writeAsString(content);
