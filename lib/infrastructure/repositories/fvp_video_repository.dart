@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'package:flutter/foundation.dart'; // For debugPrint
 import 'package:fvp/fvp.dart' as fvp;
 import 'package:video_player/video_player.dart';
 import '../../domain/entities/video_entity.dart';
@@ -32,6 +33,8 @@ class FvpVideoRepository implements VideoRepository {
   bool _isPlaying = false;
   bool _isBuffering = false;
 
+  int _initId = 0;
+
   @override
   Future<void> initialize() async {
     // Register FVP with HW acceleration and buffer settings
@@ -53,6 +56,7 @@ class FvpVideoRepository implements VideoRepository {
 
   @override
   Future<void> dispose() async {
+    _initId++; // Cancel pending inits
     _stopPoller();
     await _controller?.dispose();
     _controller = null;
@@ -102,27 +106,84 @@ class FvpVideoRepository implements VideoRepository {
 
   @override
   Future<void> play(VideoEntity video, {Duration? startPosition}) async {
+    // 1. Generate Init ID
+    _initId++;
+    final int currentId = _initId;
+
+    // 2. Initialize NEW controller locally (don't touch current one yet)
+    VideoPlayerController newController;
+    if (video.isNetwork) {
+      newController = VideoPlayerController.networkUrl(Uri.parse(video.path));
+    } else {
+      newController = VideoPlayerController.file(File(video.path));
+    }
+
+    try {
+      await newController.initialize();
+    } catch (e) {
+      // If init failed, clean up and report error if we are still the active request
+      await newController.dispose();
+      if (_initId == currentId) {
+        // Notify error? FVP repo doesn't support error stream yet, maybe log it.
+        debugPrint('FVP Init Error: $e');
+      }
+      return;
+    }
+
+    // 3. Check for cancellation
+    if (_initId != currentId) {
+      // We were superceded by a newer play() call.
+      // Dispose the controller we just created and exit.
+      await newController.dispose();
+      return;
+    }
+
+    // 4. Swap Controllers
+    // Stop polling old controller
+    _stopPoller();
+
+    // Dispose old controller
     if (_controller != null) {
       await _controller!.dispose();
     }
 
-    if (video.isNetwork) {
-      _controller = VideoPlayerController.networkUrl(Uri.parse(video.path));
-    } else {
-      _controller = VideoPlayerController.file(File(video.path));
-    }
+    // Assign new controller
+    _controller = newController;
 
-    await _controller!.initialize();
-
-    // FVP doesn't have 'start' property, so we seek manually
+    // 5. Setup Resume / Start Position
     if (startPosition != null && startPosition > Duration.zero) {
-      await _controller!.seekTo(startPosition);
-      _currentPosition = startPosition;
-      _positionController.add(startPosition);
+      // Add delay to ensure backend is ready for seek (similar to MediaKit fix)
+      if (_initId == currentId) {
+        // extra check though we are main thread here
+        // This might block UI slightly if we await, but ensures saftey.
+        // Actually, let's just seek.
+        try {
+          await _controller!.seekTo(startPosition);
+          _currentPosition = startPosition;
+          _positionController.add(startPosition);
+        } catch (e) {
+          debugPrint('FVP Seek Error: $e');
+        }
+      }
     }
 
-    _startPoller();
-    await _controller!.play();
+    // 6. Start Playback
+    if (_initId == currentId) {
+      // Reset internal state before starting poller to ensure clean sync.
+      // This prevents stale state from the previous video from affecting the new one.
+      _isPlaying = false;
+      _isBuffering = false;
+
+      _startPoller();
+      await _controller!.play();
+
+      // FIX: Immediately emit isPlaying: true after play() to ensure PlayerNotifier
+      // is synchronized. Without this, after video switch, the notifier may think
+      // the video is paused (stale state) and call resume() instead of pause()
+      // when the user presses Play/Pause.
+      _isPlaying = true;
+      _isPlayingController.add(true);
+    }
   }
 
   @override
