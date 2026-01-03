@@ -192,10 +192,23 @@ class PlayerNotifier extends _$PlayerNotifier {
     try {
       if (state.currentVideoPath != null) {
         final storageKey = _getStableStorageKey(state.currentVideoPath!);
-        await _storageService.savePosition(
-          storageKey,
-          state.position.inMilliseconds,
-        );
+
+        // Check if video has reached the end (within 500ms of duration)
+        // If so, clear the progress instead of saving it
+        final isAtEnd =
+            state.duration > Duration.zero &&
+            state.position >=
+                state.duration - const Duration(milliseconds: 500);
+
+        if (isAtEnd) {
+          await _storageService.clearPosition(storageKey);
+          debugPrint('PlayerNotifier: Video finished, cleared progress');
+        } else {
+          await _storageService.savePosition(
+            storageKey,
+            state.position.inMilliseconds,
+          );
+        }
       }
     } catch (e) {
       // Ignore errors during save, especially during dispose
