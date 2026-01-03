@@ -329,9 +329,29 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     return Scaffold(
       backgroundColor: Colors.black,
       body: CallbackShortcuts(
-        bindings: _buildKeyboardShortcuts(state, notifier),
+        bindings: _buildKeyboardShortcuts(
+          state,
+          notifier,
+          playNext,
+          playPrevious,
+        ),
         child: Focus(
           autofocus: true,
+          onKeyEvent: (node, event) {
+            if (event is KeyDownEvent) {
+              // '±' (Plus-Minus) mapped to Previous (inverted based on user feedback)
+              if (event.logicalKey.keyLabel == '±') {
+                playPrevious();
+                return KeyEventResult.handled;
+              }
+              // '°' (Degree) mapped to Next
+              if (event.logicalKey.keyLabel == '°') {
+                playNext();
+                return KeyEventResult.handled;
+              }
+            }
+            return KeyEventResult.ignored;
+          },
           child: MouseRegion(
             cursor: state.isFullscreen && !state.areControlsVisible
                 ? SystemMouseCursors.none
@@ -525,6 +545,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   Map<ShortcutActivator, VoidCallback> _buildKeyboardShortcuts(
     PlayerState state,
     PlayerNotifier notifier,
+    VoidCallback onNext,
+    VoidCallback onPrevious,
   ) {
     return {
       const SingleActivator(LogicalKeyboardKey.space): notifier.togglePlay,
@@ -582,6 +604,23 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           _seekToPercent(80, state, notifier),
       const SingleActivator(LogicalKeyboardKey.digit9): () =>
           _seekToPercent(90, state, notifier),
+
+      // Multimedia Keys
+      const SingleActivator(LogicalKeyboardKey.mediaPlay): notifier.togglePlay,
+      const SingleActivator(LogicalKeyboardKey.mediaPause): notifier.togglePlay,
+      const SingleActivator(LogicalKeyboardKey.mediaPlayPause):
+          notifier.togglePlay,
+      const SingleActivator(LogicalKeyboardKey.mediaTrackNext): onNext,
+      const SingleActivator(LogicalKeyboardKey.mediaTrackPrevious): onPrevious,
+      // Variant: Skip
+      const SingleActivator(LogicalKeyboardKey.mediaSkipForward): onNext,
+      const SingleActivator(LogicalKeyboardKey.mediaSkipBackward): onPrevious,
+      // Variant: Step
+      const SingleActivator(LogicalKeyboardKey.mediaStepForward): onNext,
+      const SingleActivator(LogicalKeyboardKey.mediaStepBackward): onPrevious,
+      // Variant: Navigate
+      const SingleActivator(LogicalKeyboardKey.navigateNext): onNext,
+      const SingleActivator(LogicalKeyboardKey.navigatePrevious): onPrevious,
     };
   }
 
