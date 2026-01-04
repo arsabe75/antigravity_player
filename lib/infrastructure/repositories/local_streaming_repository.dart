@@ -1,6 +1,9 @@
 import '../../domain/repositories/streaming_repository.dart';
 import '../services/local_streaming_proxy.dart';
 
+// Re-export LoadingProgress so it's available to consumers
+export '../services/local_streaming_proxy.dart' show LoadingProgress;
+
 class LocalStreamingRepository implements StreamingRepository {
   final LocalStreamingProxy _proxy;
 
@@ -42,5 +45,10 @@ class LocalStreamingRepository implements StreamingRepository {
   @override
   void preloadVideoStart(int fileId, int? totalSize, {bool isVisible = false}) {
     _proxy.preloadVideoStart(fileId, totalSize, isVisible: isVisible);
+  }
+
+  @override
+  LoadingProgress? getLoadingProgress(int fileId) {
+    return _proxy.getLoadingProgress(fileId);
   }
 }

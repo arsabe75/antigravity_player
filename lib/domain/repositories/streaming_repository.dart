@@ -1,3 +1,6 @@
+import '../../infrastructure/services/local_streaming_proxy.dart'
+    show LoadingProgress;
+
 abstract class StreamingRepository {
   /// Aborts a specific file request to stop streaming data
   void abortRequest(int fileId);
@@ -25,4 +28,9 @@ abstract class StreamingRepository {
   /// P1: Two-tier preloading when videos appear in list view
   /// isVisible=true: Priority 5, 2MB + MOOV | isVisible=false: Priority 1, 512KB only
   void preloadVideoStart(int fileId, int? totalSize, {bool isVisible = false});
+
+  /// Get current loading progress for a file.
+  /// Returns null if file is not being tracked.
+  /// UI can use this to show loading indicators, progress bars, and MOOV fetching status.
+  LoadingProgress? getLoadingProgress(int fileId);
 }

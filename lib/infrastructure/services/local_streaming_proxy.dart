@@ -42,6 +42,57 @@ class ProxyFileInfo {
   }
 }
 
+/// Progress information for video loading, exposed to UI.
+/// Allows the UI to show loading indicators and progress.
+class LoadingProgress {
+  /// File ID being loaded
+  final int fileId;
+
+  /// Total bytes of the file
+  final int totalBytes;
+
+  /// Bytes currently loaded/available
+  final int bytesLoaded;
+
+  /// Whether we are currently fetching the MOOV atom (metadata)
+  final bool isFetchingMoov;
+
+  /// Whether the file is fully downloaded
+  final bool isComplete;
+
+  /// Current download speed in bytes per second (0 if unknown)
+  final double bytesPerSecond;
+
+  /// Current load state
+  final FileLoadState loadState;
+
+  const LoadingProgress({
+    required this.fileId,
+    required this.totalBytes,
+    required this.bytesLoaded,
+    this.isFetchingMoov = false,
+    this.isComplete = false,
+    this.bytesPerSecond = 0,
+    this.loadState = FileLoadState.idle,
+  });
+
+  /// Progress as a value between 0.0 and 1.0
+  double get progress =>
+      totalBytes > 0 ? (bytesLoaded / totalBytes).clamp(0.0, 1.0) : 0.0;
+
+  /// Estimated time remaining in seconds (0 if unknown)
+  double get estimatedSecondsRemaining {
+    if (bytesPerSecond <= 0 || isComplete) return 0;
+    final remaining = totalBytes - bytesLoaded;
+    return remaining / bytesPerSecond;
+  }
+
+  @override
+  String toString() =>
+      'LoadingProgress(fileId: $fileId, progress: ${(progress * 100).toStringAsFixed(1)}%, '
+      'moov: $isFetchingMoov, speed: ${(bytesPerSecond / 1024).toStringAsFixed(0)}KB/s)';
+}
+
 /// Loading state machine for MOOV-first initialization.
 /// Ensures proper sequence: MOOV loaded first, then seek to saved position.
 enum FileLoadState {
@@ -538,7 +589,7 @@ class LocalStreamingProxy {
   final Map<int, Timer?> _seekDebounceTimers = {};
   final Map<int, int> _pendingSeekOffsets = {};
   static const int _seekDebounceMs =
-      300; // Delay before executing seek (increased from 150ms for stability)
+      200; // Reduced from 300ms (Week 2 optimization)
 
   // MOOV PRE-FETCH: Schedule moov download after initial buffering
   // This avoids the ping-pong effect for MP4s with moov at end
@@ -623,6 +674,31 @@ class LocalStreamingProxy {
   }
 
   int get port => _port;
+
+  /// Get current loading progress for a file.
+  /// Returns null if file is not being tracked.
+  /// UI can use this to show loading indicators and progress bars.
+  LoadingProgress? getLoadingProgress(int fileId) {
+    final cached = _filePaths[fileId];
+    if (cached == null) return null;
+
+    final metrics = _downloadMetrics[fileId];
+    final loadState = _fileLoadStates[fileId] ?? FileLoadState.idle;
+    final isFetchingMoov =
+        _moovDownloadStart.containsKey(fileId) &&
+        (_forcedMoovOffset.containsKey(fileId) ||
+            loadState == FileLoadState.loadingMoov);
+
+    return LoadingProgress(
+      fileId: fileId,
+      totalBytes: cached.totalSize,
+      bytesLoaded: cached.downloadedPrefixSize,
+      isFetchingMoov: isFetchingMoov,
+      isComplete: cached.isCompleted,
+      bytesPerSecond: metrics?.bytesPerSecond ?? 0,
+      loadState: loadState,
+    );
+  }
 
   // OPTIMIZATION 2: Track files we've started preloading from list view
   final Set<int> _listPreloadStarted = {};
