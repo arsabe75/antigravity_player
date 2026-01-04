@@ -297,8 +297,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           !next.isPlaying &&
           next.duration > Duration.zero &&
           next.position >= next.duration - const Duration(milliseconds: 500)) {
-        // Video finished, play next
+        // Video finished
         if (playlistNotifier.next()) {
+          // There's a next video (or looping back to start with RepeatMode.all)
           final newItem = ref.read(playlistProvider).currentItem;
           if (newItem != null) {
             notifier.loadVideo(
@@ -307,6 +308,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               startAtZero: ref.read(playlistProvider).startFromBeginning,
             );
           }
+        } else {
+          // No next video available:
+          // - Empty playlist (single video or Telegram video)
+          // - Last video in playlist and RepeatMode is not 'all'
+          // Exit the player
+          _handleBack();
         }
       }
 

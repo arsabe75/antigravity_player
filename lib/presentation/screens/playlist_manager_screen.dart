@@ -23,6 +23,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
   String? _currentFilePath;
   bool _isDirty = false;
   bool _startFromBeginning = false;
+  RepeatMode _repeatMode = RepeatMode.none;
 
   @override
   void initState() {
@@ -32,6 +33,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
     if (playlist.items.isNotEmpty) {
       _items = List.from(playlist.items);
       _currentFilePath = playlist.sourcePath;
+      _repeatMode = playlist.repeatMode;
     }
   }
 
@@ -249,13 +251,14 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
     if (_items.isEmpty) return;
 
     // Update global playlist state
-    ref
-        .read(playlistProvider.notifier)
-        .setPlaylist(
-          _items,
-          sourcePath: _currentFilePath,
-          startFromBeginning: _startFromBeginning,
-        );
+    final notifier = ref.read(playlistProvider.notifier);
+    notifier.setPlaylist(
+      _items,
+      sourcePath: _currentFilePath,
+      startFromBeginning: _startFromBeginning,
+    );
+    // Set repeat mode
+    notifier.setRepeatMode(_repeatMode);
 
     // Navigate to player
     PlayerRoute($extra: PlayerRouteExtra(url: _items.first.path)).go(context);
@@ -382,6 +385,41 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
                     label: const Text('Add'),
                   ),
                   const SizedBox(width: 16),
+                  // Loop playlist button
+                  Container(
+                    height: 48,
+                    decoration: BoxDecoration(
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(24),
+                    ),
+                    child: IconButton(
+                      onPressed: () {
+                        setState(() {
+                          _repeatMode = switch (_repeatMode) {
+                            RepeatMode.none => RepeatMode.all,
+                            RepeatMode.all => RepeatMode.one,
+                            RepeatMode.one => RepeatMode.none,
+                          };
+                        });
+                      },
+                      icon: Icon(
+                        _repeatMode == RepeatMode.one
+                            ? LucideIcons.repeat1
+                            : LucideIcons.repeat,
+                        color: _repeatMode != RepeatMode.none
+                            ? Theme.of(context).colorScheme.primary
+                            : null,
+                      ),
+                      tooltip: switch (_repeatMode) {
+                        RepeatMode.none => 'Repeat: Off',
+                        RepeatMode.all => 'Repeat: All',
+                        RepeatMode.one => 'Repeat: One',
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   // Restart checkbox
                   Container(
                     height: 48,
