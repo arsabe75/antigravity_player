@@ -589,7 +589,7 @@ class LocalStreamingProxy {
   final Map<int, Timer?> _seekDebounceTimers = {};
   final Map<int, int> _pendingSeekOffsets = {};
   static const int _seekDebounceMs =
-      200; // Reduced from 300ms (Week 2 optimization)
+      150; // Reduced from 200ms for faster response
 
   // MOOV PRE-FETCH: Schedule moov download after initial buffering
   // This avoids the ping-pong effect for MP4s with moov at end
