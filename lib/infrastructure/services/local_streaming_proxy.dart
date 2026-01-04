@@ -700,56 +700,13 @@ class LocalStreamingProxy {
     );
   }
 
-  // OPTIMIZATION 2: Track files we've started preloading from list view
-  final Set<int> _listPreloadStarted = {};
-  int _activePreloads = 0;
-  static const int _maxConcurrentPreloads = 3;
-
-  /// P1: Two-tier preloading when videos appear in list view
-  /// - isVisible=true: Priority 5, first 2MB (for visible videos)
-  /// - isVisible=false: Priority 1, first 512KB only (for next-in-list)
-  /// Limited to 3 concurrent preloads to avoid TDLib conflicts
+  // DISABLED: TWO-TIER PRELOAD removed.
+  // It could delay video start when TDLib needed to cancel active preloads.
+  // The MOOV pre-detection and post-seek preload features provide similar
+  // benefits without the TDLib conflict issue.
+  // ignore: unused_element
   void preloadVideoStart(int fileId, int? totalSize, {bool isVisible = false}) {
-    // Only preload once per file
-    if (_listPreloadStarted.contains(fileId)) return;
-
-    // Limit concurrent preloads to prevent TDLib download conflicts
-    if (_activePreloads >= _maxConcurrentPreloads) {
-      return;
-    }
-
-    // Skip if already cached or downloading
-    final cached = _filePaths[fileId];
-    final minSize = isVisible ? 2 * 1024 * 1024 : 512 * 1024;
-    if (cached != null &&
-        (cached.downloadedPrefixSize > minSize || cached.isCompleted)) {
-      return;
-    }
-
-    _listPreloadStarted.add(fileId);
-    _activePreloads++;
-
-    final priority = isVisible ? 5 : 1;
-    final limit = isVisible ? 2 * 1024 * 1024 : 512 * 1024;
-
-    debugPrint(
-      'Proxy: TWO-TIER PRELOAD for $fileId (visible: $isVisible, prio: $priority, active: $_activePreloads/$_maxConcurrentPreloads)',
-    );
-
-    // Start background download
-    TelegramService().send({
-      '@type': 'downloadFile',
-      'file_id': fileId,
-      'priority': priority,
-      'offset': 0,
-      'limit': limit,
-      'synchronous': false,
-    });
-
-    // Reduce active count after a delay (preload is fire-and-forget)
-    Future.delayed(const Duration(seconds: 3), () {
-      if (_activePreloads > 0) _activePreloads--;
-    });
+    // No-op: preloading disabled
   }
 
   void abortRequest(int fileId) {
@@ -796,7 +753,6 @@ class LocalStreamingProxy {
     _downloadStartTime.clear();
     _downloadMetrics.clear();
     _sampleTableCache.clear();
-    _listPreloadStarted.clear();
     _lastSeekTime.clear();
     _lastServedOffset.clear();
     _moovPreloadStarted.clear();
@@ -3304,9 +3260,9 @@ class LocalStreamingProxy {
     try {
       // Platform-specific documents directory
       if (Platform.isWindows) {
-        return Platform.environment['USERPROFILE']! + r'\Documents';
+        return '${Platform.environment['USERPROFILE']!}\\Documents';
       } else if (Platform.isMacOS || Platform.isLinux) {
-        return Platform.environment['HOME']! + '/Documents';
+        return '${Platform.environment['HOME']!}/Documents';
       }
       return null;
     } catch (e) {
