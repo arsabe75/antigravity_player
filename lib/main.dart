@@ -41,6 +41,7 @@ void main() async {
       AppConstants.defaultWindowWidth,
       AppConstants.defaultWindowHeight,
     ),
+    minimumSize: const Size(800, 600),
     center: true,
     backgroundColor: Colors.transparent,
     skipTaskbar: false,
