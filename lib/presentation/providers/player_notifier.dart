@@ -256,6 +256,34 @@ class PlayerNotifier extends _$PlayerNotifier {
     _moovCheckTimer = null;
   }
 
+  /// Clears progress for a finished video using captured values.
+  ///
+  /// This is called BEFORE state is reset to ensure we use the correct
+  /// position/duration values from the completed video, not from the next video.
+  /// This fixes the race condition where _savePosition() would fail to clear
+  /// progress because state.duration was already reset to zero by loadVideo().
+  Future<void> _clearProgressForFinishedVideo({
+    required String storageKey,
+    required Duration position,
+    required Duration duration,
+  }) async {
+    try {
+      // Check if video has reached the end (within 500ms of duration)
+      final isAtEnd =
+          duration > Duration.zero &&
+          position >= duration - const Duration(milliseconds: 500);
+
+      if (isAtEnd) {
+        await _storageService.clearPosition(storageKey);
+        debugPrint(
+          'PlayerNotifier: Cleared progress for finished video: $storageKey',
+        );
+      }
+    } catch (e) {
+      debugPrint('PlayerNotifier: Error clearing progress: $e');
+    }
+  }
+
   /// Load and play a video.
   ///
   /// For Telegram videos, provide [telegramChatId], [telegramMessageId], and
@@ -335,6 +363,28 @@ class PlayerNotifier extends _$PlayerNotifier {
     _abortCurrentProxyRequest();
 
     try {
+      // CRITICAL FIX: Capture previous video data BEFORE resetting state.
+      // This ensures we can clear progress for finished videos using the correct
+      // position/duration values, not the reset values from the new video.
+      final previousPath = state.currentVideoPath;
+      final previousPosition = state.position;
+      final previousDuration = state.duration;
+
+      // Get storage key for previous video using current Telegram context
+      // (before it gets overwritten by new video's context)
+      final previousStorageKey = previousPath != null
+          ? _getStableStorageKey(previousPath)
+          : null;
+
+      // Clear progress for the previous video if it finished
+      if (previousStorageKey != null) {
+        await _clearProgressForFinishedVideo(
+          storageKey: previousStorageKey,
+          position: previousPosition,
+          duration: previousDuration,
+        );
+      }
+
       state = state.copyWith(
         currentVideoPath: path,
         currentVideoTitle: title,
