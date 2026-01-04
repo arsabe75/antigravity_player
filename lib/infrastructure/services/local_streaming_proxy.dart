@@ -61,6 +61,19 @@ enum FileLoadState {
   playing,
 }
 
+/// Position of MOOV atom in the MP4 file.
+/// Used for optimizing streaming strategy.
+enum MoovPosition {
+  /// MOOV at start - optimized for streaming
+  start,
+
+  /// MOOV at end - requires additional download time
+  end,
+
+  /// Position unknown (not yet detected)
+  unknown,
+}
+
 /// Metrics for tracking download speed per file.
 /// Used for adaptive buffer decisions inspired by Telegram Android's approach.
 class _DownloadMetrics {
@@ -485,7 +498,24 @@ class LocalStreamingProxy {
   // P1 FIX: MOOV DOWNLOAD LOCK - Track active MOOV downloads to prevent cancellation
   // When MOOV is downloading, block requests for low offsets (< 50MB)
   final Map<int, DateTime> _moovDownloadStart = {};
-  static const int _moovDownloadTimeoutMs = 15000; // Allow up to 15s for MOOV
+  // Base timeout - actual timeout scales with file size via _calculateMoovTimeout()
+  static const int _moovDownloadTimeoutMsBase = 15000;
+
+  /// Calculate dynamic MOOV download timeout based on file size.
+  /// Larger files have larger MOOV atoms and may need more time.
+  /// - Files < 500MB: 15s (base)
+  /// - Files 500MB - 2GB: 20s
+  /// - Files > 2GB: 30s
+  int _calculateMoovTimeout(int fileSize) {
+    if (fileSize > 2 * 1024 * 1024 * 1024) {
+      // > 2GB
+      return 30000;
+    } else if (fileSize > 500 * 1024 * 1024) {
+      // > 500MB
+      return 20000;
+    }
+    return _moovDownloadTimeoutMsBase; // 15s default
+  }
 
   // P2 FIX: HIGH-PRIORITY DOWNLOAD LOCK
   // After starting a priority 32 download at offset X, wait until it accumulates
@@ -520,6 +550,10 @@ class LocalStreamingProxy {
   // MOOV-AT-END DETECTION: Track files where moov atom is at the end
   // These files are NOT optimized for streaming and require extra loading time
   final Map<int, bool> _isMoovAtEnd = {};
+
+  // PRE-DETECTION: Cache of detected MOOV position
+  // Allows early strategy decisions without waiting for player requests
+  final Map<int, MoovPosition> _moovPositionCache = {};
 
   // STALL DETECTION: Track last download progress to detect truly stalled downloads
   // Used to avoid ping-pong downloads between multiple concurrent requests
@@ -682,6 +716,7 @@ class LocalStreamingProxy {
     _moovUnblockTime.clear();
     _moovStabilizeCompleted.clear();
     _isMoovAtEnd.clear();
+    _moovPositionCache.clear();
     _downloadStartTime.clear();
     _downloadMetrics.clear();
     _sampleTableCache.clear();
@@ -749,6 +784,8 @@ class LocalStreamingProxy {
     _streamingCaches[fileId]?.clear();
     _streamingCaches.remove(fileId);
     _forcedMoovOffset.remove(fileId);
+    _moovPositionCache.remove(fileId);
+    _isMoovAtEnd.remove(fileId);
   }
 
   /// P1 FIX: Signal that user explicitly initiated a seek.
@@ -1419,6 +1456,13 @@ class LocalStreamingProxy {
             // which causes TDLib crash if we request it.
             if (remainingToSend > 0) {
               _startDownloadAtOffset(fileId, currentReadOffset);
+
+              // POST-SEEK PRELOAD: Trigger proactive preload if we recently seeked
+              final lastSeek = _lastSeekTime[fileId];
+              if (lastSeek != null &&
+                  DateTime.now().difference(lastSeek).inMilliseconds < 2000) {
+                _triggerPostSeekPreload(fileId, currentReadOffset);
+              }
             }
 
             // PRIMARY TRACKING FIX:
@@ -1807,6 +1851,16 @@ class LocalStreamingProxy {
         // OPTIMIZATION 1: Pre-load moov atom for large files
         if (totalSize > 50 * 1024 * 1024 && !isCompleted) {
           _preloadMoovAtom(fileId, totalSize);
+        }
+
+        // PRE-DETECT MOOV POSITION for large files
+        // Schedule detection after some data is available
+        if (totalSize > 10 * 1024 * 1024 && !isCompleted) {
+          Future.delayed(const Duration(milliseconds: 500), () {
+            if (!_abortedRequests.contains(fileId)) {
+              _detectMoovPosition(fileId, totalSize);
+            }
+          });
         }
 
         // If path is empty, trigger download to allocate the file
@@ -2257,10 +2311,12 @@ class LocalStreamingProxy {
     // P1 FIX: MOOV DOWNLOAD PROTECTION
     // Prevent low-offset requests from canceling MOOV download.
     // When MOOV download is in progress, block requests for offsets < 50MB.
+    // Timeout is dynamic based on file size (larger files = longer timeout)
     final moovLockStart = _moovDownloadStart[fileId];
+    final moovTimeout = _calculateMoovTimeout(totalSize);
     final isMoovLocked =
         moovLockStart != null &&
-        now.difference(moovLockStart).inMilliseconds < _moovDownloadTimeoutMs;
+        now.difference(moovLockStart).inMilliseconds < moovTimeout;
 
     if (isMoovDownload) {
       // Mark MOOV download start time
@@ -2882,6 +2938,141 @@ class LocalStreamingProxy {
   // NOTE: Read-ahead feature was removed because TDLib cancels ongoing downloads
   // when a new downloadFile call is made for the same file_id with a different offset.
   // This limitation makes proactive read-ahead counterproductive.
+
+  // ============================================================
+  // MOOV PRE-DETECTION AND POST-SEEK PRELOAD
+  // ============================================================
+
+  /// Pre-detects the position of the MOOV atom by analyzing the first bytes of the file.
+  /// Returns immediately if already cached.
+  /// This detection does NOT start downloads - only analyzes already available data.
+  Future<MoovPosition> _detectMoovPosition(int fileId, int totalSize) async {
+    // Check cache first
+    if (_moovPositionCache.containsKey(fileId)) {
+      return _moovPositionCache[fileId]!;
+    }
+
+    final cached = _filePaths[fileId];
+    if (cached == null || cached.path.isEmpty) {
+      return MoovPosition.unknown;
+    }
+
+    try {
+      final file = File(cached.path);
+      if (!await file.exists()) {
+        return MoovPosition.unknown;
+      }
+
+      final raf = await file.open(mode: FileMode.read);
+      try {
+        // MP4 files start with ftyp or moov atom
+        // Read first 32 bytes to check atom header
+        final header = await raf.read(32);
+        if (header.length < 8) {
+          return MoovPosition.unknown;
+        }
+
+        // Check for 'ftyp' or 'moov' in first atom
+        final atomType = String.fromCharCodes(header.sublist(4, 8));
+
+        if (atomType == 'moov') {
+          _moovPositionCache[fileId] = MoovPosition.start;
+          debugPrint('Proxy: MOOV PRE-DETECT - File $fileId has MOOV at START');
+          return MoovPosition.start;
+        }
+
+        // If ftyp, check next atom (usually within first 100 bytes)
+        if (atomType == 'ftyp') {
+          // Parse ftyp size to find next atom
+          final ftypSize = _readMoovUint32BE(header, 0);
+          if (ftypSize > 0 &&
+              ftypSize < 1000 &&
+              cached.downloadedPrefixSize > ftypSize + 8) {
+            await raf.setPosition(ftypSize);
+            final nextHeader = await raf.read(8);
+            if (nextHeader.length >= 8) {
+              final nextAtomType = String.fromCharCodes(
+                nextHeader.sublist(4, 8),
+              );
+              if (nextAtomType == 'moov') {
+                _moovPositionCache[fileId] = MoovPosition.start;
+                debugPrint(
+                  'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at START (after ftyp)',
+                );
+                return MoovPosition.start;
+              }
+            }
+          }
+        }
+
+        // If we have enough prefix but no moov found near start, assume end
+        if (cached.downloadedPrefixSize > 5 * 1024 * 1024) {
+          _moovPositionCache[fileId] = MoovPosition.end;
+          _isMoovAtEnd[fileId] = true; // Sync with existing flag
+          debugPrint(
+            'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at END (inferred)',
+          );
+          return MoovPosition.end;
+        }
+      } finally {
+        await raf.close();
+      }
+    } catch (e) {
+      debugPrint('Proxy: MOOV PRE-DETECT error for $fileId: $e');
+    }
+
+    return MoovPosition.unknown;
+  }
+
+  /// Read uint32 big-endian from byte list
+  int _readMoovUint32BE(List<int> data, int offset) {
+    if (data.length < offset + 4) return 0;
+    return (data[offset] << 24) |
+        (data[offset + 1] << 16) |
+        (data[offset + 2] << 8) |
+        data[offset + 3];
+  }
+
+  /// Triggers proactive preload after a seek has completed.
+  /// Called when data is available at the new position.
+  void _triggerPostSeekPreload(int fileId, int currentOffset) {
+    final cached = _filePaths[fileId];
+    if (cached == null || cached.isCompleted) return;
+
+    // Only preload if we're in active playback (not during initial load)
+    final primaryOffset = _primaryPlaybackOffset[fileId];
+    if (primaryOffset == null) return;
+
+    // Only if currentOffset is close to primary (seek just completed)
+    if ((currentOffset - primaryOffset).abs() > 5 * 1024 * 1024) return;
+
+    // Calculate target offset: 1MB ahead of current position
+    const preloadAheadBytes = 1024 * 1024; // 1MB
+    final targetOffset = currentOffset + preloadAheadBytes;
+
+    // Don't preload if we already have data there
+    if (cached.availableBytesFrom(targetOffset) > 0) return;
+
+    // Don't preload if we're near end of file
+    if (cached.totalSize > 0 &&
+        targetOffset >= cached.totalSize - 1024 * 1024) {
+      return;
+    }
+
+    debugPrint(
+      'Proxy: POST-SEEK PRELOAD for $fileId: ${currentOffset ~/ 1024}KB -> ${targetOffset ~/ 1024}KB',
+    );
+
+    // Trigger preload with high but not critical priority
+    TelegramService().send({
+      '@type': 'downloadFile',
+      'file_id': fileId,
+      'priority': 20, // High but below playback (32)
+      'offset': targetOffset,
+      'limit': preloadAheadBytes,
+      'synchronous': false,
+    });
+  }
 
   // ============================================================
   // SEEK PREVIEW PRELOADING
