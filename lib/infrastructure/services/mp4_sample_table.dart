@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 
@@ -607,6 +608,77 @@ class Mp4SampleTable {
       if (a[i] != b[i]) return false;
     }
     return true;
+  }
+
+  // ============================================================
+  // SERIALIZATION FOR DISK CACHE
+  // ============================================================
+
+  /// Serialize to JSON for disk caching.
+  /// Uses compact format: samples as list of [timeMs, byteOffset, size].
+  Map<String, dynamic> toJson() {
+    return {
+      'v': 1, // version for future compatibility
+      'samples': samples.map((s) => [s.timeMs, s.byteOffset, s.size]).toList(),
+      'keyframes': keyframeSampleIndices,
+      'durationMs': totalDurationMs,
+      'totalBytes': totalBytes,
+      'timescale': timescale,
+    };
+  }
+
+  /// Deserialize from JSON.
+  /// Returns null if data is invalid or incompatible version.
+  static Mp4SampleTable? fromJson(Map<String, dynamic> json) {
+    try {
+      final version = json['v'] as int?;
+      if (version != 1) return null;
+
+      final samplesData = json['samples'] as List<dynamic>;
+      final samples = samplesData.map((s) {
+        final arr = s as List<dynamic>;
+        return SampleEntry(
+          timeMs: arr[0] as int,
+          byteOffset: arr[1] as int,
+          size: arr[2] as int,
+        );
+      }).toList();
+
+      return Mp4SampleTable._(
+        samples: samples,
+        keyframeSampleIndices: (json['keyframes'] as List<dynamic>).cast<int>(),
+        totalDurationMs: json['durationMs'] as int,
+        totalBytes: json['totalBytes'] as int,
+        timescale: json['timescale'] as int,
+      );
+    } catch (e) {
+      debugPrint('Mp4SampleTable: Failed to parse from JSON: $e');
+      return null;
+    }
+  }
+
+  /// Save to file
+  Future<void> saveToFile(String path) async {
+    try {
+      final file = File(path);
+      await file.parent.create(recursive: true);
+      await file.writeAsString(jsonEncode(toJson()));
+    } catch (e) {
+      debugPrint('Mp4SampleTable: Failed to save to $path: $e');
+    }
+  }
+
+  /// Load from file
+  static Future<Mp4SampleTable?> loadFromFile(String path) async {
+    try {
+      final file = File(path);
+      if (!await file.exists()) return null;
+      final content = await file.readAsString();
+      return fromJson(jsonDecode(content) as Map<String, dynamic>);
+    } catch (e) {
+      debugPrint('Mp4SampleTable: Failed to load from $path: $e');
+      return null;
+    }
   }
 }
 

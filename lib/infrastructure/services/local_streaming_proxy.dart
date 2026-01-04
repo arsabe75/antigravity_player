@@ -3227,6 +3227,24 @@ class LocalStreamingProxy {
       return;
     }
 
+    // Generate cache key based on fileId and fileSize for uniqueness
+    final cacheKey = '${fileId}_${fileInfo.totalSize}';
+    final cachePath = await _getSampleTableCachePath(cacheKey);
+
+    // Try to load from disk cache first
+    if (cachePath != null) {
+      final cached = await Mp4SampleTable.loadFromFile(cachePath);
+      if (cached != null) {
+        _sampleTableCache[fileId] = cached;
+        debugPrint(
+          'Proxy: Loaded sample table from cache for $fileId: '
+          '${cached.samples.length} samples, ${cached.keyframeSampleIndices.length} keyframes',
+        );
+        return;
+      }
+    }
+
+    // Parse from file
     try {
       final file = File(fileInfo.path);
       if (!await file.exists()) {
@@ -3240,12 +3258,19 @@ class LocalStreamingProxy {
           raf,
           fileInfo.totalSize,
         );
-        if (_sampleTableCache[fileId] != null) {
+        final parsed = _sampleTableCache[fileId];
+        if (parsed != null) {
           debugPrint(
             'Proxy: Parsed MP4 sample table for $fileId: '
-            '${_sampleTableCache[fileId]!.samples.length} samples, '
-            '${_sampleTableCache[fileId]!.keyframeSampleIndices.length} keyframes',
+            '${parsed.samples.length} samples, '
+            '${parsed.keyframeSampleIndices.length} keyframes',
           );
+
+          // Save to disk cache for future use
+          if (cachePath != null) {
+            await parsed.saveToFile(cachePath);
+            debugPrint('Proxy: Saved sample table to cache for $fileId');
+          }
         }
       } finally {
         await raf.close();
@@ -3253,6 +3278,39 @@ class LocalStreamingProxy {
     } catch (e) {
       debugPrint('Proxy: Failed to parse sample table for $fileId: $e');
       _sampleTableCache[fileId] = null;
+    }
+  }
+
+  /// Get the cache directory path for sample tables
+  String? _sampleTableCacheDir;
+
+  Future<String?> _getSampleTableCachePath(String cacheKey) async {
+    try {
+      if (_sampleTableCacheDir == null) {
+        // Use the same base directory as TDLib
+        final docsDir = await _getDocumentsDirectory();
+        if (docsDir == null) return null;
+        _sampleTableCacheDir = '$docsDir/antigravity_tdlib/sample_table_cache';
+        await Directory(_sampleTableCacheDir!).create(recursive: true);
+      }
+      return '$_sampleTableCacheDir/$cacheKey.json';
+    } catch (e) {
+      debugPrint('Proxy: Failed to get cache path: $e');
+      return null;
+    }
+  }
+
+  Future<String?> _getDocumentsDirectory() async {
+    try {
+      // Platform-specific documents directory
+      if (Platform.isWindows) {
+        return Platform.environment['USERPROFILE']! + r'\Documents';
+      } else if (Platform.isMacOS || Platform.isLinux) {
+        return Platform.environment['HOME']! + '/Documents';
+      }
+      return null;
+    } catch (e) {
+      return null;
     }
   }
 
