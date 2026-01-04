@@ -33,6 +33,7 @@ class PlayerBottomBar extends StatelessWidget {
   final VoidCallback onToggleAlwaysOnTop;
   final VoidCallback onTogglePlaylist;
   final VoidCallback? onToggleTracks;
+  final VoidCallback onStop;
 
   const PlayerBottomBar({
     super.key,
@@ -59,6 +60,7 @@ class PlayerBottomBar extends StatelessWidget {
     required this.onToggleAlwaysOnTop,
     required this.onTogglePlaylist,
     this.onToggleTracks,
+    required this.onStop,
   });
 
   String _formatDuration(Duration duration) {
@@ -97,6 +99,12 @@ class PlayerBottomBar extends StatelessWidget {
             // Controls Row
             Row(
               children: [
+                // Stop button
+                IconButton(
+                  icon: const Icon(LucideIcons.square, color: Colors.white),
+                  onPressed: onStop,
+                  tooltip: 'Stop',
+                ),
                 // Previous button
                 if (!isPlaylistEmpty)
                   IconButton(

@@ -445,6 +445,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
                       // Bottom Bar
                       PlayerBottomBar(
+                        onStop: _handleBack,
                         isPlaying: state.isPlaying,
                         position: state.position,
                         duration: state.duration,
