@@ -244,6 +244,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       windowManager.setFullScreen(false);
     } else {
       windowManager.setFullScreen(true);
+      // When entering fullscreen, restart the hide timer so controls and cursor
+      // will hide after the normal delay
+      _startHideTimer();
     }
   }
 
