@@ -220,8 +220,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     // Trigger refresh of recent videos BEFORE we navigate away
     triggerRecentVideosRefresh(ref);
 
-    await Future.delayed(AppConstants.disposeDelay);
-    await ref.read(playerProvider.notifier).stop();
+    // Navigate FIRST to unmount Video widget and avoid OpenGL race condition
     if (mounted) {
       if (context.canPop()) {
         context.pop();
@@ -229,6 +228,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         const HomeRoute().go(context);
       }
     }
+
+    // Allow frame to render without Video widget
+    await Future.delayed(AppConstants.disposeDelay);
+
+    // Now safe to dispose player resources
+    await ref.read(playerProvider.notifier).stop();
   }
 
   void _handleToggleFullscreen() {

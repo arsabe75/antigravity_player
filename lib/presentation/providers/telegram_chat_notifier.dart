@@ -36,9 +36,11 @@ class TelegramChat extends _$TelegramChat {
         debugPrint(
           'TelegramChat: TDLib error: ${update['code']} - ${update['message']}',
         );
+        // Mark hasMore as false to prevent infinite retry loops on errors
         state = state.copyWith(
           isLoading: false,
           isLoadingMore: false,
+          hasMore: false,
           error: update['message'] as String?,
         );
         return;
@@ -253,16 +255,25 @@ class TelegramChat extends _$TelegramChat {
     debugPrint('TelegramChat: Loading more messages...');
     state = state.copyWith(isLoadingMore: true);
 
-    final lastMessageId = state.messages.last['id'];
+    final lastMessageId = state.messages.last['id'] as int;
 
     if (messageThreadId != null) {
+      // For forum topics, use searchChatMessages with from_message_id for pagination
+      // This matches the same API used in loadMessages()
       _service.send({
-        '@type': 'getMessageThreadHistory',
+        '@type': 'searchChatMessages',
         'chat_id': chatId,
-        'message_id': messageThreadId,
+        'topic_id': {
+          '@type': 'messageTopicForum',
+          'forum_topic_id': messageThreadId,
+        },
+        'query': '',
+        'sender_id': null,
         'from_message_id': lastMessageId,
         'offset': 0,
         'limit': 100,
+        'filter': null,
+        '@extra': 'topic_$messageThreadId',
       });
     } else {
       _service.send({

@@ -50,6 +50,10 @@ class ChatIcon extends ConsumerWidget {
               width: size,
               height: size,
               fit: BoxFit.cover,
+              gaplessPlayback: true,
+              errorBuilder: (context, error, stackTrace) {
+                return Icon(fallbackIcon, size: iconSize);
+              },
             ),
           );
         }
@@ -91,6 +95,10 @@ class ChatIcon extends ConsumerWidget {
                     width: size,
                     height: size,
                     fit: BoxFit.cover,
+                    gaplessPlayback: true,
+                    errorBuilder: (context, error, stackTrace) {
+                      return const SizedBox.shrink();
+                    },
                   ),
               ],
             ),
