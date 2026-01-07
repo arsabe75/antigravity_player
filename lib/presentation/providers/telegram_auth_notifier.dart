@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
@@ -8,12 +9,17 @@ import 'package:path/path.dart' as p;
 
 import 'state/telegram_auth_state.dart';
 export 'state/telegram_auth_state.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../../infrastructure/services/recent_videos_service.dart';
+import '../../infrastructure/services/playback_storage_service.dart';
+import '../../infrastructure/services/telegram_cache_service.dart';
 
 part 'telegram_auth_notifier.g.dart';
 
 @Riverpod(keepAlive: true)
 class TelegramAuth extends _$TelegramAuth {
   late final TelegramService _service;
+  StreamSubscription<Map<String, dynamic>>? _subscription;
 
   // Read from environment variables
   late final int _apiId =
@@ -28,17 +34,21 @@ class TelegramAuth extends _$TelegramAuth {
     _service = TelegramService();
     // Defer initialization to avoid modifying provider during build
     Future.microtask(() => _init());
+
+    // Ensure we clean up the subscription when the notifier is disposed
+    ref.onDispose(() {
+      _subscription?.cancel();
+    });
+
     return TelegramAuthState();
   }
 
   void _init() {
-    _service.initialize();
-    final sub = _service.updates.listen(_handleUpdate);
+    // Cancel existing subscription if re-initializing (e.g. after logout)
+    _subscription?.cancel();
 
-    // Ensure we clean up the subscription when the notifier is disposed
-    ref.onDispose(() {
-      sub.cancel();
-    });
+    _service.initialize();
+    _subscription = _service.updates.listen(_handleUpdate);
 
     // Request current auth state
     _service.send({'@type': 'getAuthorizationState'});
@@ -121,6 +131,17 @@ class TelegramAuth extends _$TelegramAuth {
 
       case 'authorizationStateClosed':
         state = state.copyWith(list: AuthState.closed, isLoading: false);
+
+        // When TDLib closes (after logout), we need to reset the service
+        // and restart the auth flow for the next user.
+        debugPrint('TelegramAuthNotifier: Auth closed. Resetting service...');
+        _service.reset();
+
+        // Small delay to ensure cleanup
+        await Future.delayed(const Duration(milliseconds: 500));
+
+        // Restart flow
+        _init();
         break;
     }
   }
@@ -147,7 +168,28 @@ class TelegramAuth extends _$TelegramAuth {
     });
   }
 
-  void logout() {
+  Future<void> logout() async {
+    debugPrint('TelegramAuthNotifier: Logging out and clearing data...');
+
+    try {
+      // 1. Clear Favorites and Settings
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('telegram_favorites');
+
+      // 2. Clear Recent Videos (Telegram only)
+      await RecentVideosService().clearTelegramVideos();
+
+      // 3. Clear Playback Progress
+      await PlaybackStorageService().clearAllPositions();
+
+      // 4. Clear Cache (Force all, including avatars/headers)
+      // Note: This uses optimizeStorage which deletes files.
+      await TelegramCacheService().clearCache(forceAll: true);
+    } catch (e) {
+      debugPrint('TelegramAuthNotifier: Error during cleanup: $e');
+    }
+
+    // 5. Send logout command to TDLib
     _service.send({'@type': 'logOut'});
   }
 }
