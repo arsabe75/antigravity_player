@@ -540,33 +540,9 @@ class LocalStreamingProxy {
   final Map<int, int> _lastExplicitSeekOffset = {};
   final Map<int, DateTime> _lastExplicitSeekTime = {};
 
-  // MOOV STABILIZE: Track when moov requests should be allowed (after delay)
-  final Map<int, DateTime> _moovUnblockTime = {};
-
-  // MOOV STABILIZE: Track files that have completed stabilization (don't re-trigger)
-  final Set<int> _moovStabilizeCompleted = {};
-
-  // P1 FIX: MOOV DOWNLOAD LOCK - Track active MOOV downloads to prevent cancellation
-  // When MOOV is downloading, block requests for low offsets (< 50MB)
-  final Map<int, DateTime> _moovDownloadStart = {};
-  // Base timeout - actual timeout scales with file size via _calculateMoovTimeout()
-  static const int _moovDownloadTimeoutMsBase = 15000;
-
-  /// Calculate dynamic MOOV download timeout based on file size.
-  /// Larger files have larger MOOV atoms and may need more time.
-  /// - Files < 500MB: 15s (base)
-  /// - Files 500MB - 2GB: 20s
-  /// - Files > 2GB: 30s
-  int _calculateMoovTimeout(int fileSize) {
-    if (fileSize > 2 * 1024 * 1024 * 1024) {
-      // > 2GB
-      return 30000;
-    } else if (fileSize > 500 * 1024 * 1024) {
-      // > 500MB
-      return 20000;
-    }
-    return _moovDownloadTimeoutMsBase; // 15s default
-  }
+  // PHASE2: MOOV state tracking simplified - only track moov-at-end detection
+  // Removed: _moovUnblockTime, _moovStabilizeCompleted, _moovDownloadStart
+  // These were causing blocking issues and adding unnecessary complexity
 
   // P2 FIX: HIGH-PRIORITY DOWNLOAD LOCK
   // After starting a priority 32 download at offset X, wait until it accumulates
@@ -685,9 +661,8 @@ class LocalStreamingProxy {
     final metrics = _downloadMetrics[fileId];
     final loadState = _fileLoadStates[fileId] ?? FileLoadState.idle;
     final isFetchingMoov =
-        _moovDownloadStart.containsKey(fileId) &&
-        (_forcedMoovOffset.containsKey(fileId) ||
-            loadState == FileLoadState.loadingMoov);
+        _forcedMoovOffset.containsKey(fileId) ||
+        loadState == FileLoadState.loadingMoov;
 
     return LoadingProgress(
       fileId: fileId,
@@ -746,8 +721,6 @@ class LocalStreamingProxy {
     _primaryPlaybackOffset.clear();
 
     // Clear moov-related state to prevent stale behavior after cache clear
-    _moovUnblockTime.clear();
-    _moovStabilizeCompleted.clear();
     _isMoovAtEnd.clear();
     _moovPositionCache.clear();
     _downloadStartTime.clear();
@@ -2140,118 +2113,16 @@ class LocalStreamingProxy {
         }
       }
 
+      // PHASE2: SIMPLIFIED MOOV DETECTION
+      // Only mark file as moov-at-end for informational purposes
+      // No blocking or stabilization - let TDLib and player handle naturally
       final isMoovAtomRequest = mightBeMoovRequest && !isConfirmedVideoData;
 
-      // Mark file as not optimized for streaming if moov is at the end
       if (isMoovAtomRequest && !_isMoovAtEnd.containsKey(fileId)) {
         _isMoovAtEnd[fileId] = true;
         debugPrint(
           'Proxy: File $fileId has moov atom at end (not optimized for streaming)',
         );
-      }
-
-      // DISABLED: This was blocking moov downloads and preventing playback start.
-      // The player NEEDS the moov atom to display video metadata and start playback.
-      // Blocking moov requests causes a deadlock: player waits for moov, we wait for data.
-      // final currentData = cached?.downloadedPrefixSize ?? 0;
-      // final downloadStart = _downloadStartTime[fileId];
-      // final isEarlyPhase = downloadStart != null &&
-      //     DateTime.now().difference(downloadStart).inSeconds < 5;
-      // if (isMoovAtomRequest && isEarlyPhase &&
-      //     currentData < _getAdaptiveMoovThreshold(fileId)) {
-      //   return; // This was causing videos to never load!
-      // }
-
-      // PARTSMANAGER FIX: When there's cached data at start and we're requesting moov,
-      // TDLib can crash if the offset change is too rapid. Add a small delay.
-      if (_isMoovAtEnd[fileId] == true) {
-        final cachedPrefix = cached?.downloadedPrefixSize ?? 0;
-
-        // Check if we have cached data at a DIFFERENT location than the moov
-        // (i.e., we have data from start but requesting end, or vice versa)
-        final isMoovRequest =
-            totalSize > 0 &&
-            (totalSize - requestedOffset) <
-                (totalSize * 0.05).round().clamp(
-                  10 * 1024 * 1024,
-                  100 * 1024 * 1024,
-                );
-        final hasDataAtStart = cachedPrefix > 1024 * 1024; // >1MB from start
-        final isJumpingToMoov =
-            isMoovRequest &&
-            hasDataAtStart &&
-            (requestedOffset - cachedPrefix).abs() >
-                50 * 1024 * 1024; // >50MB jump
-
-        // FRESH-FILE MOOV PROTECTION: After cache clear, there's no cached data
-        // but we still need to protect against large offset jumps which crash PartsManager.
-        // This case occurs when: cachedPrefix < 1MB AND requestedOffset > 500MB
-        final isFreshFileMoovJump =
-            isMoovRequest &&
-            !hasDataAtStart &&
-            requestedOffset > 500 * 1024 * 1024;
-
-        if (isFreshFileMoovJump && !_moovStabilizeCompleted.contains(fileId)) {
-          debugPrint(
-            'Proxy: Fresh-file moov jump detected for $fileId at ${requestedOffset ~/ (1024 * 1024)}MB - '
-            'canceling download and waiting before moov fetch',
-          );
-
-          // Mark as in-progress to prevent re-entry
-          _moovStabilizeCompleted.add(fileId);
-
-          // Cancel any ongoing download to give TDLib time to settle (fire-and-forget)
-          TelegramService().send({
-            '@type': 'cancelDownloadFile',
-            'file_id': fileId,
-            'only_if_pending': false,
-          });
-
-          // Schedule the actual moov download after TDLib settles
-          Future.delayed(const Duration(milliseconds: 300), () {
-            if (!_abortedRequests.contains(fileId)) {
-              debugPrint(
-                'Proxy: Fresh-file moov protection complete for $fileId - starting moov download',
-              );
-
-              // IMPORTANT: Clear seek time to prevent debounce from interfering
-              // The next download request should proceed immediately, not be debounced
-              _lastSeekTime.remove(fileId);
-              _pendingSeekOffsets.remove(fileId);
-              _seekDebounceTimers[fileId]?.cancel();
-              _seekDebounceTimers.remove(fileId);
-
-              // Trigger the moov download now that TDLib has settled
-              _forcedMoovOffset[fileId] = requestedOffset;
-              _startDownloadAtOffset(fileId, requestedOffset);
-            }
-          });
-
-          // Return early - the delayed callback will handle the download
-          return;
-        }
-
-        if (isJumpingToMoov) {
-          // If this file has already completed stabilization, skip
-          if (_moovStabilizeCompleted.contains(fileId)) {
-            // Already stabilized, allow request through
-            return; // Don't block, but don't start download here either
-          }
-
-          // DISABLED: MOOV STABILIZE was blocking playback start by delaying moov fetch.
-          // The player cannot display video without moov metadata. Removed blocking.
-          // The TDLib will handle the download naturally without our interference.
-          debugPrint(
-            'Proxy: Moov request for $fileId - proceeding without stabilize delay',
-          );
-
-          // Unblock time has passed - mark as completed and allow the request
-          _moovUnblockTime.remove(fileId);
-          _moovStabilizeCompleted.add(fileId);
-          debugPrint(
-            'Proxy: MOOV STABILIZE complete for $fileId - allowing moov fetch',
-          );
-        }
       }
     }
 
@@ -2331,52 +2202,14 @@ class LocalStreamingProxy {
       }
     }
 
-    // PARTSMANAGER FIX: Define isMoovDownload to use for priority calculation
-    // This prevents parallel range conflicts that cause PartsManager crashes
+    // PHASE2: MOOV DOWNLOAD LOCK REMOVED
+    // The lock was blocking video data requests and causing stalls.
+    // TDLib handles priority naturally - let it manage MOOV vs video data.
     final isMoovDownload =
         _isMoovAtEnd[fileId] == true &&
         totalSize > 0 &&
         (totalSize - requestedOffset) <
             (totalSize * 0.01).round().clamp(5 * 1024 * 1024, 50 * 1024 * 1024);
-
-    // P1 FIX: MOOV DOWNLOAD PROTECTION
-    // Prevent low-offset requests from canceling MOOV download.
-    // When MOOV download is in progress, block requests for offsets < 50MB.
-    // Timeout is dynamic based on file size (larger files = longer timeout)
-    final moovLockStart = _moovDownloadStart[fileId];
-    final moovTimeout = _calculateMoovTimeout(totalSize);
-    final isMoovLocked =
-        moovLockStart != null &&
-        now.difference(moovLockStart).inMilliseconds < moovTimeout;
-
-    if (isMoovDownload) {
-      // Mark MOOV download start time
-      if (!_moovDownloadStart.containsKey(fileId)) {
-        _moovDownloadStart[fileId] = now;
-        debugPrint('Proxy: P1 MOOV LOCK started for $fileId');
-      }
-    } else if (isMoovLocked && requestedOffset < 50 * 1024 * 1024) {
-      // Block low-offset requests while MOOV is downloading
-      debugPrint(
-        'Proxy: P1 MOOV LOCK - Blocking request at ${requestedOffset ~/ 1024}KB while MOOV downloads',
-      );
-      return; // Don't start this download, wait for MOOV to complete
-    }
-
-    // Clear MOOV lock if we have MOOV data (moov typically downloads quickly)
-    if (_moovDownloadStart.containsKey(fileId)) {
-      final cached = _filePaths[fileId];
-      // MOOV is considered complete if:
-      // 1. We have data at the end of file (moov region)
-      // 2. OR the download at MOOV offset has completed/progressed
-      if (cached != null &&
-          cached.downloadOffset > totalSize - 10 * 1024 * 1024) {
-        _moovDownloadStart.remove(fileId);
-        debugPrint(
-          'Proxy: P1 MOOV LOCK released for $fileId (MOOV data available)',
-        );
-      }
-    }
 
     // TELEGRAM ANDROID-INSPIRED: Calculate dynamic priority based on distance
     // to primary playback position. Closer = higher priority.
