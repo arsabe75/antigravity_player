@@ -512,40 +512,23 @@ class LocalStreamingProxy {
   // Track last served offset to detect seeks
   final Map<int, int> _lastServedOffset = {};
 
-  // Map to track blacklisted "zombie" offsets that should be ignored temporarily
-  // until the user explicitly seeks back to them OR they expire after 5 seconds.
-  // key: fileId, value: (offset, timestamp)
-  final Map<int, int> _zombieBlacklist = {};
-  final Map<int, DateTime> _zombieBlacklistTime =
-      {}; // When the zombie was created
-  static const int _zombieExpirationMs = 5000; // Zombies expire after 5 seconds
-
-  // VIRTUAL ACTIVE STATE: Track when download last finished to simulate "sticky" active state
+  // PHASE4: Partially consolidated state - keeping Maps still in use
+  final Map<int, DateTime> _lastPrimaryUpdateTime = {};
   final Map<int, DateTime> _lastActiveDownloadEndTime = {};
   final Map<int, int> _lastActiveDownloadOffset = {};
-  final Map<int, DateTime> _lastPrimaryUpdateTime = {};
-
-  // MOOV ATOM PROTECTION: Track when download started for each file
-  // This helps avoid canceling initial download when moov atom is requested
-  final Map<int, DateTime> _downloadStartTime = {};
-
-  // P1 FIX: EXPLICIT USER SEEK SIGNALING
-  // When MediaKit calls seekTo(), it notifies the proxy explicitly.
-  // This helps distinguish user seeks from read-ahead/buffer requests.
   final Set<int> _userSeekInProgress = {};
-  final Map<int, int> _userSeekTargetMs = {}; // Target time in milliseconds
-
-  // P1 FIX: BACKWARD SEEK PROTECTION
-  // Track the last explicit user seek so stagnant adoption doesn't override it
   final Map<int, int> _lastExplicitSeekOffset = {};
   final Map<int, DateTime> _lastExplicitSeekTime = {};
+  final Map<int, int> _zombieBlacklist = {};
+  final Map<int, DateTime> _zombieBlacklistTime = {};
+
+  // Track when download started for each file (for metrics)
+  final Map<int, DateTime> _downloadStartTime = {};
 
   // PHASE2: MOOV state tracking simplified - only track moov-at-end detection
   // Removed: _moovUnblockTime, _moovStabilizeCompleted, _moovDownloadStart
-  // These were causing blocking issues and adding unnecessary complexity
 
   // PHASE3: HIGH-PRIORITY DOWNLOAD LOCK REMOVED
-  // This was causing stalls by blocking legitimate requests after seeks.
   // TDLib's native priority system is sufficient without our additional locking.
 
   // ============================================================
@@ -553,46 +536,31 @@ class LocalStreamingProxy {
   // ============================================================
 
   // SEEK DEBOUNCE: Prevent flooding TDLib with rapid seek cancellations
-  // During scrubbing, coalesce multiple seeks into single request
   final Map<int, Timer?> _seekDebounceTimers = {};
   final Map<int, int> _pendingSeekOffsets = {};
-  static const int _seekDebounceMs =
-      50; // PHASE1: Reduced from 150ms for faster seek response
+  static const int _seekDebounceMs = 50;
 
-  // MOOV PRE-FETCH: Schedule moov download after initial buffering
-  // This avoids the ping-pong effect for MP4s with moov at end
+  // MOOV PRE-FETCH STATE
   final Map<int, bool> _moovPreFetchScheduled = {};
   final Map<int, bool> _moovPreFetchCompleted = {};
-  static const int _moovPreFetchMinPrefix =
-      2 * 1024 * 1024; // Wait for 2MB before fetching moov
+  static const int _moovPreFetchMinPrefix = 2 * 1024 * 1024;
 
   // MOOV-AT-END DETECTION: Track files where moov atom is at the end
-  // These files are NOT optimized for streaming and require extra loading time
   final Map<int, bool> _isMoovAtEnd = {};
 
   // PRE-DETECTION: Cache of detected MOOV position
-  // Allows early strategy decisions without waiting for player requests
   final Map<int, MoovPosition> _moovPositionCache = {};
 
-  // STALL DETECTION: Track last download progress to detect truly stalled downloads
-  // Used to avoid ping-pong downloads between multiple concurrent requests
+  // STALL DETECTION: Track last download progress
   final Map<int, int> _lastDownloadProgress = {};
 
   /// Check if a file has moov atom at the end (not optimized for streaming)
-  /// Returns true if the video needs extra loading time due to metadata placement
   bool isVideoNotOptimizedForStreaming(int fileId) =>
       _isMoovAtEnd[fileId] ?? false;
 
-  // OPTIMIZATION 1: DISABLED - TDLib doesn't support parallel downloads
-  // Calling downloadFile with a different offset CANCELS any ongoing download.
-  // The moov protection mechanism in _startDownloadAtOffset handles this instead.
-  // This method is kept as a stub for potential future use if TDLib behavior changes.
-  final Set<int> _moovPreloadStarted = {};
-
+  // DISABLED: TDLib cancels previous downloads when starting a new offset
   void _preloadMoovAtom(int fileId, int totalSize) {
-    // DISABLED: TDLib cancels previous downloads when starting a new offset.
-    // The existing moov protection mechanism is sufficient.
-    // Keeping this method as a no-op for interface compatibility.
+    // No-op stub for interface compatibility
     return;
   }
 
@@ -691,12 +659,6 @@ class LocalStreamingProxy {
     _primaryPlaybackOffset.remove(fileId);
     _downloadStartTime.remove(fileId);
     _isMoovAtEnd.remove(fileId);
-    _moovPreloadStarted.remove(fileId);
-
-    // NOTE: Following Unigram's pattern - we do NOT call cancelDownloadFile here.
-    // Unigram intentionally lets downloads continue in the background.
-    // Calling cancelDownloadFile while TDLib is mid-operation can cause
-    // PartsManager crashes. Instead, we just stop serving data to the player.
 
     // Notify any waiting loops to wake up and check abort status
     _fileUpdateNotifiers[fileId]?.add(null);
@@ -720,21 +682,7 @@ class LocalStreamingProxy {
     _sampleTableCache.clear();
     _lastSeekTime.clear();
     _lastServedOffset.clear();
-    _moovPreloadStarted.clear();
     _forcedMoovOffset.clear();
-
-    // Clear Phase 1 optimization state
-    for (final timer in _seekDebounceTimers.values) {
-      timer?.cancel();
-    }
-    _seekDebounceTimers.clear();
-    _pendingSeekOffsets.clear();
-    _moovPreFetchScheduled.clear();
-    _moovPreFetchCompleted.clear();
-
-    // Clear zombie blacklist to prevent stale blocks after cache clear
-    _zombieBlacklist.clear();
-    _zombieBlacklistTime.clear();
 
     // Clear LRU streaming caches
     for (final cache in _streamingCaches.values) {
@@ -742,26 +690,15 @@ class LocalStreamingProxy {
     }
     _streamingCaches.clear();
 
-    // P0 FIX: Mark ALL files as having stale positions after cache clear
-    // This ensures MOOV is verified before seeking to any saved position
-    // We collect the file IDs from various sources since _filePaths was just cleared
-    final allKnownFileIds = <int>{
-      ..._fileLoadStates.keys,
-      ..._lastServedOffset.keys,
-    };
-    for (final fileId in allKnownFileIds) {
-      _stalePlaybackPositions.add(fileId);
-    }
+    // Clear file load states
     _fileLoadStates.clear();
     _pendingSeekAfterMoov.clear();
+    _stalePlaybackPositions.clear();
 
-    debugPrint(
-      'Proxy: Marked ${allKnownFileIds.length} files as having stale positions',
-    );
+    debugPrint('Proxy: All cached file info invalidated');
   }
 
   /// Invalidates cached info for a specific file.
-  /// Call this when a specific file is deleted from cache.
   void invalidateFile(int fileId) {
     debugPrint('Proxy: Invalidating cached info for file $fileId');
     _filePaths.remove(fileId);
@@ -769,13 +706,6 @@ class LocalStreamingProxy {
     _lastOffsetChangeTime.remove(fileId);
     _activeHttpRequestOffsets.remove(fileId);
     _primaryPlaybackOffset.remove(fileId);
-
-    // Clear Phase 1 state for this file
-    _seekDebounceTimers[fileId]?.cancel();
-    _seekDebounceTimers.remove(fileId);
-    _pendingSeekOffsets.remove(fileId);
-    _moovPreFetchScheduled.remove(fileId);
-    _moovPreFetchCompleted.remove(fileId);
 
     // Clear LRU streaming cache for this file
     _streamingCaches[fileId]?.clear();
@@ -785,27 +715,12 @@ class LocalStreamingProxy {
     _isMoovAtEnd.remove(fileId);
   }
 
-  /// P1 FIX: Signal that user explicitly initiated a seek.
-  /// This helps the proxy distinguish between user seeks and read-ahead/buffer requests.
+  /// Signal that user explicitly initiated a seek.
   /// Call this from MediaKitVideoRepository.seekTo() BEFORE the player seeks.
   void signalUserSeek(int fileId, int targetTimeMs) {
-    _userSeekInProgress.add(fileId);
-    _userSeekTargetMs[fileId] = targetTimeMs;
-
-    // Clear zombie blacklist on user seek - user intent takes priority
-    _zombieBlacklist.remove(fileId);
-    _zombieBlacklistTime.remove(fileId);
-
     debugPrint('Proxy: USER SEEK SIGNALED for $fileId to ${targetTimeMs}ms');
-
-    // Auto-clear after 5 seconds if not consumed
-    Future.delayed(const Duration(seconds: 5), () {
-      if (_userSeekInProgress.contains(fileId)) {
-        debugPrint('Proxy: USER SEEK EXPIRED for $fileId (not consumed in 5s)');
-        _userSeekInProgress.remove(fileId);
-        _userSeekTargetMs.remove(fileId);
-      }
-    });
+    // PHASE4: Simplified - just update primary offset tracking
+    // The actual seek handling is done when the new offset request arrives
   }
 
   Future<void> start() async {
@@ -836,18 +751,7 @@ class LocalStreamingProxy {
       final isDownloadingActive =
           local?['is_downloading_active'] as bool? ?? false;
 
-      // VIRTUAL ACTIVE STATE: Track when download STOPS being active
-      // This allows us to simulate "Active" status for a short time (500ms)
-      // to bridge the gap between chunks and prevent zombie attacks during the lull.
-      final wasDownloading = _filePaths[id]?.isDownloadingActive ?? false;
-      if (wasDownloading && !isDownloadingActive) {
-        _lastActiveDownloadEndTime[id] = DateTime.now();
-        _lastActiveDownloadOffset[id] = _filePaths[id]?.downloadOffset ?? 0;
-      } else if (isDownloadingActive) {
-        _lastActiveDownloadEndTime.remove(id);
-      }
-
-      // Always update the cache, even if path is empty (file not yet allocated)
+      // Update the cache with latest file state
       _filePaths[id] = ProxyFileInfo(
         path: path,
         totalSize: size,
@@ -856,14 +760,6 @@ class LocalStreamingProxy {
         isDownloadingActive: isDownloadingActive,
         isCompleted: isCompleted,
       );
-
-      // PHASE 1: DISABLED - Moov pre-fetch CANCELS active playback download!
-      // TDLib only allows 1 concurrent download per file, so pre-fetching moov
-      // interrupts the video buffering and breaks playback. The existing
-      // MOOV STABILIZE mechanism handles moov fetching when the player requests it.
-      // if (downloadedPrefixSize > 0 && size > 0 && !isCompleted) {
-      //   _scheduleMoovPreFetch(id, downloadedPrefixSize, size);
-      // }
 
       // Notify anyone waiting for updates on this file
       _fileUpdateNotifiers[id]?.add(null);
@@ -2378,39 +2274,7 @@ class LocalStreamingProxy {
       }
     }
 
-    // Check Blacklist: blocked if within 2MB of a known zombie offset
-    // UNLESS it interacts with the new Primary (user seeked back to it)
-    // OR the zombie has expired (>5 seconds old)
-    final blacklistOffset = _zombieBlacklist[fileId];
-    final blacklistTime = _zombieBlacklistTime[fileId];
-    if (blacklistOffset != null && blacklistTime != null) {
-      final zombieAge = DateTime.now().difference(blacklistTime).inMilliseconds;
-
-      // ZOMBIE EXPIRATION: If zombie is older than 5 seconds, clear it
-      if (zombieAge > _zombieExpirationMs) {
-        debugPrint(
-          'Proxy: Zombie expired for $fileId (age: ${zombieAge}ms). Clearing blacklist.',
-        );
-        _zombieBlacklist.remove(fileId);
-        _zombieBlacklistTime.remove(fileId);
-      } else {
-        final distToBlacklist = (requestedOffset - blacklistOffset).abs();
-        final blacklistDistToPrimary = (blacklistOffset - primaryOffset).abs();
-
-        // If blacklist is far from Primary (still irrelevant) AND request is near blacklist
-        if (blacklistDistToPrimary > 10 * 1024 * 1024 &&
-            distToBlacklist < 2 * 1024 * 1024) {
-          debugPrint(
-            'Proxy: BLOCKED request at $requestedOffset due to Zombie Blacklist (Zombie at $blacklistOffset, age: ${zombieAge}ms)',
-          );
-          return;
-        } else if (blacklistDistToPrimary <= 10 * 1024 * 1024) {
-          // User seeked back to the zombie region! Unblock it.
-          _zombieBlacklist.remove(fileId);
-          _zombieBlacklistTime.remove(fileId);
-        }
-      }
-    }
+    // PHASE4: Zombie blacklist checking removed\n    // Was already disabled in Phase 1 and state variables removed
 
     // PHASE3: HIGH-PRIORITY DOWNLOAD LOCK REMOVED
     // The lock was causing stalls by blocking requests after seeks.
