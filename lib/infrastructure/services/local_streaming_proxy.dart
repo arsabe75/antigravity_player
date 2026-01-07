@@ -589,7 +589,7 @@ class LocalStreamingProxy {
   final Map<int, Timer?> _seekDebounceTimers = {};
   final Map<int, int> _pendingSeekOffsets = {};
   static const int _seekDebounceMs =
-      150; // Reduced from 200ms for faster response
+      50; // PHASE1: Reduced from 150ms for faster seek response
 
   // MOOV PRE-FETCH: Schedule moov download after initial buffering
   // This avoids the ping-pong effect for MP4s with moov at end
@@ -2294,15 +2294,14 @@ class LocalStreamingProxy {
         requestedOffset > activeDownloadTarget &&
         distanceFromCurrent < 2 * 1024 * 1024; // Within 2MB ahead
 
-    // STABILITY FIX: Increased cooldown from 100-300ms to 500-1000ms
-    // This gives TDLib more time to stabilize between offset changes
-    final cooldownMs = isSequentialRead ? 500 : 1000;
+    // PHASE1 OPTIMIZATION: Reduced cooldown for faster seek response
+    // TDLib handles rapid changes better than previously assumed
+    final cooldownMs = isSequentialRead ? 50 : 100;
 
     if (lastChange != null) {
       final timeSinceLastChange = now.difference(lastChange).inMilliseconds;
-      // STABILITY FIX: Increased distance threshold from 512KB-1MB to 2MB-5MB
-      // Larger thresholds reduce the frequency of download cancellations
-      final minDistance = isSequentialRead ? 2 * 1024 * 1024 : 5 * 1024 * 1024;
+      // PHASE1 OPTIMIZATION: Reduced distance threshold for more responsive seeks
+      final minDistance = isSequentialRead ? 256 * 1024 : 512 * 1024;
 
       // DEADLOCK PREVENTION:
       // If we think we are downloading at offset X, but cache says we are inactive
@@ -2542,86 +2541,26 @@ class LocalStreamingProxy {
       }
     }
 
-    // ZOMBIE KILLER: Blacklist logic
-    // If we have a High Priority Active download near Primary, and we see a persistent
-    // divergent request, we BLACKLIST the divergent region to prevent it from ever
-    // slipping through during a momentary state gap.
+    // PHASE1: ZOMBIE BLACKLIST DISABLED
+    // This was blocking legitimate seek positions and causing stalls.
+    // The simplified cooldown system provides sufficient protection.
+    // Original zombie blacklist code and related variables removed.
 
-    // ACTIVE STREAM PROTECTION VARIABLES RE-CALCULATION:
-    // Need these for Zombie Killer logic below
-    final distToPrimary = (requestedOffset - primaryOffset).abs();
-    final isActiveCloseToPrimary =
-        (_activeDownloadOffset[fileId] ?? -1 - primaryOffset).abs() <
-        5 * 1024 * 1024;
-
-    // TIGHTENED THRESHOLD: Any request > 2MB away from primary is considered divergent
-    // if we have a locked-in High Priority stream.
-    final isRequestFarFromPrimary =
-        distToPrimary > 2 * 1024 * 1024; // Tightened from 10MB
-    if (isHighPriorityActive &&
-        isActiveCloseToPrimary &&
-        isRequestFarFromPrimary &&
-        !isBlocking &&
-        !isMoovDownload) {
-      // EXEMPTION: Never block Blocking Requests or Moov Downloads
-      debugPrint(
-        'Proxy: PROTECTED active download (prio $activePriority) near Primary from divergent request '
-        'at $requestedOffset (diff: ${distToPrimary ~/ 1024}KB). Ignoring to prevent ping-pong.',
-      );
-
-      // Add to blacklist WITH TIMESTAMP so future requests (even if active drops) are blocked temporarily
-      _zombieBlacklist[fileId] = requestedOffset;
-      _zombieBlacklistTime[fileId] = DateTime.now();
-      return;
-    }
-
-    // DOWNLOAD DEBOUNCE:
-    // If we just started a download (<500ms ago), DO NOT switch to a different offset
-    // unless it is extremely close (sequential) or an explicit Seek.
-    // This prevents "Thrashing" where multiple parallel requests (e.g. from player trying to find
-    // a good spot) cause the proxy to rapidly switch between offsets 1, 2, 3... never completing any.
-    // EXCEPTION: Blocking requests (waiting for data) MUST bypass debounce to upgrade priority.
+    // PHASE1: SIMPLIFIED SEEK DEBOUNCE
+    // Always allow seek requests through immediately - the player knows best where it needs data
     final lastStart = _lastOffsetChangeTime[fileId];
     if (lastStart != null &&
-        now.difference(lastStart).inMilliseconds < 500 &&
-        !isBlocking) {
+        now.difference(lastStart).inMilliseconds < 100 &&
+        !isBlocking &&
+        !isSeekRequest) {
       final activeOffset = _activeDownloadOffset[fileId] ?? -1;
-      // Allow if sequential (reading forward)
+      // Allow if sequential (reading forward within 2MB)
       if (requestedOffset >= activeOffset &&
           requestedOffset < activeOffset + 2 * 1024 * 1024) {
         // Sequential: Allowed
-      } else if (isSeekRequest) {
-        // STRICT DEBOUNCE EXCEPTION:
-        // Only allow the seek to break the lock if it targets the PRIMARY offset (User's Intent).
-        // If it's a "fake seek" (divergent probe), it must wait.
-        final primary = _primaryPlaybackOffset[fileId];
-        if (primary != null &&
-            (requestedOffset - primary).abs() > 2 * 1024 * 1024) {
-          // SAFETY VALVE:
-          // If the Primary has been stagnant for > 2000ms, and this "Divergent Seek" is persistent,
-          // it likely means the Primary is WRONG (zombie false positive).
-          // Force adoption to correct the Primary.
-          final lastPrimaryUpdate = _lastPrimaryUpdateTime[fileId];
-          if (lastPrimaryUpdate != null &&
-              DateTime.now().difference(lastPrimaryUpdate).inMilliseconds >
-                  2000) {
-            debugPrint(
-              'Proxy: SAFETY VALVE - Adopting Divergent Seek $requestedOffset (Primary stagnant > 2s)',
-            );
-            _primaryPlaybackOffset[fileId] = requestedOffset;
-            _lastPrimaryUpdateTime[fileId] = DateTime.now();
-            // Allow this request to proceed (break debounce)
-          } else {
-            debugPrint(
-              'Proxy: DEBOUNCED divergent seek $requestedOffset (Primary is $primary). Ignoring.',
-            );
-            return;
-          }
-        }
-        // Explicit Valid Seek: Allowed
       } else {
         debugPrint(
-          'Proxy: DEBOUNCED rapid switch from $activeOffset to $requestedOffset (too fast). Ignoring.',
+          'Proxy: DEBOUNCED rapid switch from $activeOffset to $requestedOffset. Ignoring.',
         );
         return;
       }

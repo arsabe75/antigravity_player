@@ -49,18 +49,45 @@ class MediaKitVideoRepository implements VideoRepository {
       }
     }
 
-    _playerSub?.cancel();
-    _tracksSub?.cancel();
-    await _player?.dispose();
-    _player = null;
+    // Cancel subscriptions first
+    await _playerSub?.cancel();
+    _playerSub = null;
+    await _tracksSub?.cancel();
+    _tracksSub = null;
+
+    // Dispose player with error handling (may already be disposed)
+    if (_player != null) {
+      try {
+        await _player!.dispose();
+      } catch (e) {
+        debugPrint(
+          'MediaKitVideoRepository: Player dispose error (ignored): $e',
+        );
+      }
+      _player = null;
+    }
     _controller = null;
-    _videoUrl = null; // Clear video URL on dispose
-    await _positionController.close();
-    await _durationController.close();
-    await _isPlayingController.close();
-    await _isBufferingController.close();
-    await _tracksChangedController.close();
-    await _errorController.close();
+    _videoUrl = null;
+
+    // Close StreamControllers safely (check if not already closed)
+    if (!_positionController.isClosed) {
+      await _positionController.close();
+    }
+    if (!_durationController.isClosed) {
+      await _durationController.close();
+    }
+    if (!_isPlayingController.isClosed) {
+      await _isPlayingController.close();
+    }
+    if (!_isBufferingController.isClosed) {
+      await _isBufferingController.close();
+    }
+    if (!_tracksChangedController.isClosed) {
+      await _tracksChangedController.close();
+    }
+    if (!_errorController.isClosed) {
+      await _errorController.close();
+    }
   }
 
   /// Helper to initialize player once and reuse it
