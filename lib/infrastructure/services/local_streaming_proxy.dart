@@ -566,8 +566,6 @@ class LocalStreamingProxy {
   final Set<int> _userSeekInProgress = {};
   final Map<int, int> _lastExplicitSeekOffset = {};
   final Map<int, DateTime> _lastExplicitSeekTime = {};
-  final Map<int, int> _zombieBlacklist = {};
-  final Map<int, DateTime> _zombieBlacklistTime = {};
 
   // Track when download started for each file (for metrics)
   final Map<int, DateTime> _downloadStartTime = {};
@@ -599,12 +597,6 @@ class LocalStreamingProxy {
   /// Check if a file has moov atom at the end (not optimized for streaming)
   bool isVideoNotOptimizedForStreaming(int fileId) =>
       _isMoovAtEnd[fileId] ?? false;
-
-  // DISABLED: TDLib cancels previous downloads when starting a new offset
-  void _preloadMoovAtom(int fileId, int totalSize) {
-    // No-op stub for interface compatibility
-    return;
-  }
 
   // FORCE MOOV DOWNLOAD: Track files that MUST download moov before anything else
   // This prevents the player's request for the start of the file from canceling
@@ -1081,16 +1073,6 @@ class LocalStreamingProxy {
 
           if (isTrueScrubbing) {
             _lastSeekTime[fileId] = DateTime.now();
-
-            // ZOMBIE FIX: Clear zombie blacklist on true user seeks
-            // This allows the player to request data at the new position
-            if (_zombieBlacklist.containsKey(fileId)) {
-              debugPrint(
-                'Proxy: Clearing zombie blacklist for $fileId on true scrubbing',
-              );
-              _zombieBlacklist.remove(fileId);
-              _zombieBlacklistTime.remove(fileId);
-            }
           }
 
           // CRITICAL FIX: When a seek is detected, reset the primary offset to the seek target
@@ -1821,11 +1803,6 @@ class LocalStreamingProxy {
           );
         }
 
-        // OPTIMIZATION 1: Pre-load moov atom for large files
-        if (totalSize > 50 * 1024 * 1024 && !isCompleted) {
-          _preloadMoovAtom(fileId, totalSize);
-        }
-
         // PRE-DETECT MOOV POSITION for large files
         // Schedule detection after some data is available
         if (totalSize > 10 * 1024 * 1024 && !isCompleted) {
@@ -1953,11 +1930,15 @@ class LocalStreamingProxy {
           : 5 * 1024 * 1024; // Default to 5MB if total size unknown
 
       if (availableAtForced >= targetSize) {
-        // Got enough moov data
+        // Got enough moov data - clear MOOV lock AND reset active priority
+        // This allows normal priority calculation for subsequent requests
         debugPrint(
           'Proxy: Forced moov download satisfied ($availableAtForced bytes >= $targetSize), releasing lock for $fileId',
         );
         _forcedMoovOffset.remove(fileId);
+        _activePriority.remove(
+          fileId,
+        ); // CRITICAL: Reset priority to avoid deadlock
       } else if (requestedOffset != forcedOffset) {
         debugPrint(
           'Proxy: Ignoring request for $requestedOffset while forcing moov download at $forcedOffset for $fileId (have $availableAtForced/$targetSize)',
