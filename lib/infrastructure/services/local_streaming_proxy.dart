@@ -457,6 +457,53 @@ class LocalStreamingProxy {
   factory LocalStreamingProxy() => _instance;
   LocalStreamingProxy._internal();
 
+  // ============================================================
+  // OPTIMIZATION: Conditional Logging
+  // ============================================================
+  // Set to false in production to eliminate debug output overhead.
+  // This significantly reduces main thread load during playback.
+  static const bool _enableVerboseLogging = false;
+
+  /// Conditional logging - only prints when verbose logging is enabled.
+  /// Use for non-critical debug messages. Critical errors should use debugPrint directly.
+  void _log(String message) {
+    if (_enableVerboseLogging) {
+      debugPrint('Proxy: $message');
+    }
+  }
+
+  // ============================================================
+  // OPTIMIZATION: Update Throttling
+  // ============================================================
+  // Process TDLib updateFile events at most every 50ms to reduce main thread load
+  static const int _updateThrottleMs = 50;
+  DateTime? _lastUpdateProcessedTime;
+  final Map<int, ProxyFileInfo> _pendingFileUpdates = {};
+  Timer? _throttleTimer;
+
+  // ============================================================
+  // OPTIMIZATION: Disk Safety Check Caching
+  // ============================================================
+  // Cache disk safety check result for 5 seconds to avoid redundant disk queries
+  static const int _diskCheckCacheMs = 5000;
+  DateTime? _lastDiskCheckTime;
+  bool? _lastDiskCheckResult;
+
+  /// Cached disk safety check to reduce disk queries during rapid download requests
+  Future<bool> _checkDiskSafetyCached() async {
+    final now = DateTime.now();
+    if (_lastDiskCheckResult != null &&
+        _lastDiskCheckTime != null &&
+        now.difference(_lastDiskCheckTime!).inMilliseconds <
+            _diskCheckCacheMs) {
+      return _lastDiskCheckResult!;
+    }
+
+    _lastDiskCheckResult = await TelegramCacheService().checkDiskSafety();
+    _lastDiskCheckTime = now;
+    return _lastDiskCheckResult!;
+  }
+
   HttpServer? _server;
   int _port = 0;
 
@@ -539,11 +586,6 @@ class LocalStreamingProxy {
   final Map<int, Timer?> _seekDebounceTimers = {};
   final Map<int, int> _pendingSeekOffsets = {};
   static const int _seekDebounceMs = 50;
-
-  // MOOV PRE-FETCH STATE
-  final Map<int, bool> _moovPreFetchScheduled = {};
-  final Map<int, bool> _moovPreFetchCompleted = {};
-  static const int _moovPreFetchMinPrefix = 2 * 1024 * 1024;
 
   // MOOV-AT-END DETECTION: Track files where moov atom is at the end
   final Map<int, bool> _isMoovAtEnd = {};
@@ -635,11 +677,8 @@ class LocalStreamingProxy {
     );
   }
 
-  // DISABLED: TWO-TIER PRELOAD removed.
-  // It could delay video start when TDLib needed to cancel active preloads.
-  // The MOOV pre-detection and post-seek preload features provide similar
-  // benefits without the TDLib conflict issue.
-  // ignore: unused_element
+  /// Preload video start - no-op stub maintained for API compatibility.
+  /// Actual preloading was disabled as it interfered with TDLib download management.
   void preloadVideoStart(int fileId, int? totalSize, {bool isVisible = false}) {
     // No-op: preloading disabled
   }
@@ -647,11 +686,11 @@ class LocalStreamingProxy {
   void abortRequest(int fileId) {
     // Prevent duplicate abort calls
     if (_abortedRequests.contains(fileId)) {
-      debugPrint('Proxy: Already aborted fileId $fileId, skipping');
+      _log('Already aborted fileId $fileId, skipping');
       return;
     }
 
-    debugPrint('Proxy: ===== ABORTING REQUEST for fileId $fileId =====');
+    _log('===== ABORTING REQUEST for fileId $fileId =====');
     _abortedRequests.add(fileId);
     _activeDownloadRequests.remove(fileId);
     _activeDownloadOffset.remove(fileId);
@@ -667,7 +706,7 @@ class LocalStreamingProxy {
   /// Invalidates all cached file information.
   /// Call this when Telegram cache is cleared to ensure fresh file info is fetched.
   void invalidateAllFiles() {
-    debugPrint('Proxy: Invalidating all cached file info');
+    _log('Invalidating all cached file info');
     _filePaths.clear();
     _activeDownloadOffset.clear();
     _lastOffsetChangeTime.clear();
@@ -695,12 +734,12 @@ class LocalStreamingProxy {
     _pendingSeekAfterMoov.clear();
     _stalePlaybackPositions.clear();
 
-    debugPrint('Proxy: All cached file info invalidated');
+    _log('All cached file info invalidated');
   }
 
   /// Invalidates cached info for a specific file.
   void invalidateFile(int fileId) {
-    debugPrint('Proxy: Invalidating cached info for file $fileId');
+    _log('Invalidating cached info for file $fileId');
     _filePaths.remove(fileId);
     _activeDownloadOffset.remove(fileId);
     _lastOffsetChangeTime.remove(fileId);
@@ -718,7 +757,7 @@ class LocalStreamingProxy {
   /// Signal that user explicitly initiated a seek.
   /// Call this from MediaKitVideoRepository.seekTo() BEFORE the player seeks.
   void signalUserSeek(int fileId, int targetTimeMs) {
-    debugPrint('Proxy: USER SEEK SIGNALED for $fileId to ${targetTimeMs}ms');
+    _log('USER SEEK SIGNALED for $fileId to ${targetTimeMs}ms');
     // PHASE4: Simplified - just update primary offset tracking
     // The actual seek handling is done when the new offset request arrives
   }
@@ -736,34 +775,75 @@ class LocalStreamingProxy {
   }
 
   void _onUpdate(Map<String, dynamic> update) {
-    if (update['@type'] == 'updateFile') {
-      final file = update['file'];
-      final id = file['id'] as int?;
-      if (id == null) return;
+    if (update['@type'] != 'updateFile') return;
 
-      final local = file['local'] as Map<String, dynamic>?;
-      final path = local?['path'] as String? ?? '';
-      final isCompleted = local?['is_downloading_completed'] as bool? ?? false;
-      final size = file['size'] as int? ?? 0;
-      final downloadOffset = local?['download_offset'] as int? ?? 0;
-      final downloadedPrefixSize =
-          local?['downloaded_prefix_size'] as int? ?? 0;
-      final isDownloadingActive =
-          local?['is_downloading_active'] as bool? ?? false;
+    final file = update['file'];
+    final id = file['id'] as int?;
+    if (id == null) return;
 
-      // Update the cache with latest file state
-      _filePaths[id] = ProxyFileInfo(
-        path: path,
-        totalSize: size,
-        downloadOffset: downloadOffset,
-        downloadedPrefixSize: downloadedPrefixSize,
-        isDownloadingActive: isDownloadingActive,
-        isCompleted: isCompleted,
-      );
+    final local = file['local'] as Map<String, dynamic>?;
+    final info = ProxyFileInfo(
+      path: local?['path'] as String? ?? '',
+      totalSize: file['size'] as int? ?? 0,
+      downloadOffset: local?['download_offset'] as int? ?? 0,
+      downloadedPrefixSize: local?['downloaded_prefix_size'] as int? ?? 0,
+      isDownloadingActive: local?['is_downloading_active'] as bool? ?? false,
+      isCompleted: local?['is_downloading_completed'] as bool? ?? false,
+    );
+
+    // CRITICAL FIX: Always process immediately if there are active waiters
+    // for this file. This ensures MOOV-at-end videos don't stall.
+    final hasActiveWaiter = _fileUpdateNotifiers.containsKey(id);
+    if (hasActiveWaiter) {
+      // Process this update immediately - someone is waiting for it
+      _filePaths[id] = info;
+      _fileUpdateNotifiers[id]?.add(null);
+      return;
+    }
+
+    // OPTIMIZATION: Buffer non-critical updates and process with throttling
+    _pendingFileUpdates[id] = info;
+
+    // Throttle: process at most every 50ms
+    final now = DateTime.now();
+    if (_lastUpdateProcessedTime != null &&
+        now.difference(_lastUpdateProcessedTime!).inMilliseconds <
+            _updateThrottleMs) {
+      // Schedule delayed processing if not already scheduled
+      _scheduleThrottledUpdate();
+      return;
+    }
+
+    // Process immediately if throttle window passed
+    _processPendingUpdates();
+  }
+
+  /// Schedule a delayed update processing if one isn't already pending
+  void _scheduleThrottledUpdate() {
+    if (_throttleTimer != null) return; // Already scheduled
+
+    _throttleTimer = Timer(Duration(milliseconds: _updateThrottleMs), () {
+      _throttleTimer = null;
+      _processPendingUpdates();
+    });
+  }
+
+  /// Process all buffered file updates at once
+  void _processPendingUpdates() {
+    if (_pendingFileUpdates.isEmpty) return;
+
+    _lastUpdateProcessedTime = DateTime.now();
+
+    for (final entry in _pendingFileUpdates.entries) {
+      final id = entry.key;
+      final info = entry.value;
+
+      _filePaths[id] = info;
 
       // Notify anyone waiting for updates on this file
       _fileUpdateNotifiers[id]?.add(null);
     }
+    _pendingFileUpdates.clear();
   }
 
   Future<void> stop() async {
@@ -1828,9 +1908,9 @@ class LocalStreamingProxy {
     int requestedOffset, {
     bool isBlocking = false,
   }) async {
-    // DISK SAFETY CHECK: Prevent crash if disk is full (< 50MB)
-    // This allows the Binlog write to fail gracefully or just stops filling disk
-    if (!await TelegramCacheService().checkDiskSafety()) {
+    // DISK SAFETY CHECK: Prevent crash if disk is full (<50MB)
+    // Uses cached result for 5 seconds to avoid redundant disk queries
+    if (!await _checkDiskSafetyCached()) {
       debugPrint(
         'Proxy: CRITICAL DISK SPACE - Aborting new download request for $fileId',
       );
@@ -2784,77 +2864,7 @@ class LocalStreamingProxy {
   }
 
   // ============================================================
-  // PHASE 1: INTELLIGENT MOOV PRE-FETCH
-  // ============================================================
-
-  /// Schedule moov atom pre-fetch after initial buffering reaches threshold.
-  /// Called from _onUpdate when downloadedPrefixSize changes.
-  /// This implements the DrKLO-inspired sequential moov fetch strategy.
-  /// DISABLED: TDLib cancels active downloads when offset changes, breaking playback.
-  // ignore: unused_element
-  void _scheduleMoovPreFetch(int fileId, int currentPrefix, int totalSize) {
-    // Skip if already scheduled or completed
-    if (_moovPreFetchScheduled[fileId] == true ||
-        _moovPreFetchCompleted[fileId] == true) {
-      return;
-    }
-
-    // Skip if file is not marked as having moov at end
-    if (_isMoovAtEnd[fileId] != true) {
-      return;
-    }
-
-    // Skip if not enough data buffered yet
-    if (currentPrefix < _moovPreFetchMinPrefix) {
-      return;
-    }
-
-    // Skip for small files (moov will be reached quickly anyway)
-    if (totalSize < 50 * 1024 * 1024) {
-      return;
-    }
-
-    // Mark as scheduled to prevent duplicate scheduling
-    _moovPreFetchScheduled[fileId] = true;
-
-    debugPrint(
-      'Proxy: PHASE1 - Scheduling moov pre-fetch for $fileId '
-      '(prefix: ${currentPrefix ~/ 1024}KB, total: ${totalSize ~/ (1024 * 1024)}MB)',
-    );
-
-    // Schedule moov fetch with a short delay to let current download settle
-    Future.delayed(const Duration(milliseconds: 300), () async {
-      if (_abortedRequests.contains(fileId)) {
-        debugPrint(
-          'Proxy: PHASE1 - Moov pre-fetch cancelled (file aborted): $fileId',
-        );
-        return;
-      }
-
-      // Calculate moov position (last 1MB of file)
-      final moovOffset = totalSize - (1024 * 1024);
-      if (moovOffset <= 0) return;
-
-      debugPrint(
-        'Proxy: PHASE1 - Fetching moov atom for $fileId at offset ${moovOffset ~/ 1024}KB',
-      );
-
-      // Fetch moov with lower priority so it doesn't interrupt playback buffer
-      TelegramService().send({
-        '@type': 'downloadFile',
-        'file_id': fileId,
-        'priority': 8, // Lower priority than playback (32)
-        'offset': moovOffset,
-        'limit': 1024 * 1024, // 1MB for moov
-        'synchronous': true, // Sequential to avoid PartsManager issues
-      });
-
-      _moovPreFetchCompleted[fileId] = true;
-    });
-  }
-
-  // ============================================================
-  // PHASE 1: SEEK DEBOUNCE (RESERVED FOR FUTURE USE)
+  // SEEK DEBOUNCE
   // ============================================================
 
   /// Debounced seek handler to prevent flooding TDLib with rapid cancellations.
@@ -2875,20 +2885,13 @@ class LocalStreamingProxy {
         _seekDebounceTimers.remove(fileId);
 
         if (pendingOffset != null && !_abortedRequests.contains(fileId)) {
-          debugPrint(
-            'Proxy: PHASE1 - Executing debounced seek for $fileId to offset ${pendingOffset ~/ 1024}KB',
+          _log(
+            'Executing debounced seek for $fileId to offset ${pendingOffset ~/ 1024}KB',
           );
           // Execute the actual seek by starting download at the debounced offset
           _startDownloadAtOffset(fileId, pendingOffset);
         }
       },
     );
-  }
-
-  /// Check if there's a pending debounced seek for a file.
-  /// Returns the pending offset if exists, null otherwise.
-  // ignore: unused_element
-  int? _getPendingSeekOffset(int fileId) {
-    return _pendingSeekOffsets[fileId];
   }
 }
