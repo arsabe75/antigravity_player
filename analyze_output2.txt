@@ -1,6 +1,0 @@
-Analyzing antigravity_player...                                 
-
-   info - Don't use 'BuildContext's across async gaps, guarded by an unrelated 'mounted' check - lib\presentation\screens\playlist_manager_screen.dart:170:11 - use_build_context_synchronously
-   info - Don't use 'BuildContext's across async gaps - lib\presentation\screens\playlist_manager_screen.dart:196:46 - use_build_context_synchronously
-
-2 issues found. (ran in 2.6s)
