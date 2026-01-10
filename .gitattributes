@@ -1,0 +1,2 @@
+windows/tdlib_libs/** filter=lfs diff=lfs merge=lfs -text
+linux/tdlib_libs/** filter=lfs diff=lfs merge=lfs -text
