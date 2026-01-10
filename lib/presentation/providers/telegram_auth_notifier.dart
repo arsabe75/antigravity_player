@@ -58,7 +58,8 @@ class TelegramAuth extends _$TelegramAuth {
     // Wrap in microtask to ensure we never update state during a build frame,
     // regardless of when the stream emits.
     Future.microtask(() {
-      // if (!mounted) return; // Not available in simple Notifier, relay on Riverpod handling
+      // Guard against disposed provider
+      if (!ref.mounted) return;
       if (update['@type'] == 'updateAuthorizationState') {
         final stateUpdate = update['authorization_state'];
         _processAuthState(stateUpdate);

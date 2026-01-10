@@ -54,6 +54,8 @@ class TelegramForum extends _$TelegramForum {
 
   // chatId getter is provided by generated code (_$TelegramForum)
   void _handleUpdate(Map<String, dynamic> update) {
+    // Guard against disposed provider
+    if (!ref.mounted) return;
     try {
       if (update['@type'] == 'forumTopics') {
         final topicsData = update['topics'] as List? ?? [];

@@ -81,6 +81,7 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
 
     // Subscribe to disk safety stream
     final subscription = _service.onDiskCriticalState.listen((isCritical) {
+      if (!ref.mounted) return;
       state = state.copyWith(isDiskCriticallyLow: isCritical);
     });
     ref.onDispose(subscription.cancel);

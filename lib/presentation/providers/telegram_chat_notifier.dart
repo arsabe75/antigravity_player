@@ -28,6 +28,8 @@ class TelegramChat extends _$TelegramChat {
   int? get messageThreadId => params.messageThreadId;
 
   void _handleUpdate(Map<String, dynamic> update) {
+    // Guard against disposed provider
+    if (!ref.mounted) return;
     try {
       final updateType = update['@type'];
 

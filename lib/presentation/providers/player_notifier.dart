@@ -148,6 +148,8 @@ class PlayerNotifier extends _$PlayerNotifier {
 
   void _initStreams() {
     _positionSub = _repository.positionStream.listen((pos) {
+      // Guard against disposed provider
+      if (!ref.mounted) return;
       // Riverpod 3: 'state' es la propiedad que mantiene el estado actual.
       // Es inmutable (en este caso), por lo que usamos copyWith para actualizarlo.
       // Al asignar un nuevo valor a 'state', se notifica a los listeners.
@@ -168,13 +170,16 @@ class PlayerNotifier extends _$PlayerNotifier {
       }
     });
     _durationSub = _repository.durationStream.listen((dur) {
+      if (!ref.mounted) return;
       state = state.copyWith(duration: dur);
     });
     _playingSub = _repository.isPlayingStream.listen((playing) {
+      if (!ref.mounted) return;
       state = state.copyWith(isPlaying: playing);
       // Don't clear isInitialLoading here - let position listener handle it
     });
     _bufferingSub = _repository.isBufferingStream.listen((buffering) {
+      if (!ref.mounted) return;
       // Check if current video is not optimized for streaming (moov atom at end)
       bool isNotOptimized = false;
       if (buffering && _currentProxyFileId != null) {
@@ -211,10 +216,12 @@ class PlayerNotifier extends _$PlayerNotifier {
     });
     // Listen for track changes (for streaming videos where tracks arrive late)
     _tracksSub = _repository.tracksChangedStream.listen((_) {
+      if (!ref.mounted) return;
       _loadTracks();
     });
     // Listen for player errors and update state
     _errorSub = _repository.errorStream.listen((error) {
+      if (!ref.mounted) return;
       debugPrint('PlayerNotifier: Player error received: $error');
       // Stop forced loading on error
       state = state.copyWith(error: error, isBuffering: false);
@@ -227,6 +234,10 @@ class PlayerNotifier extends _$PlayerNotifier {
     _stopMoovCheckTimer();
     // FIX: Run every 100ms (not 500ms) to catch MOOV detection before playback confirms
     _moovCheckTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
+      if (!ref.mounted) {
+        _stopMoovCheckTimer();
+        return;
+      }
       if (_currentProxyFileId == null) {
         _stopMoovCheckTimer();
         return;
@@ -628,6 +639,10 @@ class PlayerNotifier extends _$PlayerNotifier {
   void _startSaveTimer() {
     _saveTimer?.cancel();
     _saveTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      if (!ref.mounted) {
+        _saveTimer?.cancel();
+        return;
+      }
       if (state.isPlaying) {
         _savePosition();
       }

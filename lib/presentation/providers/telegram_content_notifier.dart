@@ -31,6 +31,8 @@ class TelegramContent extends _$TelegramContent {
   }
 
   void _handleUpdate(Map<String, dynamic> update) {
+    // Guard against disposed provider
+    if (!ref.mounted) return;
     try {
       if (update['@type'] == 'updateNewChat') {
         final chat = update['chat'];
@@ -125,6 +127,8 @@ class TelegramContent extends _$TelegramContent {
   }
 
   void _flushUpdates() {
+    // Guard against disposed provider
+    if (!ref.mounted) return;
     if (_bufferedChats.isEmpty) {
       // Even if no updates, if we were loading and time passed, maybe stop loading?
       // But usually flush is only called if buffered chats exist.

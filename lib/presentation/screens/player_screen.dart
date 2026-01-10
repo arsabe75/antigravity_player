@@ -695,6 +695,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     PlayerNotifier notifier,
   ) {
     if (_isDisposing || controller == null) {
+      // Don't show fallback indicator if BufferingIndicator is already visible
+      if (state.isInitialLoading || state.isBuffering) {
+        return const SizedBox.shrink();
+      }
       return const Center(
         child: CircularProgressIndicator(color: Colors.white),
       );
