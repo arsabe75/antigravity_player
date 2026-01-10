@@ -46,3 +46,14 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# --- TDLib Binaries ---
+# Ignoramos las carpetas completas
+windows/tdlib_libs/
+linux/tdlib_libs/
+
+# Por seguridad, ignorar cualquier binario que se cuele
+*.dll
+*.so
+*.lib
+*.exe
