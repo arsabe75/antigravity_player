@@ -57,3 +57,5 @@ linux/tdlib_libs/
 *.so
 *.lib
 *.exe
+
+analyze_output*.txt
