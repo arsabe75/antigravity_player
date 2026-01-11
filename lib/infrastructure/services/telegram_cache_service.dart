@@ -166,7 +166,7 @@ class TelegramCacheService {
       }
 
       debugPrint(
-        'TelegramCacheService: Video cache (${_formatBytes(stats.videoSize)}) exceeds effective limit (${_formatBytes(effectiveLimitBytes)}), cleaning up...',
+        'TelegramCacheService: Video cache (${_formatBytes(stats.videoSize)}) exceeds effective limit (${_formatBytes(effectiveLimitBytes)}), cleaning up ${_formatBytes(stats.videoSize - effectiveLimitBytes)}...',
       );
 
       // Use optimizeStorage with size parameter for videos only
@@ -176,7 +176,7 @@ class TelegramCacheService {
         'size': effectiveLimitBytes, // Target size for video cache
         'ttl': -1, // Use default TTL
         'count': -1, // No file count limit
-        'immunity_delay': 120, // Don't delete files accessed in last 2 minutes
+        'immunity_delay': 0, // Allow deletion of all files (oldest first)
         'file_types': [
           {'@type': 'fileTypeVideo'},
           {'@type': 'fileTypeVideoNote'},
@@ -190,7 +190,8 @@ class TelegramCacheService {
       if (result['@type'] == 'storageStatistics') {
         final deletedStats = StorageStatistics.fromTdLib(result);
         debugPrint(
-          'TelegramCacheService: Cleaned up ${_formatBytes(deletedStats.videoSize)} of video cache',
+          'TelegramCacheService: Cleaned up ${_formatBytes(deletedStats.videoSize)} of video cache '
+          '(total deleted: ${_formatBytes(deletedStats.totalSize)})',
         );
         return true;
       }

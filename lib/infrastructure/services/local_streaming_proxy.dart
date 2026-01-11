@@ -482,6 +482,19 @@ class LocalStreamingProxy {
   Timer? _throttleTimer;
 
   // ============================================================
+  // CACHE LIMIT ENFORCEMENT
+  // ============================================================
+  // Trigger cache limit enforcement based on downloaded bytes (streaming mode)
+  // Since videos stream partially and never "complete", we trigger enforcement
+  // every _enforcementThresholdBytes of downloaded data.
+  static const int _enforcementThresholdBytes = 500 * 1024 * 1024; // 500 MB
+  static const int _enforcementDebounceMs =
+      10000; // 10 seconds minimum between enforcements
+  Timer? _enforcementTimer;
+  DateTime? _lastEnforcementTime;
+  int _totalBytesDownloadedSinceEnforcement = 0;
+
+  // ============================================================
   // OPTIMIZATION: Disk Safety Check Caching
   // ============================================================
   // Cache disk safety check result for 5 seconds to avoid redundant disk queries
@@ -783,6 +796,37 @@ class LocalStreamingProxy {
       isCompleted: local?['is_downloading_completed'] as bool? ?? false,
     );
 
+    // CACHE LIMIT ENFORCEMENT (STREAMING MODE):
+    // Since videos stream partially and never "complete", we track cumulative
+    // downloaded bytes and trigger enforcement every _enforcementThresholdBytes.
+    final previousInfo = _filePaths[id];
+    if (previousInfo != null) {
+      final previousBytes = previousInfo.downloadedPrefixSize;
+      final currentBytes = info.downloadedPrefixSize;
+      if (currentBytes > previousBytes) {
+        final delta = currentBytes - previousBytes;
+        _totalBytesDownloadedSinceEnforcement += delta;
+
+        // Check if we've crossed the threshold
+        if (_totalBytesDownloadedSinceEnforcement >=
+            _enforcementThresholdBytes) {
+          debugPrint(
+            'Proxy: Downloaded ${_totalBytesDownloadedSinceEnforcement ~/ (1024 * 1024)} MB since last enforcement, scheduling cleanup',
+          );
+          _scheduleEnforcement();
+        }
+      }
+    }
+
+    // Also trigger on download complete (for fully cached videos)
+    final wasCompleted = previousInfo?.isCompleted ?? false;
+    if (info.isCompleted && !wasCompleted) {
+      debugPrint(
+        'Proxy: Video $id download completed, scheduling cache enforcement',
+      );
+      _scheduleEnforcement();
+    }
+
     // CRITICAL FIX: Always process immediately if there are active waiters
     // for this file. This ensures MOOV-at-end videos don't stall.
     final hasActiveWaiter = _fileUpdateNotifiers.containsKey(id);
@@ -836,6 +880,38 @@ class LocalStreamingProxy {
       _fileUpdateNotifiers[id]?.add(null);
     }
     _pendingFileUpdates.clear();
+  }
+
+  /// Schedule cache limit enforcement with debounce.
+  /// Called when a video download completes to ensure cache stays within limit.
+  void _scheduleEnforcement() {
+    if (_enforcementTimer != null) return; // Already scheduled
+
+    final now = DateTime.now();
+    if (_lastEnforcementTime != null &&
+        now.difference(_lastEnforcementTime!).inMilliseconds <
+            _enforcementDebounceMs) {
+      // Recently enforced - schedule for later
+      final delay =
+          _enforcementDebounceMs -
+          now.difference(_lastEnforcementTime!).inMilliseconds;
+      _enforcementTimer = Timer(Duration(milliseconds: delay), () {
+        _enforcementTimer = null;
+        _runEnforcement();
+      });
+      return;
+    }
+
+    // Run immediately (first time or after debounce window)
+    _runEnforcement();
+  }
+
+  /// Execute the cache limit enforcement
+  Future<void> _runEnforcement() async {
+    _lastEnforcementTime = DateTime.now();
+    _totalBytesDownloadedSinceEnforcement = 0; // Reset counter
+    debugPrint('Proxy: Running cache limit enforcement');
+    await TelegramCacheService().enforceVideoSizeLimit();
   }
 
   Future<void> stop() async {
