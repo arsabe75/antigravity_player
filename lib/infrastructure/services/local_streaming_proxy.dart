@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'telegram_service.dart';
 import 'mp4_sample_table.dart';
@@ -520,6 +521,10 @@ class LocalStreamingProxy {
   HttpServer? _server;
   int _port = 0;
 
+  // Security: Session token to prevent unauthorized local access
+  // Generated on each start() call, required in all streaming URLs
+  String _sessionToken = '';
+
   // Cache of file_id -> ProxyFileInfo
   final Map<int, ProxyFileInfo> _filePaths = {};
 
@@ -770,6 +775,13 @@ class LocalStreamingProxy {
   Future<void> start() async {
     if (_server != null) return;
 
+    // Security: Generate random session token (32 hex characters)
+    final random = Random.secure();
+    final tokenBytes = List<int>.generate(16, (_) => random.nextInt(256));
+    _sessionToken = tokenBytes
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join();
+
     _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _port = _server!.port;
     debugPrint('LocalStreamingProxy running on port $_port');
@@ -928,7 +940,7 @@ class LocalStreamingProxy {
   }
 
   String getUrl(int fileId, int size) {
-    return 'http://127.0.0.1:$_port/stream?file_id=$fileId&size=$size';
+    return 'http://127.0.0.1:$_port/stream?token=$_sessionToken&file_id=$fileId&size=$size';
   }
 
   // Helper to get available bytes from the given offset
@@ -983,6 +995,16 @@ class LocalStreamingProxy {
     int start = 0;
     try {
       debugPrint('Proxy: Received request for ${request.uri}');
+
+      // Security: Validate session token
+      final tokenParam = request.uri.queryParameters['token'];
+      if (tokenParam != _sessionToken) {
+        debugPrint('Proxy: Invalid or missing token - rejecting request');
+        request.response.statusCode = HttpStatus.forbidden;
+        await request.response.close();
+        return;
+      }
+
       fileIdStr = request.uri.queryParameters['file_id'];
       final sizeStr = request.uri.queryParameters['size'];
 

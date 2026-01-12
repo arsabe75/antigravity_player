@@ -417,7 +417,7 @@ class PlayerNotifier extends _$PlayerNotifier {
 
       // Extract and store proxy file ID safely for disposal
       _currentProxyFileId = null;
-      if (path.contains('/stream?file_id=')) {
+      if (path.contains('file_id=')) {
         try {
           final uri = Uri.parse(path);
           final fileIdStr = uri.queryParameters['file_id'];
