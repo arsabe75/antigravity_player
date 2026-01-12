@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../infrastructure/services/telegram_service.dart';
+import '../../infrastructure/services/config_obfuscator.dart';
 import 'dart:io';
 import 'package:path_provider/path_provider.dart';
 import 'package:path/path.dart' as p;
@@ -21,16 +22,20 @@ class TelegramAuth extends _$TelegramAuth {
   late final TelegramService _service;
   StreamSubscription<Map<String, dynamic>>? _subscription;
 
-  // Read from environment variables
-  late final int _apiId =
-      int.tryParse(dotenv.env['TELEGRAM_API_ID'] ?? '') ?? 0;
-  late final String _apiHash = dotenv.env['TELEGRAM_API_HASH'] ?? '';
+  // Read and decode obfuscated credentials from environment variables
+  late final int _apiId = ConfigObfuscator.decodeInt(
+    dotenv.env['TELEGRAM_API_ID'] ?? '',
+  );
+  late final String _apiHash = ConfigObfuscator.decode(
+    dotenv.env['TELEGRAM_API_HASH'] ?? '',
+  );
 
   @override
   TelegramAuthState build() {
-    debugPrint(
-      'TelegramAuthNotifier: API_ID=$_apiId, API_HASH=$_apiHash',
-    ); // DEBUG
+    // Security: Don't log credentials in production
+    if (kDebugMode) {
+      debugPrint('TelegramAuthNotifier: Credentials loaded (hidden)');
+    }
     _service = TelegramService();
     // Defer initialization to avoid modifying provider during build
     Future.microtask(() => _init());
@@ -78,9 +83,10 @@ class TelegramAuth extends _$TelegramAuth {
         final tdlibPath = p.join(appDir.path, 'antigravity_tdlib');
         await Directory(tdlibPath).create(recursive: true);
 
-        debugPrint(
-          'Sending setTdlibParameters with API_ID=$_apiId, API_HASH=$_apiHash',
-        ); // DEBUG
+        // Security: Don't log credentials
+        if (kDebugMode) {
+          debugPrint('Sending setTdlibParameters...');
+        }
 
         _service.send({
           '@type': 'setTdlibParameters',
@@ -148,7 +154,10 @@ class TelegramAuth extends _$TelegramAuth {
   }
 
   void setPhoneNumber(String phoneNumber) {
-    debugPrint('Setting Phone Number: $phoneNumber');
+    // Security: Don't log phone numbers
+    if (kDebugMode) {
+      debugPrint('Setting Phone Number: ***hidden***');
+    }
     state = state.copyWith(isLoading: true, error: null);
     _service.send({
       '@type': 'setAuthenticationPhoneNumber',
