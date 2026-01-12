@@ -7,6 +7,7 @@
 #include "generated_plugin_registrant.h"
 
 #include <disk_space_2/disk_space_2_plugin.h>
+#include <flutter_secure_storage_windows/flutter_secure_storage_windows_plugin.h>
 #include <fvp/fvp_plugin_c_api.h>
 #include <media_kit_libs_windows_video/media_kit_libs_windows_video_plugin_c_api.h>
 #include <media_kit_video/media_kit_video_plugin_c_api.h>
@@ -16,6 +17,8 @@
 void RegisterPlugins(flutter::PluginRegistry* registry) {
   DiskSpace_2PluginRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("DiskSpace_2Plugin"));
+  FlutterSecureStorageWindowsPluginRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("FlutterSecureStorageWindowsPlugin"));
   FvpPluginCApiRegisterWithRegistrar(
       registry->GetRegistrarForPlugin("FvpPluginCApi"));
   MediaKitLibsWindowsVideoPluginCApiRegisterWithRegistrar(

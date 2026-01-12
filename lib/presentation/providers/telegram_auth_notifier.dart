@@ -14,6 +14,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
 import '../../infrastructure/services/playback_storage_service.dart';
 import '../../infrastructure/services/telegram_cache_service.dart';
+import '../../infrastructure/services/tdlib_encryption_service.dart';
 
 part 'telegram_auth_notifier.g.dart';
 
@@ -83,9 +84,13 @@ class TelegramAuth extends _$TelegramAuth {
         final tdlibPath = p.join(appDir.path, 'antigravity_tdlib');
         await Directory(tdlibPath).create(recursive: true);
 
+        // Get or create secure encryption key for TDLib database
+        final encryptionKey =
+            await TDLibEncryptionService.getOrCreateEncryptionKey();
+
         // Security: Don't log credentials
         if (kDebugMode) {
-          debugPrint('Sending setTdlibParameters...');
+          debugPrint('Sending setTdlibParameters (database encrypted)...');
         }
 
         _service.send({
@@ -93,7 +98,7 @@ class TelegramAuth extends _$TelegramAuth {
           'use_test_dc': false,
           'database_directory': tdlibPath,
           'files_directory': tdlibPath,
-          'database_encryption_key': '',
+          'database_encryption_key': encryptionKey,
           'use_file_database': true,
           'use_chat_info_database': true,
           'use_message_database': true,
@@ -103,17 +108,18 @@ class TelegramAuth extends _$TelegramAuth {
           'system_language_code': 'en',
           'device_model': 'Desktop',
           'system_version': Platform.operatingSystemVersion,
-          'application_version':
-              '1.0.0', // Reset to standard version now that we have new binary
+          'application_version': '1.0.0',
           'enable_storage_optimizer': true,
         });
         break;
 
       case 'authorizationStateWaitEncryptionKey':
-        // Check DB encryption key (empty for now)
+        // Provide the same encryption key used in setTdlibParameters
+        final encryptionKey =
+            await TDLibEncryptionService.getOrCreateEncryptionKey();
         _service.send({
           '@type': 'checkDatabaseEncryptionKey',
-          'encryption_key': '',
+          'encryption_key': encryptionKey,
         });
         break;
 
