@@ -4,7 +4,7 @@ import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 
 import '../../config/router/routes.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../../infrastructure/services/secure_storage_service.dart';
 import 'dart:convert';
 import 'package:window_manager/window_manager.dart';
 
@@ -36,7 +36,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
   }
 
   Future<void> _loadFavorites() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     final String? favoritesJson = prefs.getString('telegram_favorites');
     if (favoritesJson != null) {
       final cachedFavorites = List<Map<String, dynamic>>.from(
@@ -93,7 +93,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
   }
 
   Future<void> _saveFavorites() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     await prefs.setString('telegram_favorites', jsonEncode(_favorites));
   }
 

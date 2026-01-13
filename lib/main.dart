@@ -10,6 +10,7 @@ import 'config/theme/app_theme.dart';
 import 'config/constants/app_constants.dart';
 import 'presentation/providers/theme_provider.dart';
 import 'infrastructure/services/player_settings_service.dart';
+import 'infrastructure/services/secure_storage_service.dart';
 import 'presentation/providers/video_repository_provider.dart';
 
 class _PreloadedBackendNotifier extends PlayerBackend {
@@ -25,6 +26,9 @@ void main() async {
 
   // Load environment variables
   await dotenv.load(fileName: ".env");
+
+  // Initialize encrypted storage
+  await SecureStorageService.initialize();
 
   // Initialize MediaKit
   MediaKit.ensureInitialized();

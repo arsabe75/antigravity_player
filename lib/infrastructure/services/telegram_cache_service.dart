@@ -1,6 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_storage_service.dart';
 import 'package:disk_space_2/disk_space_2.dart';
 import '../../domain/entities/storage_statistics.dart';
 import 'telegram_service.dart';
@@ -103,7 +103,7 @@ class TelegramCacheService {
 
   /// Gets the user's video cache size limit preference.
   Future<CacheSizeLimit> getCacheSizeLimit() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     final index = prefs.getInt(_cacheSizeLimitKey);
 
     if (index == null || index < 0 || index >= CacheSizeLimit.values.length) {
@@ -115,7 +115,7 @@ class TelegramCacheService {
 
   /// Sets the user's video cache size limit preference.
   Future<void> setCacheSizeLimit(CacheSizeLimit limit) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     await prefs.setInt(_cacheSizeLimitKey, limit.index);
     debugPrint('TelegramCacheService: Video cache limit set to ${limit.label}');
   }
@@ -340,7 +340,7 @@ class TelegramCacheService {
 
   /// Gets the user's "Keep Media" duration preference.
   Future<KeepMediaDuration> getKeepMediaDuration() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     final index = prefs.getInt(_keepMediaKey);
 
     if (index == null ||
@@ -354,7 +354,7 @@ class TelegramCacheService {
 
   /// Sets the user's "Keep Media" duration preference.
   Future<void> setKeepMediaDuration(KeepMediaDuration duration) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     await prefs.setInt(_keepMediaKey, duration.index);
     debugPrint('TelegramCacheService: Keep Media set to ${duration.label}');
   }

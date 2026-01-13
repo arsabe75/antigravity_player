@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:path/path.dart' as p;
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_storage_service.dart';
 
 /// Representa un video en el historial
 class RecentVideo {
@@ -100,7 +100,7 @@ class RecentVideosService {
 
   /// Obtiene los videos recientes
   Future<List<RecentVideo>> getRecentVideos() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     final jsonList = prefs.getStringList(_key) ?? [];
 
     return jsonList
@@ -131,7 +131,7 @@ class RecentVideosService {
     int? telegramTopicId,
     String? telegramTopicName,
   }) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     final videos = await getRecentVideos();
 
     // Remove if already exists to update it (move to top)
@@ -197,7 +197,7 @@ class RecentVideosService {
 
   /// Actualiza la posición de un video
   Future<void> updatePosition(String path, Duration position) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     final videos = await getRecentVideos();
 
     final index = videos.indexWhere((v) => v.path == path);
@@ -223,7 +223,7 @@ class RecentVideosService {
 
   /// Elimina un video del historial
   Future<void> removeVideo(String path) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     final videos = await getRecentVideos();
     videos.removeWhere((v) => v.path == path);
 
@@ -233,13 +233,13 @@ class RecentVideosService {
 
   /// Limpia todo el historial
   Future<void> clearAll() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     await prefs.remove(_key);
   }
 
   /// Limpia solo los videos de Telegram
   Future<void> clearTelegramVideos() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     final videos = await getRecentVideos();
     // Keep only non-Telegram videos
     videos.removeWhere((v) => v.isTelegramVideo);
@@ -250,7 +250,7 @@ class RecentVideosService {
 
   /// Limpia solo los videos locales y de red (no Telegram)
   Future<void> clearLocalVideos() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     final videos = await getRecentVideos();
     // Keep only Telegram videos
     videos.removeWhere((v) => !v.isTelegramVideo);

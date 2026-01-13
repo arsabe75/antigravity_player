@@ -55,6 +55,7 @@ dependencies:
   path: ^1.8.3
   disk_space_2: ^1.0.5
   flutter_secure_storage: ^10.0.0
+  encrypt_shared_preferences: ^0.9.10
 
 dev_dependencies:
   flutter_test:

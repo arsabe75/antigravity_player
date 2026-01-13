@@ -10,7 +10,7 @@ import 'package:path/path.dart' as p;
 
 import 'state/telegram_auth_state.dart';
 export 'state/telegram_auth_state.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import '../../infrastructure/services/secure_storage_service.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
 import '../../infrastructure/services/playback_storage_service.dart';
 import '../../infrastructure/services/telegram_cache_service.dart';
@@ -189,7 +189,7 @@ class TelegramAuth extends _$TelegramAuth {
 
     try {
       // 1. Clear Favorites and Settings
-      final prefs = await SharedPreferences.getInstance();
+      final prefs = SecureStorageService.instance;
       await prefs.remove('telegram_favorites');
 
       // 2. Clear Recent Videos (Telegram only)

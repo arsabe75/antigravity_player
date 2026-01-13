@@ -1,4 +1,4 @@
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_storage_service.dart';
 
 class PlayerSettingsService {
   static const String _playerEngineKey = 'player_engine';
@@ -6,12 +6,12 @@ class PlayerSettingsService {
   static const String engineFvp = 'fvp';
 
   Future<void> savePlayerEngine(String engine) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     await prefs.setString(_playerEngineKey, engine);
   }
 
   Future<String> getPlayerEngine() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     return prefs.getString(_playerEngineKey) ?? engineMediaKit;
   }
 }

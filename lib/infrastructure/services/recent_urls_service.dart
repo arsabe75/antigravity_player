@@ -1,4 +1,4 @@
-import 'package:shared_preferences/shared_preferences.dart';
+import 'secure_storage_service.dart';
 
 /// Servicio para guardar y obtener URLs recientes
 class RecentUrlsService {
@@ -7,13 +7,13 @@ class RecentUrlsService {
 
   /// Obtiene las URLs recientes
   Future<List<String>> getRecentUrls() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     return prefs.getStringList(_key) ?? [];
   }
 
   /// Añade una URL a la lista de recientes
   Future<void> addUrl(String url) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     final urls = await getRecentUrls();
 
     // Remove if already exists (to move to top)
@@ -32,7 +32,7 @@ class RecentUrlsService {
 
   /// Elimina una URL de la lista de recientes
   Future<void> removeUrl(String url) async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     final urls = await getRecentUrls();
     urls.remove(url);
     await prefs.setStringList(_key, urls);
@@ -40,7 +40,7 @@ class RecentUrlsService {
 
   /// Limpia todas las URLs recientes
   Future<void> clearAll() async {
-    final prefs = await SharedPreferences.getInstance();
+    final prefs = SecureStorageService.instance;
     await prefs.remove(_key);
   }
 }
