@@ -634,11 +634,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         }
       },
       const SingleActivator(LogicalKeyboardKey.arrowLeft): () {
-        final newPos = state.position - AppConstants.seekDuration;
+        final newPos = state.position - AppConstants.shortSeekDuration;
         notifier.seekTo(newPos < Duration.zero ? Duration.zero : newPos);
       },
       const SingleActivator(LogicalKeyboardKey.arrowRight): () {
-        final newPos = state.position + AppConstants.seekDuration;
+        final newPos = state.position + AppConstants.shortSeekDuration;
         notifier.seekTo(newPos > state.duration ? state.duration : newPos);
       },
       const SingleActivator(LogicalKeyboardKey.keyJ): () {
@@ -649,6 +649,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         final newPos = state.position + AppConstants.seekDuration;
         notifier.seekTo(newPos > state.duration ? state.duration : newPos);
       },
+      // Playlist Navigation
+      const SingleActivator(LogicalKeyboardKey.keyN): onNext,
+      const SingleActivator(LogicalKeyboardKey.keyP): onPrevious,
+      // Stop / Back
+      const SingleActivator(LogicalKeyboardKey.keyS): _handleBack,
+
       const SingleActivator(LogicalKeyboardKey.keyM): notifier.toggleMute,
       const SingleActivator(LogicalKeyboardKey.arrowUp): () {
         final newVol = (state.volume + AppConstants.volumeStep).clamp(0.0, 1.0);

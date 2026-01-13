@@ -12,6 +12,9 @@ class AppConstants {
   /// Duración del seek con flechas del teclado
   static const seekDuration = Duration(seconds: 10);
 
+  /// Duración del seek corto (flechas)
+  static const shortSeekDuration = Duration(seconds: 5);
+
   /// Intervalo de actualización de la posición del video
   static const positionUpdateInterval = Duration(milliseconds: 200);
 
