@@ -213,6 +213,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
   Future<void> _handleBack() async {
     if (_isDisposing) return;
+
+    // Ensure we exit fullscreen before leaving
+    // This fixes the bug where the window gets stuck in a "fullscreen-like" state
+    // when exiting directly from fullscreen mode
+    final state = ref.read(playerProvider);
+    if (state.isFullscreen) {
+      await windowManager.setFullScreen(false);
+      // Sync state to avoid inconsistencies during dispose
+      ref.read(playerProvider.notifier).toggleFullscreen();
+    }
+
     setState(() {
       _isDisposing = true;
     });
