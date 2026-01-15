@@ -1445,7 +1445,31 @@ class LocalStreamingProxy {
       // 4. Stream Data Loop
       RandomAccessFile? raf;
       try {
-        raf = await file.open(mode: FileMode.read);
+        // FILE LOCKING FIX (Windows): TDLib may have the file locked while writing.
+        // Retry with exponential backoff to handle temporary file access issues.
+        const maxRetries = 5;
+        FileSystemException? lastError;
+        for (var attempt = 0; attempt < maxRetries; attempt++) {
+          try {
+            raf = await file.open(mode: FileMode.read);
+            break; // Success
+          } on FileSystemException catch (e) {
+            lastError = e;
+            if (attempt < maxRetries - 1) {
+              final delayMs = 50 * (1 << attempt); // 50, 100, 200, 400, 800ms
+              debugPrint(
+                'Proxy: File locked, retrying in ${delayMs}ms (attempt ${attempt + 1}/$maxRetries): ${e.message}',
+              );
+              await Future.delayed(Duration(milliseconds: delayMs));
+            }
+          }
+        }
+
+        // If still null after retries, throw the last error
+        if (raf == null) {
+          debugPrint('Proxy: Failed to open file after $maxRetries attempts');
+          throw lastError ?? FileSystemException('Failed to open file');
+        }
 
         int currentReadOffset = start;
         int remainingToSend = contentLength;
