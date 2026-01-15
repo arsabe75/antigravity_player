@@ -9,6 +9,7 @@ class AppTheme {
       brightness: Brightness.light,
     ),
     scaffoldBackgroundColor: Colors.white,
+    fontFamilyFallback: const ['Noto Color Emoji'],
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.white,
       foregroundColor: Colors.black,
@@ -24,6 +25,7 @@ class AppTheme {
       brightness: Brightness.dark,
     ),
     scaffoldBackgroundColor: const Color(0xFF121212),
+    fontFamilyFallback: const ['Noto Color Emoji'],
     appBarTheme: const AppBarTheme(
       backgroundColor: Color(0xFF121212),
       foregroundColor: Colors.white,
