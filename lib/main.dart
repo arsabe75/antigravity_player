@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -70,11 +71,44 @@ void main() async {
   );
 }
 
-class VideoPlayerApp extends ConsumerWidget {
+class VideoPlayerApp extends ConsumerStatefulWidget {
   const VideoPlayerApp({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<VideoPlayerApp> createState() => _VideoPlayerAppState();
+}
+
+class _VideoPlayerAppState extends ConsumerState<VideoPlayerApp>
+    with WindowListener {
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+    // Enable window close interception for proper cleanup
+    windowManager.setPreventClose(true);
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  @override
+  Future<void> onWindowClose() async {
+    if (Platform.isLinux) {
+      // On Linux, use immediate exit to bypass the problematic OpenGL shader
+      // cleanup phase. The warnings occur because Flutter tries to cleanup
+      // compositor shaders after the OpenGL context is already lost.
+      exit(0);
+    } else {
+      // On Windows, windowManager.destroy() works correctly
+      await windowManager.destroy();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final themeMode = ref.watch(themeProvider);
     final router = ref.watch(appRouterProvider);
 

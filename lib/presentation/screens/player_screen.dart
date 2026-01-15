@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -91,9 +90,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       });
     }
 
-    // Prevent default close to handle cleanup
-    windowManager.setPreventClose(true);
-
     _initMediaControl();
   }
 
@@ -163,7 +159,6 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
   void dispose() {
     _mediaControl.dispose();
     windowManager.removeListener(this);
-    windowManager.setPreventClose(false);
     _hideTimer?.cancel();
     _focusNode.dispose();
     super.dispose();
@@ -186,8 +181,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       await ref.read(playerProvider.notifier).stop();
     }
 
-    // Use exit(0) to force a clean shutdown of the process
-    exit(0);
+    // Global handler in main.dart will call windowManager.destroy()
   }
 
   void _startHideTimer() {
