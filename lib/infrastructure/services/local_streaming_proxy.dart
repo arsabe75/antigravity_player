@@ -533,6 +533,12 @@ class LocalStreamingProxy {
   // File update notifiers for blocking waits
   final Map<int, StreamController<void>> _fileUpdateNotifiers = {};
 
+  // EVENT-DRIVEN WAITS: Completers that wait for specific byte offsets
+  // Key: fileId, Value: List of (requiredOffset, Completer) pairs
+  // When updateFile arrives with data at an offset, matching Completers are completed
+  final Map<int, List<MapEntry<int, Completer<void>>>>
+  _byteAvailabilityWaiters = {};
+
   // Track aborted requests to cancel waiting loops
   final Set<int> _abortedRequests = {};
 
@@ -841,10 +847,34 @@ class LocalStreamingProxy {
     // CRITICAL FIX: Always process immediately if there are active waiters
     // for this file. This ensures MOOV-at-end videos don't stall.
     final hasActiveWaiter = _fileUpdateNotifiers.containsKey(id);
-    if (hasActiveWaiter) {
+    final hasActiveByteWaiter = _byteAvailabilityWaiters.containsKey(id);
+    if (hasActiveWaiter || hasActiveByteWaiter) {
       // Process this update immediately - someone is waiting for it
       _filePaths[id] = info;
       _fileUpdateNotifiers[id]?.add(null);
+
+      // EVENT-DRIVEN: Wake up byte availability waiters whose offsets are now satisfied
+      if (hasActiveByteWaiter) {
+        final waiters = _byteAvailabilityWaiters[id]!;
+        waiters.removeWhere((entry) {
+          final requiredOffset = entry.key;
+          final completer = entry.value;
+
+          // Check if data is now available at the required offset
+          if (info.availableBytesFrom(requiredOffset) > 0) {
+            if (!completer.isCompleted) {
+              completer.complete();
+            }
+            return true; // Remove from list
+          }
+          return false;
+        });
+
+        // Clean up empty waiter lists
+        if (waiters.isEmpty) {
+          _byteAvailabilityWaiters.remove(id);
+        }
+      }
       return;
     }
 
@@ -1424,7 +1454,6 @@ class LocalStreamingProxy {
         if (!_fileUpdateNotifiers.containsKey(fileId)) {
           _fileUpdateNotifiers[fileId] = StreamController.broadcast();
         }
-        final updateStream = _fileUpdateNotifiers[fileId]!.stream;
 
         while (remainingToSend > 0) {
           if (_abortedRequests.contains(fileId)) {
@@ -1609,7 +1638,7 @@ class LocalStreamingProxy {
                 }
               }
             } else {
-              // NO DATA AVAILABLE -> BLOCKING WAIT
+              // NO DATA AVAILABLE -> BLOCKING WAIT (EVENT-DRIVEN)
               final cached = _filePaths[fileId];
               debugPrint(
                 'Proxy: Waiting for data at $currentReadOffset for $fileId '
@@ -1623,10 +1652,6 @@ class LocalStreamingProxy {
                 isBlocking: true,
               );
 
-              // Wait for updateFile that provides the data we need
-              // This is more like Unigram's event-based waiting
-              int waitAttempts = 0;
-
               // EXTENDED TIMEOUT FOR MOOV ATOM: Requests near end of file need more time
               // because TDLib must start a new download from a distant offset
               final fileInfo = _filePaths[fileId];
@@ -1638,38 +1663,39 @@ class LocalStreamingProxy {
                   distanceFromEnd > 0 && distanceFromEnd < 10 * 1024 * 1024;
 
               // Use 15 seconds for moov requests, 5 seconds for normal data
-              final maxWaitAttempts = isMoovRequest
-                  ? 75
-                  : 25; // 75 * 200ms = 15 seconds
+              final timeout = isMoovRequest
+                  ? const Duration(seconds: 15)
+                  : const Duration(seconds: 5);
 
-              while (waitAttempts < maxWaitAttempts) {
+              // EVENT-DRIVEN WAIT: Register a Completer and wait for _onUpdate to wake us
+              final completer = Completer<void>();
+              _byteAvailabilityWaiters.putIfAbsent(fileId, () => []);
+              _byteAvailabilityWaiters[fileId]!.add(
+                MapEntry(currentReadOffset, completer),
+              );
+
+              try {
+                // Wait for data to become available (or timeout)
+                await completer.future.timeout(
+                  timeout,
+                  onTimeout: () {
+                    // Timeout - remove our waiter and check manually
+                    _byteAvailabilityWaiters[fileId]?.removeWhere(
+                      (e) => e.value == completer,
+                    );
+                    if (_byteAvailabilityWaiters[fileId]?.isEmpty ?? false) {
+                      _byteAvailabilityWaiters.remove(fileId);
+                    }
+                  },
+                );
+
+                // Check if aborted during wait
                 if (_abortedRequests.contains(fileId)) {
                   debugPrint('Proxy: Wait aborted for $fileId');
                   return;
                 }
-
-                // Check if we have data NOW
-                final currentCached = _filePaths[fileId];
-                final prefix = currentCached?.downloadedPrefixSize ?? 0;
-                final offset = currentCached?.downloadOffset ?? 0;
-
-                // Condition 1: Prefix covers our read offset (Continuous from start)
-                if (currentReadOffset < prefix) {
-                  break; // Data is available!
-                }
-
-                // Condition 2: Download offset covers our read offset (Sparse download)
-                if (currentReadOffset >= offset &&
-                    currentReadOffset < (currentCached?.totalSize ?? 0)) {
-                  // We might have data, but we need to verify if the file on disk typically
-                  // has it. TDLib reports downloaded_prefix_size reliably, but for
-                  // sparse parts, we rely on the file size growing.
-                  // For simplicity, if we are in the "active zone", we retry reading.
-                  break;
-                }
-
-                await Future.delayed(const Duration(milliseconds: 200));
-                waitAttempts++;
+              } catch (_) {
+                // Timeout or error - check data availability manually on next loop
               }
             }
 
@@ -1680,7 +1706,7 @@ class LocalStreamingProxy {
             // range requests for the same file.
             // _scheduleReadAhead(fileId, currentReadOffset);
           } else {
-            // NO DATA AVAILABLE -> BLOCKING WAIT
+            // NO DATA AVAILABLE -> BLOCKING WAIT (EVENT-DRIVEN)
             final cached = _filePaths[fileId];
             debugPrint(
               'Proxy: Waiting for data at $currentReadOffset for $fileId '
@@ -1690,12 +1716,7 @@ class LocalStreamingProxy {
             // Ensure download is started at the exact offset the player needs
             _startDownloadAtOffset(fileId, currentReadOffset, isBlocking: true);
 
-            // Wait for updateFile that provides the data we need
-            // This is more like Unigram's event-based waiting
-            int waitAttempts = 0;
-
             // EXTENDED TIMEOUT FOR MOOV ATOM: Requests near end of file need more time
-            // because TDLib must start a new download from a distant offset
             final fileInfo = _filePaths[fileId];
             final totalFileSize = fileInfo?.totalSize ?? 0;
             final distanceFromEnd = totalFileSize > 0
@@ -1705,59 +1726,88 @@ class LocalStreamingProxy {
                 distanceFromEnd > 0 && distanceFromEnd < 10 * 1024 * 1024;
 
             // Use 15 seconds for moov requests, 5 seconds for normal data
-            final maxWaitAttempts = isMoovRequest
-                ? 75
-                : 25; // 75 * 200ms = 15 seconds
+            final timeout = isMoovRequest
+                ? const Duration(seconds: 15)
+                : const Duration(seconds: 5);
 
-            while (waitAttempts < maxWaitAttempts) {
+            // EVENT-DRIVEN WAIT: Register a Completer and wait for _onUpdate to wake us
+            final completer = Completer<void>();
+            _byteAvailabilityWaiters.putIfAbsent(fileId, () => []);
+            _byteAvailabilityWaiters[fileId]!.add(
+              MapEntry(currentReadOffset, completer),
+            );
+
+            // STALL DETECTION: Check for stalls every 2 seconds while waiting
+            // Capture values in local finals to avoid nullable issues in closure
+            final capturedFileId = fileId;
+            final capturedOffset = currentReadOffset;
+            Timer? stallTimer;
+            stallTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+              if (completer.isCompleted) {
+                stallTimer?.cancel();
+                return;
+              }
+
+              // MOOV PROTECTION: Don't restart download if MOOV download is in progress
+              // This prevents the cycle of cancellations seen with MOOV-at-end videos
+              if (_forcedMoovOffset.containsKey(capturedFileId)) {
+                debugPrint(
+                  'Proxy: Stall timer - MOOV download in progress for $capturedFileId, skipping restart',
+                );
+                return;
+              }
+
+              final updatedCache = _filePaths[capturedFileId];
+              if (updatedCache != null) {
+                // ACTIVE DOWNLOAD PROTECTION: Don't restart if download is actively running
+                // The download may be at a different offset but will eventually provide data
+                if (updatedCache.isDownloadingActive) {
+                  return;
+                }
+
+                final currentPrefix = updatedCache.downloadedPrefixSize;
+                final lastPrefix = _lastDownloadProgress[capturedFileId] ?? 0;
+
+                if (currentPrefix <= lastPrefix) {
+                  // No progress and download not active - restart
+                  final metrics = _downloadMetrics[capturedFileId];
+                  if (metrics != null) {
+                    metrics.recordStall();
+                    debugPrint(
+                      'Proxy: P2 STALL RECORDED for $capturedFileId (total: ${metrics.recentStallCount})',
+                    );
+                  }
+                  _startDownloadAtOffset(capturedFileId, capturedOffset);
+                }
+                _lastDownloadProgress[capturedFileId] = currentPrefix;
+              }
+            });
+
+            try {
+              // Wait for data to become available (or timeout)
+              await completer.future.timeout(
+                timeout,
+                onTimeout: () {
+                  // Timeout - clean up and fall through
+                  _byteAvailabilityWaiters[fileId]?.removeWhere(
+                    (e) => e.value == completer,
+                  );
+                  if (_byteAvailabilityWaiters[fileId]?.isEmpty ?? false) {
+                    _byteAvailabilityWaiters.remove(fileId);
+                  }
+                },
+              );
+
+              // Check if aborted during wait
               if (_abortedRequests.contains(fileId)) {
                 debugPrint('Proxy: Wait aborted for $fileId');
+                stallTimer.cancel();
                 break;
               }
-
-              // Check if data became available in cache (from updateFile)
-              final updatedCache = _filePaths[fileId];
-              if (updatedCache != null) {
-                final nowAvailable = updatedCache.availableBytesFrom(
-                  currentReadOffset,
-                );
-                if (nowAvailable > 0) {
-                  break; // Data is now available, exit wait loop
-                }
-
-                // DOWNLOAD STALL DETECTION: Only restart if download is truly stalled.
-                // Don't restart just because current offset isn't being downloaded -
-                // another request might be downloading at a different offset which
-                // will eventually reach our position.
-                // Restart only after 10 attempts (2 seconds) with no progress at all.
-                final currentPrefix = updatedCache.downloadedPrefixSize;
-                final lastPrefix = _lastDownloadProgress[fileId] ?? 0;
-                if (waitAttempts % 10 == 9) {
-                  if (currentPrefix <= lastPrefix &&
-                      !updatedCache.isDownloadingActive) {
-                    // No progress in last 2 seconds and download not active - restart
-                    // P2: Record stall for adaptive buffer escalation
-                    final metrics = _downloadMetrics[fileId];
-                    if (metrics != null) {
-                      metrics.recordStall();
-                      debugPrint(
-                        'Proxy: P2 STALL RECORDED for $fileId (total: ${metrics.recentStallCount})',
-                      );
-                    }
-                    _startDownloadAtOffset(fileId, currentReadOffset);
-                  }
-                  _lastDownloadProgress[fileId] = currentPrefix;
-                }
-              }
-
-              try {
-                await updateStream.first.timeout(
-                  const Duration(milliseconds: 200),
-                );
-              } catch (_) {
-                // Timeout, check again
-              }
-              waitAttempts++;
+            } catch (_) {
+              // Timeout or error - continue loop to retry
+            } finally {
+              stallTimer.cancel();
             }
           }
         }
