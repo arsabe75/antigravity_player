@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 
 class AppTheme {
@@ -9,7 +10,7 @@ class AppTheme {
       brightness: Brightness.light,
     ),
     scaffoldBackgroundColor: Colors.white,
-    fontFamilyFallback: const ['Noto Color Emoji'],
+    fontFamilyFallback: Platform.isWindows ? const ['Noto Color Emoji'] : null,
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.white,
       foregroundColor: Colors.black,
@@ -25,7 +26,7 @@ class AppTheme {
       brightness: Brightness.dark,
     ),
     scaffoldBackgroundColor: const Color(0xFF121212),
-    fontFamilyFallback: const ['Noto Color Emoji'],
+    fontFamilyFallback: Platform.isWindows ? const ['Noto Color Emoji'] : null,
     appBarTheme: const AppBarTheme(
       backgroundColor: Color(0xFF121212),
       foregroundColor: Colors.white,
