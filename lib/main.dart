@@ -13,6 +13,7 @@ import 'presentation/providers/theme_provider.dart';
 import 'infrastructure/services/player_settings_service.dart';
 import 'infrastructure/services/secure_storage_service.dart';
 import 'presentation/providers/video_repository_provider.dart';
+import 'presentation/providers/player_notifier.dart';
 
 class _PreloadedBackendNotifier extends PlayerBackend {
   final String initialBackend;
@@ -96,6 +97,13 @@ class _VideoPlayerAppState extends ConsumerState<VideoPlayerApp>
 
   @override
   Future<void> onWindowClose() async {
+    // Stop player immediately to prevent audio from continuing after close
+    try {
+      await ref.read(playerProvider.notifier).stop();
+    } catch (_) {
+      // Ignore if provider doesn't exist (e.g., never navigated to player)
+    }
+
     if (Platform.isLinux) {
       // On Linux, use immediate exit to bypass the problematic OpenGL shader
       // cleanup phase. The warnings occur because Flutter tries to cleanup
