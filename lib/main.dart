@@ -102,8 +102,11 @@ class _VideoPlayerAppState extends ConsumerState<VideoPlayerApp>
       // compositor shaders after the OpenGL context is already lost.
       exit(0);
     } else {
-      // On Windows, windowManager.destroy() works correctly
-      await windowManager.destroy();
+      // On Windows, using setPreventClose(false) + close() is faster than destroy()
+      // because it sends the native WM_CLOSE signal directly instead of waiting
+      // for Flutter's full cleanup cycle
+      await windowManager.setPreventClose(false);
+      await windowManager.close();
     }
   }
 
