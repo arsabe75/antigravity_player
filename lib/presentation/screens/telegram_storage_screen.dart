@@ -396,78 +396,54 @@ class TelegramStorageScreen extends ConsumerWidget {
                 ),
               ],
             ),
-            // Show usage progress bar if limit is set
-            if (!cacheState.cacheSizeLimit.isUnlimited) ...[
-              const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Text(
-                    StorageStatistics.formatBytes(videoSize),
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: isNearLimit
-                          ? theme.colorScheme.error
-                          : theme.colorScheme.onSurfaceVariant,
-                      fontWeight: isNearLimit ? FontWeight.bold : null,
-                    ),
+            // Show usage progress bar
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Text(
+                  StorageStatistics.formatBytes(videoSize),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: isNearLimit
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.onSurfaceVariant,
+                    fontWeight: isNearLimit ? FontWeight.bold : null,
                   ),
-                  Text(
-                    cacheState.cacheSizeLimit.label,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(4),
-                child: LinearProgressIndicator(
-                  value: usagePercent,
-                  backgroundColor: theme.colorScheme.surfaceContainerHighest,
-                  valueColor: AlwaysStoppedAnimation(
-                    isNearLimit ? theme.colorScheme.error : Colors.blue,
-                  ),
-                  minHeight: 8,
                 ),
-              ),
-              if (isNearLimit) ...[
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Icon(
-                      LucideIcons.alertTriangle,
-                      size: 14,
-                      color: theme.colorScheme.error,
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Approaching limit - oldest videos will be auto-deleted',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.error,
-                      ),
-                    ),
-                  ],
+                Text(
+                  cacheState.cacheSizeLimit.label,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
-            ],
-            // Warning for unlimited mode
-            if (cacheState.cacheSizeLimit.isUnlimited) ...[
+            ),
+            const SizedBox(height: 4),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(4),
+              child: LinearProgressIndicator(
+                value: usagePercent,
+                backgroundColor: theme.colorScheme.surfaceContainerHighest,
+                valueColor: AlwaysStoppedAnimation(
+                  isNearLimit ? theme.colorScheme.error : Colors.blue,
+                ),
+                minHeight: 8,
+              ),
+            ),
+            if (isNearLimit) ...[
               const SizedBox(height: 8),
               Row(
                 children: [
                   Icon(
-                    LucideIcons.info,
+                    LucideIcons.alertTriangle,
                     size: 14,
-                    color: theme.colorScheme.onSurfaceVariant,
+                    color: theme.colorScheme.error,
                   ),
                   const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      'No limit: ${StorageStatistics.formatBytes(cacheState.availableDiskSpace)} disk space available',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
+                  Text(
+                    'Approaching limit - oldest videos will be auto-deleted',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.error,
                     ),
                   ),
                 ],

@@ -107,7 +107,7 @@ class TelegramCacheService {
     final index = prefs.getInt(_cacheSizeLimitKey);
 
     if (index == null || index < 0 || index >= CacheSizeLimit.values.length) {
-      return CacheSizeLimit.unlimited; // Default
+      return CacheSizeLimit.gb10; // Default (10 GB)
     }
 
     return CacheSizeLimit.values[index];
@@ -141,17 +141,13 @@ class TelegramCacheService {
       // Determine effective limit (min of User Preference AND Physical Limit)
       int effectiveLimitBytes;
 
-      if (userLimit.isUnlimited) {
+      effectiveLimitBytes = userLimit.sizeInBytes;
+      // If physical space is tight, lower the limit
+      if (maxPhysicalLimit < effectiveLimitBytes) {
+        debugPrint(
+          'TelegramCacheService: Disk space tight! Lowering limit from ${_formatBytes(effectiveLimitBytes)} to ${_formatBytes(maxPhysicalLimit)}',
+        );
         effectiveLimitBytes = maxPhysicalLimit;
-      } else {
-        effectiveLimitBytes = userLimit.sizeInBytes;
-        // If physical space is tight, lower the limit
-        if (maxPhysicalLimit < effectiveLimitBytes) {
-          debugPrint(
-            'TelegramCacheService: Disk space tight! Lowering limit from ${_formatBytes(effectiveLimitBytes)} to ${_formatBytes(maxPhysicalLimit)}',
-          );
-          effectiveLimitBytes = maxPhysicalLimit;
-        }
       }
 
       // Ensure limit is not negative

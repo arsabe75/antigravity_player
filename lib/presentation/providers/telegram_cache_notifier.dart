@@ -21,7 +21,7 @@ class TelegramCacheState {
   const TelegramCacheState({
     this.statistics,
     this.keepMediaDuration = KeepMediaDuration.forever,
-    this.cacheSizeLimit = CacheSizeLimit.unlimited,
+    this.cacheSizeLimit = CacheSizeLimit.gb10,
     this.availableDiskSpace = 0,
     this.totalDiskSpace = 0,
     this.isLoading = false,
@@ -32,14 +32,12 @@ class TelegramCacheState {
 
   /// Returns true if video cache is approaching the limit (>80%).
   bool get isVideoNearLimit {
-    if (cacheSizeLimit.isUnlimited) return false;
     final videoSize = statistics?.videoSize ?? 0;
     return videoSize > (cacheSizeLimit.sizeInBytes * 0.8);
   }
 
   /// Returns the video cache usage percentage (0.0 to 1.0).
   double get videoCacheUsagePercent {
-    if (cacheSizeLimit.isUnlimited) return 0.0;
     final videoSize = statistics?.videoSize ?? 0;
     if (cacheSizeLimit.sizeInBytes <= 0) return 0.0;
     return (videoSize / cacheSizeLimit.sizeInBytes).clamp(0.0, 1.0);
@@ -173,10 +171,8 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
     await _service.setCacheSizeLimit(limit);
     state = state.copyWith(cacheSizeLimit: limit);
 
-    // Enforce new limit immediately if not unlimited
-    if (!limit.isUnlimited) {
-      await _service.enforceVideoSizeLimit();
-      await loadStatistics(); // Reload stats after enforcement
-    }
+    // Enforce new limit immediately
+    await _service.enforceVideoSizeLimit();
+    await loadStatistics(); // Reload stats after enforcement
   }
 }

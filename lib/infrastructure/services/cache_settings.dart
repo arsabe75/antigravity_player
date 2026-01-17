@@ -18,17 +18,17 @@ enum CacheSizeLimit {
   /// 10 GB - Maximum recommended
   gb10(10737418240, '10 GB'), // 10 * 1024^3
 
-  /// No limit - cache can grow indefinitely (current behavior)
-  unlimited(-1, 'Unlimited');
+  /// 30 GB - Large cache
+  gb30(32212254720, '30 GB'), // 30 * 1024^3
 
-  /// Size in bytes, -1 for unlimited
+  /// 50 GB - Extra large cache
+  gb50(53687091200, '50 GB'); // 50 * 1024^3
+
+  /// Size in bytes
   final int sizeInBytes;
 
   /// Human-readable label for UI
   final String label;
 
   const CacheSizeLimit(this.sizeInBytes, this.label);
-
-  /// Returns true if this limit has no cap.
-  bool get isUnlimited => sizeInBytes < 0;
 }
