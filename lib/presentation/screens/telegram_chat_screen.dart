@@ -34,10 +34,35 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
   Widget build(BuildContext context) {
     final state = ref.watch(telegramChatProvider(_params));
 
-    // Filter for video or video note messages
+    // Filter for video or video note messages, including MKV documents
     final videoMessages = state.messages.where((m) {
       final content = m['content'];
-      return content != null && (content['@type'] == 'messageVideo');
+      if (content == null) return false;
+
+      // Standard mp4/mov videos
+      if (content['@type'] == 'messageVideo') return true;
+
+      // MKV and other video formats sent as documents
+      if (content['@type'] == 'messageDocument') {
+        final document = content['document'];
+        final mimeType = (document['mime_type'] as String? ?? '').toLowerCase();
+        final fileName = (document['file_name'] as String? ?? '').toLowerCase();
+
+        if (mimeType.startsWith('video/')) return true;
+
+        const videoExtensions = [
+          '.mkv',
+          '.avi',
+          '.mp4',
+          '.mov',
+          '.webm',
+          '.flv',
+        ];
+        for (final ext in videoExtensions) {
+          if (fileName.endsWith(ext)) return true;
+        }
+      }
+      return false;
     }).toList();
 
     // Auto-load more if we have very few videos and there's more history
@@ -130,9 +155,28 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                       delegate: SliverChildBuilderDelegate((context, index) {
                         final msg = videoMessages[index];
                         final content = msg['content'];
-                        final video = content['video'];
-                        final fileId = video['video']['id'] as int;
-                        final size = video['video']['size'] as int?;
+
+                        int fileId;
+                        int? size;
+                        int duration = 0;
+                        String? rawFileName;
+
+                        if (content['@type'] == 'messageVideo') {
+                          final video = content['video'];
+                          fileId = video['video']['id'];
+                          size = video['video']['size'];
+                          duration = video['duration'] ?? 0;
+                          rawFileName = video['file_name'];
+                        } else if (content['@type'] == 'messageDocument') {
+                          final doc = content['document'];
+                          fileId = doc['document']['id'];
+                          size = doc['document']['size'];
+                          rawFileName = doc['file_name'];
+                          // Documents don't provide duration in the message object
+                          duration = 0;
+                        } else {
+                          return const SizedBox.shrink();
+                        }
 
                         // P1: Two-tier preloading
                         // Visible items (first 10) get higher priority preload
@@ -169,13 +213,17 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                           }
                         }
 
-                        String? rawFileName = video['file_name']?.toString();
-                        if (rawFileName != null && rawFileName.trim().isEmpty) {
-                          rawFileName = null;
+                        // Use rawFileName extracted above instead of getting it from video['file_name']
+                        String? effectiveFileName = rawFileName;
+                        if (effectiveFileName != null &&
+                            effectiveFileName.trim().isEmpty) {
+                          effectiveFileName = null;
                         }
 
                         final fileName =
-                            captionText ?? rawFileName ?? 'Video sin título';
+                            captionText ??
+                            effectiveFileName ??
+                            'Video sin título';
 
                         return Card(
                           clipBehavior: Clip.antiAlias,
@@ -237,15 +285,22 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                               4,
                                             ),
                                           ),
-                                          child: Text(
-                                            _formatDuration(
-                                              video['duration'] ?? 0,
-                                            ),
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 12,
-                                            ),
-                                          ),
+                                          child: duration > 0
+                                              ? Text(
+                                                  _formatDuration(duration),
+                                                  style: const TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 12,
+                                                  ),
+                                                )
+                                              : const Text(
+                                                  'MKV', // Badge for files without duration (likely MKV)
+                                                  style: TextStyle(
+                                                    color: Colors.white,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
                                         ),
                                       ),
                                     ],

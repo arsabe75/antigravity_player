@@ -320,6 +320,16 @@ class PlayerNotifier extends _$PlayerNotifier {
             storageKey,
             state.position.inMilliseconds,
           );
+
+          // NEW: Update position in Recent Videos list for UI consistency
+          // This ensures the Recent Videos screen shows actual progress bars
+          if (state.currentVideoPath != null) {
+            final recentService = RecentVideosService();
+            await recentService.updatePosition(
+              state.currentVideoPath!,
+              state.position,
+            );
+          }
         }
       }
     } catch (e) {

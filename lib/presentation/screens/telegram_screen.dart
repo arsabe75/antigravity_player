@@ -439,23 +439,31 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                         final content =
                             messageResult['content'] as Map<String, dynamic>?;
                         if (content != null) {
-                          final videoContent =
-                              content['video'] as Map<String, dynamic>?;
-                          if (videoContent != null) {
-                            final videoFile =
-                                videoContent['video'] as Map<String, dynamic>?;
-                            if (videoFile != null) {
-                              final freshFileId = videoFile['id'] as int?;
-                              final size =
-                                  videoFile['size'] as int? ??
-                                  video.telegramFileSize ??
-                                  0;
-                              if (freshFileId != null) {
-                                url = proxy.getUrl(freshFileId, size);
-                                debugPrint(
-                                  'TelegramScreen: Got fresh file_id: $freshFileId, size: $size',
-                                );
-                              }
+                          // Try getting from messageVideo
+                          var videoFile = content['video'] != null
+                              ? content['video']['video']
+                                    as Map<String, dynamic>?
+                              : null;
+
+                          // Fallback: Try getting from messageDocument (MKV)
+                          if (videoFile == null &&
+                              content['document'] != null) {
+                            videoFile =
+                                content['document']['document']
+                                    as Map<String, dynamic>?;
+                          }
+
+                          if (videoFile != null) {
+                            final freshFileId = videoFile['id'] as int?;
+                            final size =
+                                videoFile['size'] as int? ??
+                                video.telegramFileSize ??
+                                0;
+                            if (freshFileId != null) {
+                              url = proxy.getUrl(freshFileId, size);
+                              debugPrint(
+                                'TelegramScreen: Got fresh file_id: $freshFileId, size: $size',
+                              );
                             }
                           }
                         }
