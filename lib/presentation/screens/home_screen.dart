@@ -92,12 +92,10 @@ class HomeScreen extends ConsumerWidget {
                                   const SizedBox(
                                     height: 60,
                                   ), // Space for top bar
-                                  Icon(
-                                    LucideIcons.clapperboard,
-                                    size: 64,
-                                    color: Theme.of(
-                                      context,
-                                    ).colorScheme.primary,
+                                  Image.asset(
+                                    'assets/icon/app_icon_v2.png',
+                                    width: 120,
+                                    height: 120,
                                   ),
                                   const SizedBox(height: 32),
                                   Text(

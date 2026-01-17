@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=Antigravity Player
+Comment=Futuristic Video Player
+# Update Exec to the actual path of the executable
+Exec=/path/to/antigravity_player
+# Update Icon to the actual path of the icon or 'antigravity_player' if installed in system icons
+Icon=/path/to/assets/icon/app_icon.png
+Terminal=false
+Type=Application
+Categories=AudioVideo;Player;Video;
+Keywords=video;movie;player;
+StartupNotify=true
