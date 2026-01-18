@@ -380,6 +380,28 @@ class TelegramStorageScreen extends ConsumerWidget {
                   value: cacheState.cacheSizeLimit,
                   onChanged: (value) {
                     if (value != null) {
+                      // Validate if user has enough space
+                      // Max Safe = Current Video Usage + Free Space - Safety Buffer (500MB)
+                      final currentVideoSize =
+                          cacheState.statistics?.videoSize ?? 0;
+                      final safetyBuffer = 500 * 1024 * 1024; // 500 MB
+                      final maxSafeSpace =
+                          currentVideoSize +
+                          cacheState.availableDiskSpace -
+                          safetyBuffer;
+
+                      if (value.sizeInBytes > maxSafeSpace) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Not enough disk space for ${value.label}. Max available: ${StorageStatistics.formatBytes(maxSafeSpace)}',
+                            ),
+                            backgroundColor: theme.colorScheme.error,
+                          ),
+                        );
+                        return;
+                      }
+
                       ref
                           .read(telegramCacheProvider.notifier)
                           .setCacheSizeLimit(value);
