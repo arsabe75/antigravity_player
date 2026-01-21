@@ -9,6 +9,9 @@ import 'video_repository_provider.dart';
 import '../../domain/repositories/streaming_repository.dart';
 import '../../infrastructure/services/playback_storage_service.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
+import '../../application/use_cases/save_progress_use_case.dart';
+import '../../application/use_cases/clear_finished_progress_use_case.dart';
+import '../../application/services/storage_key_service.dart';
 import 'player_state.dart';
 
 part 'player_notifier.g.dart';
@@ -86,12 +89,16 @@ part 'player_notifier.g.dart';
     playbackStorageService,
     streamingRepository,
     PlayerBackend,
+    saveProgressUseCase,
+    clearFinishedProgressUseCase,
   ],
 )
 class PlayerNotifier extends _$PlayerNotifier {
   late final VideoRepository _repository;
   late final PlaybackStorageService _storageService;
   late final StreamingRepository _streamingRepository;
+  late final SaveProgressUseCase _saveProgressUseCase;
+  late final ClearFinishedProgressUseCase _clearFinishedProgressUseCase;
   StreamSubscription? _positionSub;
   StreamSubscription? _durationSub;
   StreamSubscription? _playingSub;
@@ -123,6 +130,10 @@ class PlayerNotifier extends _$PlayerNotifier {
     _repository = ref.watch(videoRepositoryProvider);
     _storageService = ref.watch(playbackStorageServiceProvider);
     _streamingRepository = ref.watch(streamingRepositoryProvider);
+    _saveProgressUseCase = ref.watch(saveProgressUseCaseProvider);
+    _clearFinishedProgressUseCase = ref.watch(
+      clearFinishedProgressUseCaseProvider,
+    );
     _initStreams();
 
     // Registramos la limpieza de recursos.
@@ -271,21 +282,21 @@ class PlayerNotifier extends _$PlayerNotifier {
   ///
   /// This is called BEFORE state is reset to ensure we use the correct
   /// position/duration values from the completed video, not from the next video.
-  /// This fixes the race condition where _savePosition() would fail to clear
-  /// progress because state.duration was already reset to zero by loadVideo().
+  /// Delegates to ClearFinishedProgressUseCase for business logic.
   Future<void> _clearProgressForFinishedVideo({
     required String storageKey,
     required Duration position,
     required Duration duration,
   }) async {
     try {
-      // Check if video has reached the end (within 500ms of duration)
-      final isAtEnd =
-          duration > Duration.zero &&
-          position >= duration - const Duration(milliseconds: 500);
-
-      if (isAtEnd) {
-        await _storageService.clearPosition(storageKey);
+      final wasCleared = await _clearFinishedProgressUseCase.call(
+        ClearFinishedProgressParams(
+          storageKey: storageKey,
+          position: position,
+          duration: duration,
+        ),
+      );
+      if (wasCleared) {
         debugPrint(
           'PlayerNotifier: Cleared progress for finished video: $storageKey',
         );
@@ -295,42 +306,25 @@ class PlayerNotifier extends _$PlayerNotifier {
     }
   }
 
-  /// Load and play a video.
+  /// Saves playback progress using SaveProgressUseCase.
   ///
-  /// For Telegram videos, provide [telegramChatId], [telegramMessageId], and
-  /// [telegramFileSize] for stable progress persistence that survives cache clears.
-  /// For forum topics, provide [telegramTopicId] and [telegramTopicName].
+  /// Delegates to use case which handles:
+  /// - Generating stable storage key
+  /// - Saving or clearing progress based on video completion
+  /// - Updating recent videos list
   Future<void> _savePosition() async {
     try {
       if (state.currentVideoPath != null) {
-        final storageKey = _getStableStorageKey(state.currentVideoPath!);
-
-        // Check if video has reached the end (within 500ms of duration)
-        // If so, clear the progress instead of saving it
-        final isAtEnd =
-            state.duration > Duration.zero &&
-            state.position >=
-                state.duration - const Duration(milliseconds: 500);
-
-        if (isAtEnd) {
-          await _storageService.clearPosition(storageKey);
-          debugPrint('PlayerNotifier: Video finished, cleared progress');
-        } else {
-          await _storageService.savePosition(
-            storageKey,
-            state.position.inMilliseconds,
-          );
-
-          // NEW: Update position in Recent Videos list for UI consistency
-          // This ensures the Recent Videos screen shows actual progress bars
-          if (state.currentVideoPath != null) {
-            final recentService = RecentVideosService();
-            await recentService.updatePosition(
-              state.currentVideoPath!,
-              state.position,
-            );
-          }
-        }
+        await _saveProgressUseCase.call(
+          SaveProgressParams(
+            videoPath: state.currentVideoPath!,
+            position: state.position,
+            duration: state.duration,
+            telegramChatId: _telegramChatId,
+            telegramMessageId: _telegramMessageId,
+            proxyFileId: _currentProxyFileId,
+          ),
+        );
       }
     } catch (e) {
       // Ignore errors during save, especially during dispose
@@ -597,18 +591,14 @@ class PlayerNotifier extends _$PlayerNotifier {
   }
 
   /// Returns a stable storage key for progress persistence.
-  /// Priority: Telegram message ID > file_id > path
+  /// Delegates to StorageKeyService for centralized logic.
   String _getStableStorageKey(String path) {
-    // Best: Use stable Telegram message ID (survives cache clears)
-    if (_telegramChatId != null && _telegramMessageId != null) {
-      return 'telegram_${_telegramChatId}_$_telegramMessageId';
-    }
-    // Fallback: Use file_id (may change after cache clear, but works for session)
-    if (_currentProxyFileId != null) {
-      return 'file_$_currentProxyFileId';
-    }
-    // Default: Use path for local files
-    return path;
+    return StorageKeyService.getStableKey(
+      telegramChatId: _telegramChatId,
+      telegramMessageId: _telegramMessageId,
+      proxyFileId: _currentProxyFileId,
+      fallbackPath: path,
+    );
   }
 
   Future<void> _loadTracks() async {

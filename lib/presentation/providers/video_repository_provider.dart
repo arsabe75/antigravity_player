@@ -10,6 +10,8 @@ import '../../infrastructure/services/recent_videos_service.dart';
 import '../../application/use_cases/load_video_use_case.dart';
 import '../../application/use_cases/seek_video_use_case.dart';
 import '../../application/use_cases/toggle_playback_use_case.dart';
+import '../../application/use_cases/save_progress_use_case.dart';
+import '../../application/use_cases/clear_finished_progress_use_case.dart';
 
 part 'video_repository_provider.g.dart';
 
@@ -102,6 +104,23 @@ SeekVideoUseCase seekVideoUseCase(Ref ref) {
 TogglePlaybackUseCase togglePlaybackUseCase(Ref ref) {
   return TogglePlaybackUseCase(
     videoRepository: ref.watch(videoRepositoryProvider),
+    storageService: ref.watch(playbackStorageServiceProvider),
+  );
+}
+
+/// Provider for SaveProgressUseCase with injected dependencies
+@Riverpod(dependencies: [playbackStorageService])
+SaveProgressUseCase saveProgressUseCase(Ref ref) {
+  return SaveProgressUseCase(
+    storageService: ref.watch(playbackStorageServiceProvider),
+    recentVideosService: RecentVideosService(),
+  );
+}
+
+/// Provider for ClearFinishedProgressUseCase with injected dependencies
+@Riverpod(dependencies: [playbackStorageService])
+ClearFinishedProgressUseCase clearFinishedProgressUseCase(Ref ref) {
+  return ClearFinishedProgressUseCase(
     storageService: ref.watch(playbackStorageServiceProvider),
   );
 }

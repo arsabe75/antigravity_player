@@ -116,12 +116,16 @@ final class PlayerNotifierProvider
           playbackStorageServiceProvider,
           streamingRepositoryProvider,
           playerBackendProvider,
+          saveProgressUseCaseProvider,
+          clearFinishedProgressUseCaseProvider,
         ],
         $allTransitiveDependencies: const <ProviderOrFamily>{
           PlayerNotifierProvider.$allTransitiveDependencies0,
           PlayerNotifierProvider.$allTransitiveDependencies1,
           PlayerNotifierProvider.$allTransitiveDependencies2,
           PlayerNotifierProvider.$allTransitiveDependencies3,
+          PlayerNotifierProvider.$allTransitiveDependencies4,
+          PlayerNotifierProvider.$allTransitiveDependencies5,
         },
       );
 
@@ -130,6 +134,9 @@ final class PlayerNotifierProvider
       VideoRepositoryProvider.$allTransitiveDependencies0;
   static const $allTransitiveDependencies2 = playbackStorageServiceProvider;
   static const $allTransitiveDependencies3 = streamingRepositoryProvider;
+  static const $allTransitiveDependencies4 = saveProgressUseCaseProvider;
+  static const $allTransitiveDependencies5 =
+      clearFinishedProgressUseCaseProvider;
 
   @override
   String debugGetCreateSourceHash() => _$playerNotifierHash();
@@ -147,7 +154,7 @@ final class PlayerNotifierProvider
   }
 }
 
-String _$playerNotifierHash() => r'23ecbf55154f7b65682471b8d20cd74829ba4585';
+String _$playerNotifierHash() => r'dbf7ab087724d5db1093f75e599e7bf08ce3cfaf';
 
 /// Manages video playback state and coordinates between UI and video backends.
 ///

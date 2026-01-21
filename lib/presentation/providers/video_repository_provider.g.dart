@@ -474,3 +474,118 @@ final class TogglePlaybackUseCaseProvider
 
 String _$togglePlaybackUseCaseHash() =>
     r'f53a341733f13e39a150b434bbf9d996b970a417';
+
+/// Provider for SaveProgressUseCase with injected dependencies
+
+@ProviderFor(saveProgressUseCase)
+const saveProgressUseCaseProvider = SaveProgressUseCaseProvider._();
+
+/// Provider for SaveProgressUseCase with injected dependencies
+
+final class SaveProgressUseCaseProvider
+    extends
+        $FunctionalProvider<
+          SaveProgressUseCase,
+          SaveProgressUseCase,
+          SaveProgressUseCase
+        >
+    with $Provider<SaveProgressUseCase> {
+  /// Provider for SaveProgressUseCase with injected dependencies
+  const SaveProgressUseCaseProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'saveProgressUseCaseProvider',
+        isAutoDispose: true,
+        dependencies: const <ProviderOrFamily>[playbackStorageServiceProvider],
+        $allTransitiveDependencies: const <ProviderOrFamily>[
+          SaveProgressUseCaseProvider.$allTransitiveDependencies0,
+        ],
+      );
+
+  static const $allTransitiveDependencies0 = playbackStorageServiceProvider;
+
+  @override
+  String debugGetCreateSourceHash() => _$saveProgressUseCaseHash();
+
+  @$internal
+  @override
+  $ProviderElement<SaveProgressUseCase> $createElement(
+    $ProviderPointer pointer,
+  ) => $ProviderElement(pointer);
+
+  @override
+  SaveProgressUseCase create(Ref ref) {
+    return saveProgressUseCase(ref);
+  }
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(SaveProgressUseCase value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<SaveProgressUseCase>(value),
+    );
+  }
+}
+
+String _$saveProgressUseCaseHash() =>
+    r'5a152ec72c7ce6f00e99f53fbbe7a4a3f2bedeab';
+
+/// Provider for ClearFinishedProgressUseCase with injected dependencies
+
+@ProviderFor(clearFinishedProgressUseCase)
+const clearFinishedProgressUseCaseProvider =
+    ClearFinishedProgressUseCaseProvider._();
+
+/// Provider for ClearFinishedProgressUseCase with injected dependencies
+
+final class ClearFinishedProgressUseCaseProvider
+    extends
+        $FunctionalProvider<
+          ClearFinishedProgressUseCase,
+          ClearFinishedProgressUseCase,
+          ClearFinishedProgressUseCase
+        >
+    with $Provider<ClearFinishedProgressUseCase> {
+  /// Provider for ClearFinishedProgressUseCase with injected dependencies
+  const ClearFinishedProgressUseCaseProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'clearFinishedProgressUseCaseProvider',
+        isAutoDispose: true,
+        dependencies: const <ProviderOrFamily>[playbackStorageServiceProvider],
+        $allTransitiveDependencies: const <ProviderOrFamily>[
+          ClearFinishedProgressUseCaseProvider.$allTransitiveDependencies0,
+        ],
+      );
+
+  static const $allTransitiveDependencies0 = playbackStorageServiceProvider;
+
+  @override
+  String debugGetCreateSourceHash() => _$clearFinishedProgressUseCaseHash();
+
+  @$internal
+  @override
+  $ProviderElement<ClearFinishedProgressUseCase> $createElement(
+    $ProviderPointer pointer,
+  ) => $ProviderElement(pointer);
+
+  @override
+  ClearFinishedProgressUseCase create(Ref ref) {
+    return clearFinishedProgressUseCase(ref);
+  }
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(ClearFinishedProgressUseCase value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<ClearFinishedProgressUseCase>(value),
+    );
+  }
+}
+
+String _$clearFinishedProgressUseCaseHash() =>
+    r'053e94b818e26ca4834ba933d98b82b4fbf9b250';
