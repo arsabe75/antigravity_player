@@ -1,8 +1,9 @@
 import '../../domain/repositories/streaming_repository.dart';
+import '../../domain/value_objects/loading_progress.dart';
 import '../services/local_streaming_proxy.dart';
 
-// Re-export LoadingProgress so it's available to consumers
-export '../services/local_streaming_proxy.dart' show LoadingProgress;
+// Re-export LoadingProgress from domain so it's available to consumers
+export '../../domain/value_objects/loading_progress.dart';
 
 class LocalStreamingRepository implements StreamingRepository {
   final LocalStreamingProxy _proxy;

@@ -8,12 +8,102 @@ part of 'player_notifier.dart';
 
 // GENERATED CODE - DO NOT MODIFY BY HAND
 // ignore_for_file: type=lint, type=warning
+/// Manages video playback state and coordinates between UI and video backends.
+///
+/// This notifier uses Riverpod 3's code generation pattern with `@Riverpod`.
+/// The `build()` method initializes dependencies and returns initial state.
+/// State updates are broadcast to all widgets watching [playerProvider].
+///
+/// ## Key Features:
+/// - **Multi-backend support**: Works with both FVP (libmpv) and MediaKit
+/// - **Progress persistence**: Saves playback position every 5 seconds
+/// - **Telegram integration**: Uses stable message IDs for progress keys
+/// - **Proxy port correction**: Fixes stale URLs after app restart
+/// - **UX optimizations**: Buffering indicators, initial loading state
+///
+/// ## Usage:
+/// ```dart
+/// // In a widget
+/// final state = ref.watch(playerProvider);
+/// final notifier = ref.read(playerProvider.notifier);
+///
+/// // Load a video
+/// notifier.loadVideo(
+///   'http://example.com/video.mp4',
+///   isNetwork: true,
+///   title: 'My Video',
+/// );
+///
+/// // Control playback
+/// notifier.togglePlay();
+/// notifier.seekTo(Duration(minutes: 5));
+/// ```
 
 @ProviderFor(PlayerNotifier)
 const playerProvider = PlayerNotifierProvider._();
 
+/// Manages video playback state and coordinates between UI and video backends.
+///
+/// This notifier uses Riverpod 3's code generation pattern with `@Riverpod`.
+/// The `build()` method initializes dependencies and returns initial state.
+/// State updates are broadcast to all widgets watching [playerProvider].
+///
+/// ## Key Features:
+/// - **Multi-backend support**: Works with both FVP (libmpv) and MediaKit
+/// - **Progress persistence**: Saves playback position every 5 seconds
+/// - **Telegram integration**: Uses stable message IDs for progress keys
+/// - **Proxy port correction**: Fixes stale URLs after app restart
+/// - **UX optimizations**: Buffering indicators, initial loading state
+///
+/// ## Usage:
+/// ```dart
+/// // In a widget
+/// final state = ref.watch(playerProvider);
+/// final notifier = ref.read(playerProvider.notifier);
+///
+/// // Load a video
+/// notifier.loadVideo(
+///   'http://example.com/video.mp4',
+///   isNetwork: true,
+///   title: 'My Video',
+/// );
+///
+/// // Control playback
+/// notifier.togglePlay();
+/// notifier.seekTo(Duration(minutes: 5));
+/// ```
 final class PlayerNotifierProvider
     extends $NotifierProvider<PlayerNotifier, PlayerState> {
+  /// Manages video playback state and coordinates between UI and video backends.
+  ///
+  /// This notifier uses Riverpod 3's code generation pattern with `@Riverpod`.
+  /// The `build()` method initializes dependencies and returns initial state.
+  /// State updates are broadcast to all widgets watching [playerProvider].
+  ///
+  /// ## Key Features:
+  /// - **Multi-backend support**: Works with both FVP (libmpv) and MediaKit
+  /// - **Progress persistence**: Saves playback position every 5 seconds
+  /// - **Telegram integration**: Uses stable message IDs for progress keys
+  /// - **Proxy port correction**: Fixes stale URLs after app restart
+  /// - **UX optimizations**: Buffering indicators, initial loading state
+  ///
+  /// ## Usage:
+  /// ```dart
+  /// // In a widget
+  /// final state = ref.watch(playerProvider);
+  /// final notifier = ref.read(playerProvider.notifier);
+  ///
+  /// // Load a video
+  /// notifier.loadVideo(
+  ///   'http://example.com/video.mp4',
+  ///   isNetwork: true,
+  ///   title: 'My Video',
+  /// );
+  ///
+  /// // Control playback
+  /// notifier.togglePlay();
+  /// notifier.seekTo(Duration(minutes: 5));
+  /// ```
   const PlayerNotifierProvider._()
     : super(
         from: null,
@@ -57,7 +147,38 @@ final class PlayerNotifierProvider
   }
 }
 
-String _$playerNotifierHash() => r'f5af3ca4762a08116788e22343dfe2f671601a6d';
+String _$playerNotifierHash() => r'23ecbf55154f7b65682471b8d20cd74829ba4585';
+
+/// Manages video playback state and coordinates between UI and video backends.
+///
+/// This notifier uses Riverpod 3's code generation pattern with `@Riverpod`.
+/// The `build()` method initializes dependencies and returns initial state.
+/// State updates are broadcast to all widgets watching [playerProvider].
+///
+/// ## Key Features:
+/// - **Multi-backend support**: Works with both FVP (libmpv) and MediaKit
+/// - **Progress persistence**: Saves playback position every 5 seconds
+/// - **Telegram integration**: Uses stable message IDs for progress keys
+/// - **Proxy port correction**: Fixes stale URLs after app restart
+/// - **UX optimizations**: Buffering indicators, initial loading state
+///
+/// ## Usage:
+/// ```dart
+/// // In a widget
+/// final state = ref.watch(playerProvider);
+/// final notifier = ref.read(playerProvider.notifier);
+///
+/// // Load a video
+/// notifier.loadVideo(
+///   'http://example.com/video.mp4',
+///   isNetwork: true,
+///   title: 'My Video',
+/// );
+///
+/// // Control playback
+/// notifier.togglePlay();
+/// notifier.seekTo(Duration(minutes: 5));
+/// ```
 
 abstract class _$PlayerNotifier extends $Notifier<PlayerState> {
   PlayerState build();

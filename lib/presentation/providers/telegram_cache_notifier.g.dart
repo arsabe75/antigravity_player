@@ -42,7 +42,7 @@ final class TelegramCacheNotifierProvider
 }
 
 String _$telegramCacheNotifierHash() =>
-    r'e824714b59e4ec8ec09d4c47d6a3648f75499a8d';
+    r'46d679190f2fcc4546ab9836faf1d3925b25c92b';
 
 abstract class _$TelegramCacheNotifier extends $Notifier<TelegramCacheState> {
   TelegramCacheState build();

@@ -1,5 +1,4 @@
-import '../../infrastructure/services/local_streaming_proxy.dart'
-    show LoadingProgress;
+import '../value_objects/loading_progress.dart';
 
 abstract class StreamingRepository {
   /// Aborts a specific file request to stop streaming data

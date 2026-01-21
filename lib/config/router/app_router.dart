@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../../presentation/screens/error_screen.dart';
 import 'routes.dart';
 
 part 'app_router.g.dart';
@@ -68,5 +69,6 @@ GoRouter appRouter(Ref ref) {
     debugLogDiagnostics: true,
     routes: $appRoutes, // Generated from routes.g.dart
     extraCodec: const _ExtraCodec(),
+    errorBuilder: (context, state) => ErrorScreen(error: state.error),
   );
 }
