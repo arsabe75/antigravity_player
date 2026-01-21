@@ -1,6 +1,7 @@
-import 'dart:convert';
+// ignore_for_file: avoid_print
+
 import 'dart:io';
-import '../lib/infrastructure/services/config_obfuscator.dart';
+import 'package:video_player_app/infrastructure/services/config_obfuscator.dart';
 
 void main() {
   print('=============================================');
