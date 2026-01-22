@@ -64,9 +64,9 @@ class SaveProgressUseCase
 
   SaveProgressUseCase({
     required PlaybackStorageService storageService,
-    RecentVideosService? recentVideosService,
+    required RecentVideosService recentVideosService,
   }) : _storageService = storageService,
-       _recentVideosService = recentVideosService ?? RecentVideosService();
+       _recentVideosService = recentVideosService;
 
   @override
   Future<SaveProgressResult> call(SaveProgressParams params) async {

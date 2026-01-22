@@ -57,11 +57,11 @@ class LoadVideoUseCase extends UseCase<LoadVideoResult, LoadVideoParams> {
     required VideoRepository videoRepository,
     required StreamingRepository streamingRepository,
     required PlaybackStorageService storageService,
-    RecentVideosService? recentVideosService,
+    required RecentVideosService recentVideosService,
   }) : _videoRepository = videoRepository,
        _streamingRepository = streamingRepository,
        _storageService = storageService,
-       _recentVideosService = recentVideosService ?? RecentVideosService();
+       _recentVideosService = recentVideosService;
 
   @override
   Future<LoadVideoResult> call(LoadVideoParams params) async {

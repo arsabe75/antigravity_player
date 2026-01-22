@@ -114,6 +114,59 @@ final class PlaybackStorageServiceProvider
 String _$playbackStorageServiceHash() =>
     r'f5a7094d7edc60f6b3eb63099d8de8a81b195746';
 
+/// Provider for recent videos service
+
+@ProviderFor(recentVideosService)
+const recentVideosServiceProvider = RecentVideosServiceProvider._();
+
+/// Provider for recent videos service
+
+final class RecentVideosServiceProvider
+    extends
+        $FunctionalProvider<
+          RecentVideosService,
+          RecentVideosService,
+          RecentVideosService
+        >
+    with $Provider<RecentVideosService> {
+  /// Provider for recent videos service
+  const RecentVideosServiceProvider._()
+    : super(
+        from: null,
+        argument: null,
+        retry: null,
+        name: r'recentVideosServiceProvider',
+        isAutoDispose: true,
+        dependencies: null,
+        $allTransitiveDependencies: null,
+      );
+
+  @override
+  String debugGetCreateSourceHash() => _$recentVideosServiceHash();
+
+  @$internal
+  @override
+  $ProviderElement<RecentVideosService> $createElement(
+    $ProviderPointer pointer,
+  ) => $ProviderElement(pointer);
+
+  @override
+  RecentVideosService create(Ref ref) {
+    return recentVideosService(ref);
+  }
+
+  /// {@macro riverpod.override_with_value}
+  Override overrideWithValue(RecentVideosService value) {
+    return $ProviderOverride(
+      origin: this,
+      providerOverride: $SyncValueProvider<RecentVideosService>(value),
+    );
+  }
+}
+
+String _$recentVideosServiceHash() =>
+    r'ab0b44ffe99bc617903c748b5ad4707d8b7503b6';
+
 /// Holds the active player backend preference.
 /// Can be overridden in main() with initial value.
 
@@ -308,12 +361,14 @@ final class LoadVideoUseCaseProvider
           videoRepositoryProvider,
           streamingRepositoryProvider,
           playbackStorageServiceProvider,
+          recentVideosServiceProvider,
         ],
         $allTransitiveDependencies: const <ProviderOrFamily>{
           LoadVideoUseCaseProvider.$allTransitiveDependencies0,
           LoadVideoUseCaseProvider.$allTransitiveDependencies1,
           LoadVideoUseCaseProvider.$allTransitiveDependencies2,
           LoadVideoUseCaseProvider.$allTransitiveDependencies3,
+          LoadVideoUseCaseProvider.$allTransitiveDependencies4,
         },
       );
 
@@ -322,6 +377,7 @@ final class LoadVideoUseCaseProvider
       VideoRepositoryProvider.$allTransitiveDependencies0;
   static const $allTransitiveDependencies2 = streamingRepositoryProvider;
   static const $allTransitiveDependencies3 = playbackStorageServiceProvider;
+  static const $allTransitiveDependencies4 = recentVideosServiceProvider;
 
   @override
   String debugGetCreateSourceHash() => _$loadVideoUseCaseHash();
@@ -345,7 +401,7 @@ final class LoadVideoUseCaseProvider
   }
 }
 
-String _$loadVideoUseCaseHash() => r'df5be8259ce916af0c476c6eb5e449330d39954a';
+String _$loadVideoUseCaseHash() => r'58015dd143797e31c5ea7eaeeef8580641dc5c4a';
 
 /// Provider for SeekVideoUseCase with injected dependencies
 
@@ -498,13 +554,18 @@ final class SaveProgressUseCaseProvider
         retry: null,
         name: r'saveProgressUseCaseProvider',
         isAutoDispose: true,
-        dependencies: const <ProviderOrFamily>[playbackStorageServiceProvider],
+        dependencies: const <ProviderOrFamily>[
+          playbackStorageServiceProvider,
+          recentVideosServiceProvider,
+        ],
         $allTransitiveDependencies: const <ProviderOrFamily>[
           SaveProgressUseCaseProvider.$allTransitiveDependencies0,
+          SaveProgressUseCaseProvider.$allTransitiveDependencies1,
         ],
       );
 
   static const $allTransitiveDependencies0 = playbackStorageServiceProvider;
+  static const $allTransitiveDependencies1 = recentVideosServiceProvider;
 
   @override
   String debugGetCreateSourceHash() => _$saveProgressUseCaseHash();
@@ -530,7 +591,7 @@ final class SaveProgressUseCaseProvider
 }
 
 String _$saveProgressUseCaseHash() =>
-    r'5a152ec72c7ce6f00e99f53fbbe7a4a3f2bedeab';
+    r'9a4ccaaf6efff4f15dfb4617fbb7202cf9887e3a';
 
 /// Provider for ClearFinishedProgressUseCase with injected dependencies
 

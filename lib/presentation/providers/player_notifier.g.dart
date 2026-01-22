@@ -126,6 +126,7 @@ final class PlayerNotifierProvider
           PlayerNotifierProvider.$allTransitiveDependencies3,
           PlayerNotifierProvider.$allTransitiveDependencies4,
           PlayerNotifierProvider.$allTransitiveDependencies5,
+          PlayerNotifierProvider.$allTransitiveDependencies6,
         },
       );
 
@@ -136,6 +137,8 @@ final class PlayerNotifierProvider
   static const $allTransitiveDependencies3 = streamingRepositoryProvider;
   static const $allTransitiveDependencies4 = saveProgressUseCaseProvider;
   static const $allTransitiveDependencies5 =
+      SaveProgressUseCaseProvider.$allTransitiveDependencies1;
+  static const $allTransitiveDependencies6 =
       clearFinishedProgressUseCaseProvider;
 
   @override

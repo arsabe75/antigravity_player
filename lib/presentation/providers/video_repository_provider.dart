@@ -31,6 +31,12 @@ PlaybackStorageService playbackStorageService(Ref ref) {
   return PlaybackStorageService();
 }
 
+/// Provider for recent videos service
+@Riverpod()
+RecentVideosService recentVideosService(Ref ref) {
+  return RecentVideosService();
+}
+
 // ============================================================================
 // Player Backend Provider (keepAlive for overrides in main.dart)
 // ============================================================================
@@ -79,14 +85,19 @@ StreamingRepository streamingRepository(Ref ref) {
 
 /// Provider for LoadVideoUseCase with injected dependencies
 @Riverpod(
-  dependencies: [videoRepository, streamingRepository, playbackStorageService],
+  dependencies: [
+    videoRepository,
+    streamingRepository,
+    playbackStorageService,
+    recentVideosService,
+  ],
 )
 LoadVideoUseCase loadVideoUseCase(Ref ref) {
   return LoadVideoUseCase(
     videoRepository: ref.watch(videoRepositoryProvider),
     streamingRepository: ref.watch(streamingRepositoryProvider),
     storageService: ref.watch(playbackStorageServiceProvider),
-    recentVideosService: RecentVideosService(),
+    recentVideosService: ref.watch(recentVideosServiceProvider),
   );
 }
 
@@ -109,11 +120,11 @@ TogglePlaybackUseCase togglePlaybackUseCase(Ref ref) {
 }
 
 /// Provider for SaveProgressUseCase with injected dependencies
-@Riverpod(dependencies: [playbackStorageService])
+@Riverpod(dependencies: [playbackStorageService, recentVideosService])
 SaveProgressUseCase saveProgressUseCase(Ref ref) {
   return SaveProgressUseCase(
     storageService: ref.watch(playbackStorageServiceProvider),
-    recentVideosService: RecentVideosService(),
+    recentVideosService: ref.watch(recentVideosServiceProvider),
   );
 }
 
