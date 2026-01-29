@@ -1,4 +1,5 @@
 import 'package:freezed_annotation/freezed_annotation.dart';
+import '../../domain/value_objects/streaming_error.dart';
 
 part 'player_state.freezed.dart';
 
@@ -27,5 +28,7 @@ abstract class PlayerState with _$PlayerState {
     @Default('media_kit') String playerBackend,
     // Video not optimized for streaming (moov atom at end of file)
     @Default(false) bool isVideoNotOptimizedForStreaming,
+    // Streaming proxy error (max retries, timeout, etc.)
+    StreamingError? streamingError,
   }) = _PlayerState;
 }

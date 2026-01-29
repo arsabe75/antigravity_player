@@ -66,6 +66,15 @@ enum FileLoadState {
 
   /// Normal playback in progress
   playing,
+
+  /// Recoverable error - can retry
+  error,
+
+  /// Timeout waiting for data
+  timeout,
+
+  /// Unrecoverable - video format not supported
+  unsupported,
 }
 
 /// Position of MOOV atom in the MP4 file.

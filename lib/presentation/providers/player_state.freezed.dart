@@ -16,7 +16,8 @@ mixin _$PlayerState {
 
  bool get isPlaying; bool get isBuffering; bool get isInitialLoading;// New: True when loading network video before playback starts
  Duration get position; Duration get duration; double get volume; double get playbackSpeed; bool get isFullscreen; bool get areControlsVisible; bool get isAlwaysOnTop; Map<int, String> get audioTracks; Map<int, String> get subtitleTracks; int? get currentAudioTrack; int? get currentSubtitleTrack; String? get currentVideoPath; String? get currentVideoTitle; String? get error; String get playerBackend;// Video not optimized for streaming (moov atom at end of file)
- bool get isVideoNotOptimizedForStreaming;
+ bool get isVideoNotOptimizedForStreaming;// Streaming proxy error (max retries, timeout, etc.)
+ StreamingError? get streamingError;
 /// Create a copy of PlayerState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -27,16 +28,16 @@ $PlayerStateCopyWith<PlayerState> get copyWith => _$PlayerStateCopyWithImpl<Play
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is PlayerState&&(identical(other.isPlaying, isPlaying) || other.isPlaying == isPlaying)&&(identical(other.isBuffering, isBuffering) || other.isBuffering == isBuffering)&&(identical(other.isInitialLoading, isInitialLoading) || other.isInitialLoading == isInitialLoading)&&(identical(other.position, position) || other.position == position)&&(identical(other.duration, duration) || other.duration == duration)&&(identical(other.volume, volume) || other.volume == volume)&&(identical(other.playbackSpeed, playbackSpeed) || other.playbackSpeed == playbackSpeed)&&(identical(other.isFullscreen, isFullscreen) || other.isFullscreen == isFullscreen)&&(identical(other.areControlsVisible, areControlsVisible) || other.areControlsVisible == areControlsVisible)&&(identical(other.isAlwaysOnTop, isAlwaysOnTop) || other.isAlwaysOnTop == isAlwaysOnTop)&&const DeepCollectionEquality().equals(other.audioTracks, audioTracks)&&const DeepCollectionEquality().equals(other.subtitleTracks, subtitleTracks)&&(identical(other.currentAudioTrack, currentAudioTrack) || other.currentAudioTrack == currentAudioTrack)&&(identical(other.currentSubtitleTrack, currentSubtitleTrack) || other.currentSubtitleTrack == currentSubtitleTrack)&&(identical(other.currentVideoPath, currentVideoPath) || other.currentVideoPath == currentVideoPath)&&(identical(other.currentVideoTitle, currentVideoTitle) || other.currentVideoTitle == currentVideoTitle)&&(identical(other.error, error) || other.error == error)&&(identical(other.playerBackend, playerBackend) || other.playerBackend == playerBackend)&&(identical(other.isVideoNotOptimizedForStreaming, isVideoNotOptimizedForStreaming) || other.isVideoNotOptimizedForStreaming == isVideoNotOptimizedForStreaming));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is PlayerState&&(identical(other.isPlaying, isPlaying) || other.isPlaying == isPlaying)&&(identical(other.isBuffering, isBuffering) || other.isBuffering == isBuffering)&&(identical(other.isInitialLoading, isInitialLoading) || other.isInitialLoading == isInitialLoading)&&(identical(other.position, position) || other.position == position)&&(identical(other.duration, duration) || other.duration == duration)&&(identical(other.volume, volume) || other.volume == volume)&&(identical(other.playbackSpeed, playbackSpeed) || other.playbackSpeed == playbackSpeed)&&(identical(other.isFullscreen, isFullscreen) || other.isFullscreen == isFullscreen)&&(identical(other.areControlsVisible, areControlsVisible) || other.areControlsVisible == areControlsVisible)&&(identical(other.isAlwaysOnTop, isAlwaysOnTop) || other.isAlwaysOnTop == isAlwaysOnTop)&&const DeepCollectionEquality().equals(other.audioTracks, audioTracks)&&const DeepCollectionEquality().equals(other.subtitleTracks, subtitleTracks)&&(identical(other.currentAudioTrack, currentAudioTrack) || other.currentAudioTrack == currentAudioTrack)&&(identical(other.currentSubtitleTrack, currentSubtitleTrack) || other.currentSubtitleTrack == currentSubtitleTrack)&&(identical(other.currentVideoPath, currentVideoPath) || other.currentVideoPath == currentVideoPath)&&(identical(other.currentVideoTitle, currentVideoTitle) || other.currentVideoTitle == currentVideoTitle)&&(identical(other.error, error) || other.error == error)&&(identical(other.playerBackend, playerBackend) || other.playerBackend == playerBackend)&&(identical(other.isVideoNotOptimizedForStreaming, isVideoNotOptimizedForStreaming) || other.isVideoNotOptimizedForStreaming == isVideoNotOptimizedForStreaming)&&(identical(other.streamingError, streamingError) || other.streamingError == streamingError));
 }
 
 
 @override
-int get hashCode => Object.hashAll([runtimeType,isPlaying,isBuffering,isInitialLoading,position,duration,volume,playbackSpeed,isFullscreen,areControlsVisible,isAlwaysOnTop,const DeepCollectionEquality().hash(audioTracks),const DeepCollectionEquality().hash(subtitleTracks),currentAudioTrack,currentSubtitleTrack,currentVideoPath,currentVideoTitle,error,playerBackend,isVideoNotOptimizedForStreaming]);
+int get hashCode => Object.hashAll([runtimeType,isPlaying,isBuffering,isInitialLoading,position,duration,volume,playbackSpeed,isFullscreen,areControlsVisible,isAlwaysOnTop,const DeepCollectionEquality().hash(audioTracks),const DeepCollectionEquality().hash(subtitleTracks),currentAudioTrack,currentSubtitleTrack,currentVideoPath,currentVideoTitle,error,playerBackend,isVideoNotOptimizedForStreaming,streamingError]);
 
 @override
 String toString() {
-  return 'PlayerState(isPlaying: $isPlaying, isBuffering: $isBuffering, isInitialLoading: $isInitialLoading, position: $position, duration: $duration, volume: $volume, playbackSpeed: $playbackSpeed, isFullscreen: $isFullscreen, areControlsVisible: $areControlsVisible, isAlwaysOnTop: $isAlwaysOnTop, audioTracks: $audioTracks, subtitleTracks: $subtitleTracks, currentAudioTrack: $currentAudioTrack, currentSubtitleTrack: $currentSubtitleTrack, currentVideoPath: $currentVideoPath, currentVideoTitle: $currentVideoTitle, error: $error, playerBackend: $playerBackend, isVideoNotOptimizedForStreaming: $isVideoNotOptimizedForStreaming)';
+  return 'PlayerState(isPlaying: $isPlaying, isBuffering: $isBuffering, isInitialLoading: $isInitialLoading, position: $position, duration: $duration, volume: $volume, playbackSpeed: $playbackSpeed, isFullscreen: $isFullscreen, areControlsVisible: $areControlsVisible, isAlwaysOnTop: $isAlwaysOnTop, audioTracks: $audioTracks, subtitleTracks: $subtitleTracks, currentAudioTrack: $currentAudioTrack, currentSubtitleTrack: $currentSubtitleTrack, currentVideoPath: $currentVideoPath, currentVideoTitle: $currentVideoTitle, error: $error, playerBackend: $playerBackend, isVideoNotOptimizedForStreaming: $isVideoNotOptimizedForStreaming, streamingError: $streamingError)';
 }
 
 
@@ -47,7 +48,7 @@ abstract mixin class $PlayerStateCopyWith<$Res>  {
   factory $PlayerStateCopyWith(PlayerState value, $Res Function(PlayerState) _then) = _$PlayerStateCopyWithImpl;
 @useResult
 $Res call({
- bool isPlaying, bool isBuffering, bool isInitialLoading, Duration position, Duration duration, double volume, double playbackSpeed, bool isFullscreen, bool areControlsVisible, bool isAlwaysOnTop, Map<int, String> audioTracks, Map<int, String> subtitleTracks, int? currentAudioTrack, int? currentSubtitleTrack, String? currentVideoPath, String? currentVideoTitle, String? error, String playerBackend, bool isVideoNotOptimizedForStreaming
+ bool isPlaying, bool isBuffering, bool isInitialLoading, Duration position, Duration duration, double volume, double playbackSpeed, bool isFullscreen, bool areControlsVisible, bool isAlwaysOnTop, Map<int, String> audioTracks, Map<int, String> subtitleTracks, int? currentAudioTrack, int? currentSubtitleTrack, String? currentVideoPath, String? currentVideoTitle, String? error, String playerBackend, bool isVideoNotOptimizedForStreaming, StreamingError? streamingError
 });
 
 
@@ -64,7 +65,7 @@ class _$PlayerStateCopyWithImpl<$Res>
 
 /// Create a copy of PlayerState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? isPlaying = null,Object? isBuffering = null,Object? isInitialLoading = null,Object? position = null,Object? duration = null,Object? volume = null,Object? playbackSpeed = null,Object? isFullscreen = null,Object? areControlsVisible = null,Object? isAlwaysOnTop = null,Object? audioTracks = null,Object? subtitleTracks = null,Object? currentAudioTrack = freezed,Object? currentSubtitleTrack = freezed,Object? currentVideoPath = freezed,Object? currentVideoTitle = freezed,Object? error = freezed,Object? playerBackend = null,Object? isVideoNotOptimizedForStreaming = null,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? isPlaying = null,Object? isBuffering = null,Object? isInitialLoading = null,Object? position = null,Object? duration = null,Object? volume = null,Object? playbackSpeed = null,Object? isFullscreen = null,Object? areControlsVisible = null,Object? isAlwaysOnTop = null,Object? audioTracks = null,Object? subtitleTracks = null,Object? currentAudioTrack = freezed,Object? currentSubtitleTrack = freezed,Object? currentVideoPath = freezed,Object? currentVideoTitle = freezed,Object? error = freezed,Object? playerBackend = null,Object? isVideoNotOptimizedForStreaming = null,Object? streamingError = freezed,}) {
   return _then(_self.copyWith(
 isPlaying: null == isPlaying ? _self.isPlaying : isPlaying // ignore: cast_nullable_to_non_nullable
 as bool,isBuffering: null == isBuffering ? _self.isBuffering : isBuffering // ignore: cast_nullable_to_non_nullable
@@ -85,7 +86,8 @@ as String?,currentVideoTitle: freezed == currentVideoTitle ? _self.currentVideoT
 as String?,error: freezed == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
 as String?,playerBackend: null == playerBackend ? _self.playerBackend : playerBackend // ignore: cast_nullable_to_non_nullable
 as String,isVideoNotOptimizedForStreaming: null == isVideoNotOptimizedForStreaming ? _self.isVideoNotOptimizedForStreaming : isVideoNotOptimizedForStreaming // ignore: cast_nullable_to_non_nullable
-as bool,
+as bool,streamingError: freezed == streamingError ? _self.streamingError : streamingError // ignore: cast_nullable_to_non_nullable
+as StreamingError?,
   ));
 }
 
@@ -170,10 +172,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool isPlaying,  bool isBuffering,  bool isInitialLoading,  Duration position,  Duration duration,  double volume,  double playbackSpeed,  bool isFullscreen,  bool areControlsVisible,  bool isAlwaysOnTop,  Map<int, String> audioTracks,  Map<int, String> subtitleTracks,  int? currentAudioTrack,  int? currentSubtitleTrack,  String? currentVideoPath,  String? currentVideoTitle,  String? error,  String playerBackend,  bool isVideoNotOptimizedForStreaming)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( bool isPlaying,  bool isBuffering,  bool isInitialLoading,  Duration position,  Duration duration,  double volume,  double playbackSpeed,  bool isFullscreen,  bool areControlsVisible,  bool isAlwaysOnTop,  Map<int, String> audioTracks,  Map<int, String> subtitleTracks,  int? currentAudioTrack,  int? currentSubtitleTrack,  String? currentVideoPath,  String? currentVideoTitle,  String? error,  String playerBackend,  bool isVideoNotOptimizedForStreaming,  StreamingError? streamingError)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _PlayerState() when $default != null:
-return $default(_that.isPlaying,_that.isBuffering,_that.isInitialLoading,_that.position,_that.duration,_that.volume,_that.playbackSpeed,_that.isFullscreen,_that.areControlsVisible,_that.isAlwaysOnTop,_that.audioTracks,_that.subtitleTracks,_that.currentAudioTrack,_that.currentSubtitleTrack,_that.currentVideoPath,_that.currentVideoTitle,_that.error,_that.playerBackend,_that.isVideoNotOptimizedForStreaming);case _:
+return $default(_that.isPlaying,_that.isBuffering,_that.isInitialLoading,_that.position,_that.duration,_that.volume,_that.playbackSpeed,_that.isFullscreen,_that.areControlsVisible,_that.isAlwaysOnTop,_that.audioTracks,_that.subtitleTracks,_that.currentAudioTrack,_that.currentSubtitleTrack,_that.currentVideoPath,_that.currentVideoTitle,_that.error,_that.playerBackend,_that.isVideoNotOptimizedForStreaming,_that.streamingError);case _:
   return orElse();
 
 }
@@ -191,10 +193,10 @@ return $default(_that.isPlaying,_that.isBuffering,_that.isInitialLoading,_that.p
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool isPlaying,  bool isBuffering,  bool isInitialLoading,  Duration position,  Duration duration,  double volume,  double playbackSpeed,  bool isFullscreen,  bool areControlsVisible,  bool isAlwaysOnTop,  Map<int, String> audioTracks,  Map<int, String> subtitleTracks,  int? currentAudioTrack,  int? currentSubtitleTrack,  String? currentVideoPath,  String? currentVideoTitle,  String? error,  String playerBackend,  bool isVideoNotOptimizedForStreaming)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( bool isPlaying,  bool isBuffering,  bool isInitialLoading,  Duration position,  Duration duration,  double volume,  double playbackSpeed,  bool isFullscreen,  bool areControlsVisible,  bool isAlwaysOnTop,  Map<int, String> audioTracks,  Map<int, String> subtitleTracks,  int? currentAudioTrack,  int? currentSubtitleTrack,  String? currentVideoPath,  String? currentVideoTitle,  String? error,  String playerBackend,  bool isVideoNotOptimizedForStreaming,  StreamingError? streamingError)  $default,) {final _that = this;
 switch (_that) {
 case _PlayerState():
-return $default(_that.isPlaying,_that.isBuffering,_that.isInitialLoading,_that.position,_that.duration,_that.volume,_that.playbackSpeed,_that.isFullscreen,_that.areControlsVisible,_that.isAlwaysOnTop,_that.audioTracks,_that.subtitleTracks,_that.currentAudioTrack,_that.currentSubtitleTrack,_that.currentVideoPath,_that.currentVideoTitle,_that.error,_that.playerBackend,_that.isVideoNotOptimizedForStreaming);case _:
+return $default(_that.isPlaying,_that.isBuffering,_that.isInitialLoading,_that.position,_that.duration,_that.volume,_that.playbackSpeed,_that.isFullscreen,_that.areControlsVisible,_that.isAlwaysOnTop,_that.audioTracks,_that.subtitleTracks,_that.currentAudioTrack,_that.currentSubtitleTrack,_that.currentVideoPath,_that.currentVideoTitle,_that.error,_that.playerBackend,_that.isVideoNotOptimizedForStreaming,_that.streamingError);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -211,10 +213,10 @@ return $default(_that.isPlaying,_that.isBuffering,_that.isInitialLoading,_that.p
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool isPlaying,  bool isBuffering,  bool isInitialLoading,  Duration position,  Duration duration,  double volume,  double playbackSpeed,  bool isFullscreen,  bool areControlsVisible,  bool isAlwaysOnTop,  Map<int, String> audioTracks,  Map<int, String> subtitleTracks,  int? currentAudioTrack,  int? currentSubtitleTrack,  String? currentVideoPath,  String? currentVideoTitle,  String? error,  String playerBackend,  bool isVideoNotOptimizedForStreaming)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( bool isPlaying,  bool isBuffering,  bool isInitialLoading,  Duration position,  Duration duration,  double volume,  double playbackSpeed,  bool isFullscreen,  bool areControlsVisible,  bool isAlwaysOnTop,  Map<int, String> audioTracks,  Map<int, String> subtitleTracks,  int? currentAudioTrack,  int? currentSubtitleTrack,  String? currentVideoPath,  String? currentVideoTitle,  String? error,  String playerBackend,  bool isVideoNotOptimizedForStreaming,  StreamingError? streamingError)?  $default,) {final _that = this;
 switch (_that) {
 case _PlayerState() when $default != null:
-return $default(_that.isPlaying,_that.isBuffering,_that.isInitialLoading,_that.position,_that.duration,_that.volume,_that.playbackSpeed,_that.isFullscreen,_that.areControlsVisible,_that.isAlwaysOnTop,_that.audioTracks,_that.subtitleTracks,_that.currentAudioTrack,_that.currentSubtitleTrack,_that.currentVideoPath,_that.currentVideoTitle,_that.error,_that.playerBackend,_that.isVideoNotOptimizedForStreaming);case _:
+return $default(_that.isPlaying,_that.isBuffering,_that.isInitialLoading,_that.position,_that.duration,_that.volume,_that.playbackSpeed,_that.isFullscreen,_that.areControlsVisible,_that.isAlwaysOnTop,_that.audioTracks,_that.subtitleTracks,_that.currentAudioTrack,_that.currentSubtitleTrack,_that.currentVideoPath,_that.currentVideoTitle,_that.error,_that.playerBackend,_that.isVideoNotOptimizedForStreaming,_that.streamingError);case _:
   return null;
 
 }
@@ -226,7 +228,7 @@ return $default(_that.isPlaying,_that.isBuffering,_that.isInitialLoading,_that.p
 
 
 class _PlayerState implements PlayerState {
-  const _PlayerState({this.isPlaying = false, this.isBuffering = false, this.isInitialLoading = false, this.position = Duration.zero, this.duration = Duration.zero, this.volume = 1.0, this.playbackSpeed = 1.0, this.isFullscreen = false, this.areControlsVisible = true, this.isAlwaysOnTop = false, final  Map<int, String> audioTracks = const {}, final  Map<int, String> subtitleTracks = const {}, this.currentAudioTrack, this.currentSubtitleTrack, this.currentVideoPath, this.currentVideoTitle, this.error, this.playerBackend = 'media_kit', this.isVideoNotOptimizedForStreaming = false}): _audioTracks = audioTracks,_subtitleTracks = subtitleTracks;
+  const _PlayerState({this.isPlaying = false, this.isBuffering = false, this.isInitialLoading = false, this.position = Duration.zero, this.duration = Duration.zero, this.volume = 1.0, this.playbackSpeed = 1.0, this.isFullscreen = false, this.areControlsVisible = true, this.isAlwaysOnTop = false, final  Map<int, String> audioTracks = const {}, final  Map<int, String> subtitleTracks = const {}, this.currentAudioTrack, this.currentSubtitleTrack, this.currentVideoPath, this.currentVideoTitle, this.error, this.playerBackend = 'media_kit', this.isVideoNotOptimizedForStreaming = false, this.streamingError}): _audioTracks = audioTracks,_subtitleTracks = subtitleTracks;
   
 
 @override@JsonKey() final  bool isPlaying;
@@ -262,6 +264,8 @@ class _PlayerState implements PlayerState {
 @override@JsonKey() final  String playerBackend;
 // Video not optimized for streaming (moov atom at end of file)
 @override@JsonKey() final  bool isVideoNotOptimizedForStreaming;
+// Streaming proxy error (max retries, timeout, etc.)
+@override final  StreamingError? streamingError;
 
 /// Create a copy of PlayerState
 /// with the given fields replaced by the non-null parameter values.
@@ -273,16 +277,16 @@ _$PlayerStateCopyWith<_PlayerState> get copyWith => __$PlayerStateCopyWithImpl<_
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _PlayerState&&(identical(other.isPlaying, isPlaying) || other.isPlaying == isPlaying)&&(identical(other.isBuffering, isBuffering) || other.isBuffering == isBuffering)&&(identical(other.isInitialLoading, isInitialLoading) || other.isInitialLoading == isInitialLoading)&&(identical(other.position, position) || other.position == position)&&(identical(other.duration, duration) || other.duration == duration)&&(identical(other.volume, volume) || other.volume == volume)&&(identical(other.playbackSpeed, playbackSpeed) || other.playbackSpeed == playbackSpeed)&&(identical(other.isFullscreen, isFullscreen) || other.isFullscreen == isFullscreen)&&(identical(other.areControlsVisible, areControlsVisible) || other.areControlsVisible == areControlsVisible)&&(identical(other.isAlwaysOnTop, isAlwaysOnTop) || other.isAlwaysOnTop == isAlwaysOnTop)&&const DeepCollectionEquality().equals(other._audioTracks, _audioTracks)&&const DeepCollectionEquality().equals(other._subtitleTracks, _subtitleTracks)&&(identical(other.currentAudioTrack, currentAudioTrack) || other.currentAudioTrack == currentAudioTrack)&&(identical(other.currentSubtitleTrack, currentSubtitleTrack) || other.currentSubtitleTrack == currentSubtitleTrack)&&(identical(other.currentVideoPath, currentVideoPath) || other.currentVideoPath == currentVideoPath)&&(identical(other.currentVideoTitle, currentVideoTitle) || other.currentVideoTitle == currentVideoTitle)&&(identical(other.error, error) || other.error == error)&&(identical(other.playerBackend, playerBackend) || other.playerBackend == playerBackend)&&(identical(other.isVideoNotOptimizedForStreaming, isVideoNotOptimizedForStreaming) || other.isVideoNotOptimizedForStreaming == isVideoNotOptimizedForStreaming));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _PlayerState&&(identical(other.isPlaying, isPlaying) || other.isPlaying == isPlaying)&&(identical(other.isBuffering, isBuffering) || other.isBuffering == isBuffering)&&(identical(other.isInitialLoading, isInitialLoading) || other.isInitialLoading == isInitialLoading)&&(identical(other.position, position) || other.position == position)&&(identical(other.duration, duration) || other.duration == duration)&&(identical(other.volume, volume) || other.volume == volume)&&(identical(other.playbackSpeed, playbackSpeed) || other.playbackSpeed == playbackSpeed)&&(identical(other.isFullscreen, isFullscreen) || other.isFullscreen == isFullscreen)&&(identical(other.areControlsVisible, areControlsVisible) || other.areControlsVisible == areControlsVisible)&&(identical(other.isAlwaysOnTop, isAlwaysOnTop) || other.isAlwaysOnTop == isAlwaysOnTop)&&const DeepCollectionEquality().equals(other._audioTracks, _audioTracks)&&const DeepCollectionEquality().equals(other._subtitleTracks, _subtitleTracks)&&(identical(other.currentAudioTrack, currentAudioTrack) || other.currentAudioTrack == currentAudioTrack)&&(identical(other.currentSubtitleTrack, currentSubtitleTrack) || other.currentSubtitleTrack == currentSubtitleTrack)&&(identical(other.currentVideoPath, currentVideoPath) || other.currentVideoPath == currentVideoPath)&&(identical(other.currentVideoTitle, currentVideoTitle) || other.currentVideoTitle == currentVideoTitle)&&(identical(other.error, error) || other.error == error)&&(identical(other.playerBackend, playerBackend) || other.playerBackend == playerBackend)&&(identical(other.isVideoNotOptimizedForStreaming, isVideoNotOptimizedForStreaming) || other.isVideoNotOptimizedForStreaming == isVideoNotOptimizedForStreaming)&&(identical(other.streamingError, streamingError) || other.streamingError == streamingError));
 }
 
 
 @override
-int get hashCode => Object.hashAll([runtimeType,isPlaying,isBuffering,isInitialLoading,position,duration,volume,playbackSpeed,isFullscreen,areControlsVisible,isAlwaysOnTop,const DeepCollectionEquality().hash(_audioTracks),const DeepCollectionEquality().hash(_subtitleTracks),currentAudioTrack,currentSubtitleTrack,currentVideoPath,currentVideoTitle,error,playerBackend,isVideoNotOptimizedForStreaming]);
+int get hashCode => Object.hashAll([runtimeType,isPlaying,isBuffering,isInitialLoading,position,duration,volume,playbackSpeed,isFullscreen,areControlsVisible,isAlwaysOnTop,const DeepCollectionEquality().hash(_audioTracks),const DeepCollectionEquality().hash(_subtitleTracks),currentAudioTrack,currentSubtitleTrack,currentVideoPath,currentVideoTitle,error,playerBackend,isVideoNotOptimizedForStreaming,streamingError]);
 
 @override
 String toString() {
-  return 'PlayerState(isPlaying: $isPlaying, isBuffering: $isBuffering, isInitialLoading: $isInitialLoading, position: $position, duration: $duration, volume: $volume, playbackSpeed: $playbackSpeed, isFullscreen: $isFullscreen, areControlsVisible: $areControlsVisible, isAlwaysOnTop: $isAlwaysOnTop, audioTracks: $audioTracks, subtitleTracks: $subtitleTracks, currentAudioTrack: $currentAudioTrack, currentSubtitleTrack: $currentSubtitleTrack, currentVideoPath: $currentVideoPath, currentVideoTitle: $currentVideoTitle, error: $error, playerBackend: $playerBackend, isVideoNotOptimizedForStreaming: $isVideoNotOptimizedForStreaming)';
+  return 'PlayerState(isPlaying: $isPlaying, isBuffering: $isBuffering, isInitialLoading: $isInitialLoading, position: $position, duration: $duration, volume: $volume, playbackSpeed: $playbackSpeed, isFullscreen: $isFullscreen, areControlsVisible: $areControlsVisible, isAlwaysOnTop: $isAlwaysOnTop, audioTracks: $audioTracks, subtitleTracks: $subtitleTracks, currentAudioTrack: $currentAudioTrack, currentSubtitleTrack: $currentSubtitleTrack, currentVideoPath: $currentVideoPath, currentVideoTitle: $currentVideoTitle, error: $error, playerBackend: $playerBackend, isVideoNotOptimizedForStreaming: $isVideoNotOptimizedForStreaming, streamingError: $streamingError)';
 }
 
 
@@ -293,7 +297,7 @@ abstract mixin class _$PlayerStateCopyWith<$Res> implements $PlayerStateCopyWith
   factory _$PlayerStateCopyWith(_PlayerState value, $Res Function(_PlayerState) _then) = __$PlayerStateCopyWithImpl;
 @override @useResult
 $Res call({
- bool isPlaying, bool isBuffering, bool isInitialLoading, Duration position, Duration duration, double volume, double playbackSpeed, bool isFullscreen, bool areControlsVisible, bool isAlwaysOnTop, Map<int, String> audioTracks, Map<int, String> subtitleTracks, int? currentAudioTrack, int? currentSubtitleTrack, String? currentVideoPath, String? currentVideoTitle, String? error, String playerBackend, bool isVideoNotOptimizedForStreaming
+ bool isPlaying, bool isBuffering, bool isInitialLoading, Duration position, Duration duration, double volume, double playbackSpeed, bool isFullscreen, bool areControlsVisible, bool isAlwaysOnTop, Map<int, String> audioTracks, Map<int, String> subtitleTracks, int? currentAudioTrack, int? currentSubtitleTrack, String? currentVideoPath, String? currentVideoTitle, String? error, String playerBackend, bool isVideoNotOptimizedForStreaming, StreamingError? streamingError
 });
 
 
@@ -310,7 +314,7 @@ class __$PlayerStateCopyWithImpl<$Res>
 
 /// Create a copy of PlayerState
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? isPlaying = null,Object? isBuffering = null,Object? isInitialLoading = null,Object? position = null,Object? duration = null,Object? volume = null,Object? playbackSpeed = null,Object? isFullscreen = null,Object? areControlsVisible = null,Object? isAlwaysOnTop = null,Object? audioTracks = null,Object? subtitleTracks = null,Object? currentAudioTrack = freezed,Object? currentSubtitleTrack = freezed,Object? currentVideoPath = freezed,Object? currentVideoTitle = freezed,Object? error = freezed,Object? playerBackend = null,Object? isVideoNotOptimizedForStreaming = null,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? isPlaying = null,Object? isBuffering = null,Object? isInitialLoading = null,Object? position = null,Object? duration = null,Object? volume = null,Object? playbackSpeed = null,Object? isFullscreen = null,Object? areControlsVisible = null,Object? isAlwaysOnTop = null,Object? audioTracks = null,Object? subtitleTracks = null,Object? currentAudioTrack = freezed,Object? currentSubtitleTrack = freezed,Object? currentVideoPath = freezed,Object? currentVideoTitle = freezed,Object? error = freezed,Object? playerBackend = null,Object? isVideoNotOptimizedForStreaming = null,Object? streamingError = freezed,}) {
   return _then(_PlayerState(
 isPlaying: null == isPlaying ? _self.isPlaying : isPlaying // ignore: cast_nullable_to_non_nullable
 as bool,isBuffering: null == isBuffering ? _self.isBuffering : isBuffering // ignore: cast_nullable_to_non_nullable
@@ -331,7 +335,8 @@ as String?,currentVideoTitle: freezed == currentVideoTitle ? _self.currentVideoT
 as String?,error: freezed == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
 as String?,playerBackend: null == playerBackend ? _self.playerBackend : playerBackend // ignore: cast_nullable_to_non_nullable
 as String,isVideoNotOptimizedForStreaming: null == isVideoNotOptimizedForStreaming ? _self.isVideoNotOptimizedForStreaming : isVideoNotOptimizedForStreaming // ignore: cast_nullable_to_non_nullable
-as bool,
+as bool,streamingError: freezed == streamingError ? _self.streamingError : streamingError // ignore: cast_nullable_to_non_nullable
+as StreamingError?,
   ));
 }
 

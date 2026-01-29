@@ -5,7 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'telegram_service.dart';
 import 'mp4_sample_table.dart';
 import 'telegram_cache_service.dart';
+import 'retry_tracker.dart';
 import '../../domain/value_objects/loading_progress.dart';
+import '../../domain/value_objects/streaming_error.dart';
 
 class ProxyFileInfo {
   final String path;
@@ -565,6 +567,59 @@ class LocalStreamingProxy {
   /// Key: fileId, Value: byte offset to seek to
   final Map<int, int> _pendingSeekAfterMoov = {};
 
+  // ============================================================
+  // RETRY TRACKING AND ERROR HANDLING
+  // ============================================================
+
+  /// Tracks retry attempts per file to prevent infinite loops
+  final RetryTracker _retryTracker = RetryTracker();
+
+  /// Callback for unrecoverable errors - UI should subscribe to this
+  void Function(StreamingError error)? onStreamingError;
+
+  /// Last error per file - for UI to query current error state
+  final Map<int, StreamingError> _lastErrors = {};
+
+  /// Get the last error for a file, or null if no error
+  StreamingError? getLastError(int fileId) => _lastErrors[fileId];
+
+  /// Clear error state for a file (e.g., when retrying manually)
+  void clearError(int fileId) {
+    _lastErrors.remove(fileId);
+    _retryTracker.reset(fileId);
+    // Reset load state back to idle if it was in error
+    if (_fileLoadStates[fileId] == FileLoadState.error ||
+        _fileLoadStates[fileId] == FileLoadState.timeout ||
+        _fileLoadStates[fileId] == FileLoadState.unsupported) {
+      _fileLoadStates[fileId] = FileLoadState.idle;
+    }
+  }
+
+  /// Internal method to notify error and update state
+  void _notifyError(int fileId, StreamingError error) {
+    _lastErrors[fileId] = error;
+
+    // Transition to appropriate error state
+    if (error.isRecoverable) {
+      _fileLoadStates[fileId] = FileLoadState.error;
+    } else {
+      switch (error.type) {
+        case StreamingErrorType.timeout:
+          _fileLoadStates[fileId] = FileLoadState.timeout;
+          break;
+        case StreamingErrorType.unsupportedCodec:
+          _fileLoadStates[fileId] = FileLoadState.unsupported;
+          break;
+        default:
+          _fileLoadStates[fileId] = FileLoadState.error;
+      }
+    }
+
+    // Notify callback
+    onStreamingError?.call(error);
+    debugPrint('Proxy: ERROR for $fileId - ${error.type}: ${error.message}');
+  }
+
   /// Get the current load state for a file
   FileLoadState getFileLoadState(int fileId) =>
       _fileLoadStates[fileId] ?? FileLoadState.idle;
@@ -635,6 +690,10 @@ class LocalStreamingProxy {
     _downloadStartTime.remove(fileId);
     _isMoovAtEnd.remove(fileId);
 
+    // Clean up retry and error tracking
+    _retryTracker.reset(fileId);
+    _lastErrors.remove(fileId);
+
     // Notify any waiting loops to wake up and check abort status
     _fileUpdateNotifiers[fileId]?.add(null);
   }
@@ -669,6 +728,10 @@ class LocalStreamingProxy {
     _fileLoadStates.clear();
     _pendingSeekAfterMoov.clear();
     _stalePlaybackPositions.clear();
+
+    // Clear retry tracking and error state
+    _retryTracker.resetAll();
+    _lastErrors.clear();
 
     _log('All cached file info invalidated');
   }
@@ -1714,12 +1777,36 @@ class LocalStreamingProxy {
                 final lastPrefix = _lastDownloadProgress[capturedFileId] ?? 0;
 
                 if (currentPrefix <= lastPrefix) {
-                  // No progress and download not active - restart
+                  // No progress and download not active - check retry limit
+                  if (!_retryTracker.canRetry(capturedFileId)) {
+                    // Max retries exceeded - transition to error state
+                    final attempts = _retryTracker.totalAttempts(
+                      capturedFileId,
+                    );
+                    final error = StreamingError.maxRetries(
+                      capturedFileId,
+                      attempts,
+                    );
+                    _notifyError(capturedFileId, error);
+                    stallTimer?.cancel();
+                    debugPrint(
+                      'Proxy: MAX RETRIES EXCEEDED for $capturedFileId after $attempts attempts',
+                    );
+                    return;
+                  }
+
+                  // Record retry attempt
+                  _retryTracker.recordRetry(capturedFileId);
+                  final remaining = _retryTracker.remainingRetries(
+                    capturedFileId,
+                  );
+
                   final metrics = _downloadMetrics[capturedFileId];
                   if (metrics != null) {
                     metrics.recordStall();
                     debugPrint(
-                      'Proxy: P2 STALL RECORDED for $capturedFileId (total: ${metrics.recentStallCount})',
+                      'Proxy: P2 STALL RECORDED for $capturedFileId '
+                      '(stalls: ${metrics.recentStallCount}, retries remaining: $remaining)',
                     );
                   }
                   _startDownloadAtOffset(capturedFileId, capturedOffset);

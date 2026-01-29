@@ -7,6 +7,7 @@ import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
 import 'video_repository_provider.dart';
 import '../../domain/repositories/streaming_repository.dart';
+import '../../domain/value_objects/streaming_error.dart';
 import '../../infrastructure/services/playback_storage_service.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
 import '../../application/use_cases/save_progress_use_case.dart';
@@ -136,6 +137,9 @@ class PlayerNotifier extends _$PlayerNotifier {
     );
     _initStreams();
 
+    // Subscribe to proxy streaming errors (max retries, timeouts, etc.)
+    _streamingRepository.onStreamingError = _handleStreamingError;
+
     // Registramos la limpieza de recursos.
     // En Riverpod 3, esto reemplaza al método dispose() de los StateNotifier.
     ref.onDispose(() {
@@ -149,6 +153,8 @@ class PlayerNotifier extends _$PlayerNotifier {
       _moovCheckTimer?.cancel();
       _savePosition();
       _abortCurrentProxyRequest();
+      // Clear streaming error callback
+      _streamingRepository.onStreamingError = null;
     });
 
     // Retornamos el estado inicial.
@@ -237,6 +243,30 @@ class PlayerNotifier extends _$PlayerNotifier {
       // Stop forced loading on error
       state = state.copyWith(error: error, isBuffering: false);
     });
+  }
+
+  /// Handle streaming proxy errors (max retries, timeout, etc.)
+  void _handleStreamingError(StreamingError error) {
+    if (!ref.mounted) return;
+    debugPrint(
+      'PlayerNotifier: Streaming error for file ${error.fileId}: ${error.message}',
+    );
+    // Only update if this error is for the current video
+    if (_currentProxyFileId == error.fileId) {
+      state = state.copyWith(
+        streamingError: error,
+        isBuffering: false,
+        isInitialLoading: false,
+      );
+    }
+  }
+
+  /// Clear any streaming error (e.g., when user retries)
+  void clearStreamingError() {
+    if (_currentProxyFileId != null) {
+      _streamingRepository.clearError(_currentProxyFileId!);
+    }
+    state = state.copyWith(streamingError: null);
   }
 
   /// Start a timer to periodically check if video is not optimized for streaming
@@ -404,6 +434,7 @@ class PlayerNotifier extends _$PlayerNotifier {
         currentVideoPath: path,
         currentVideoTitle: title,
         error: null,
+        streamingError: null, // Clear any previous streaming error
         position: Duration.zero,
         duration: Duration.zero,
         isPlaying: false,

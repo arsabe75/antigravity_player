@@ -1,0 +1,109 @@
+/// Types of errors that can occur during video streaming.
+/// Used to provide specific feedback to users and determine recovery strategies.
+enum StreamingErrorType {
+  /// Timeout waiting for data from server
+  timeout,
+
+  /// Network connectivity error
+  networkError,
+
+  /// File appears to be corrupt or invalid
+  corruptFile,
+
+  /// Video codec not supported by player
+  unsupportedCodec,
+
+  /// Not enough disk space to continue downloading
+  diskFull,
+
+  /// File no longer available on Telegram servers
+  fileNotFound,
+
+  /// Maximum retry attempts exceeded
+  maxRetriesExceeded,
+
+  /// Unknown/unspecified error
+  unknown,
+}
+
+/// Represents a streaming error with context for UI and recovery.
+class StreamingError {
+  /// Type of error that occurred
+  final StreamingErrorType type;
+
+  /// Human-readable error message
+  final String message;
+
+  /// File ID that encountered the error
+  final int fileId;
+
+  /// Whether the error might be resolved by retrying
+  final bool isRecoverable;
+
+  /// Number of retry attempts made before this error
+  final int retryAttempts;
+
+  const StreamingError({
+    required this.type,
+    required this.message,
+    required this.fileId,
+    this.isRecoverable = true,
+    this.retryAttempts = 0,
+  });
+
+  /// Create a timeout error
+  factory StreamingError.timeout(int fileId, {int retryAttempts = 0}) {
+    return StreamingError(
+      type: StreamingErrorType.timeout,
+      message: 'Tiempo de espera agotado al cargar el video',
+      fileId: fileId,
+      isRecoverable: true,
+      retryAttempts: retryAttempts,
+    );
+  }
+
+  /// Create a max retries exceeded error
+  factory StreamingError.maxRetries(int fileId, int attempts) {
+    return StreamingError(
+      type: StreamingErrorType.maxRetriesExceeded,
+      message: 'No se pudo cargar el video después de $attempts intentos',
+      fileId: fileId,
+      isRecoverable: false,
+      retryAttempts: attempts,
+    );
+  }
+
+  /// Create a file not found error
+  factory StreamingError.fileNotFound(int fileId) {
+    return StreamingError(
+      type: StreamingErrorType.fileNotFound,
+      message: 'El video ya no está disponible',
+      fileId: fileId,
+      isRecoverable: false,
+    );
+  }
+
+  /// Create a disk full error
+  factory StreamingError.diskFull(int fileId) {
+    return StreamingError(
+      type: StreamingErrorType.diskFull,
+      message: 'No hay suficiente espacio en disco',
+      fileId: fileId,
+      isRecoverable: false,
+    );
+  }
+
+  /// Create from an exception
+  factory StreamingError.fromException(int fileId, Object exception) {
+    return StreamingError(
+      type: StreamingErrorType.unknown,
+      message: exception.toString(),
+      fileId: fileId,
+      isRecoverable: true,
+    );
+  }
+
+  @override
+  String toString() =>
+      'StreamingError(type: $type, fileId: $fileId, recoverable: $isRecoverable)';
+}

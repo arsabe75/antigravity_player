@@ -1,4 +1,5 @@
 import '../value_objects/loading_progress.dart';
+import '../value_objects/streaming_error.dart';
 
 abstract class StreamingRepository {
   /// Aborts a specific file request to stop streaming data
@@ -32,4 +33,16 @@ abstract class StreamingRepository {
   /// Returns null if file is not being tracked.
   /// UI can use this to show loading indicators, progress bars, and MOOV fetching status.
   LoadingProgress? getLoadingProgress(int fileId);
+
+  /// Get the last streaming error for a file, or null if no error.
+  /// UI can use this to show error messages.
+  StreamingError? getLastError(int fileId);
+
+  /// Clear error state for a file and reset retry counter.
+  /// Call this when user wants to manually retry a failed video.
+  void clearError(int fileId);
+
+  /// Register a callback for streaming errors.
+  /// This callback is invoked when an unrecoverable error occurs.
+  set onStreamingError(void Function(StreamingError error)? callback);
 }

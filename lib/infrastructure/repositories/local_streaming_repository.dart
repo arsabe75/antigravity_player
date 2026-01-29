@@ -1,9 +1,11 @@
 import '../../domain/repositories/streaming_repository.dart';
 import '../../domain/value_objects/loading_progress.dart';
+import '../../domain/value_objects/streaming_error.dart';
 import '../services/local_streaming_proxy.dart';
 
-// Re-export LoadingProgress from domain so it's available to consumers
+// Re-export LoadingProgress and StreamingError from domain
 export '../../domain/value_objects/loading_progress.dart';
+export '../../domain/value_objects/streaming_error.dart';
 
 class LocalStreamingRepository implements StreamingRepository {
   final LocalStreamingProxy _proxy;
@@ -51,5 +53,20 @@ class LocalStreamingRepository implements StreamingRepository {
   @override
   LoadingProgress? getLoadingProgress(int fileId) {
     return _proxy.getLoadingProgress(fileId);
+  }
+
+  @override
+  StreamingError? getLastError(int fileId) {
+    return _proxy.getLastError(fileId);
+  }
+
+  @override
+  void clearError(int fileId) {
+    _proxy.clearError(fileId);
+  }
+
+  @override
+  set onStreamingError(void Function(StreamingError error)? callback) {
+    _proxy.onStreamingError = callback;
   }
 }
