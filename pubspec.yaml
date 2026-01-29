@@ -46,7 +46,7 @@ dependencies:
   flutter_dotenv: ^5.2.1
   mpris_service:
     git: https://github.com/alexmercerind/mpris_service.git
-  media_kit: ^1.2.3
+  media_kit: ^1.2.6
   media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.7
   fvp: ^0.35.1
