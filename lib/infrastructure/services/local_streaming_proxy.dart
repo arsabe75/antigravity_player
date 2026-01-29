@@ -694,6 +694,9 @@ class LocalStreamingProxy {
     _retryTracker.reset(fileId);
     _lastErrors.remove(fileId);
 
+    // Clean up early MOOV detection tracking
+    _earlyMoovDetectionTriggered.remove(fileId);
+
     // Notify any waiting loops to wake up and check abort status
     _fileUpdateNotifiers[fileId]?.add(null);
   }
@@ -732,6 +735,9 @@ class LocalStreamingProxy {
     // Clear retry tracking and error state
     _retryTracker.resetAll();
     _lastErrors.clear();
+
+    // Clear early MOOV detection tracking
+    _earlyMoovDetectionTriggered.clear();
 
     _log('All cached file info invalidated');
   }
@@ -859,6 +865,12 @@ class LocalStreamingProxy {
           _byteAvailabilityWaiters.remove(id);
         }
       }
+
+      // EARLY MOOV DETECTION: Trigger as soon as we have enough bytes
+      // This allows us to detect moov-at-start immediately and prepare
+      // for moov-at-end videos before the player even requests data.
+      _triggerEarlyMoovDetection(id, info);
+
       return;
     }
 
@@ -2727,6 +2739,57 @@ class LocalStreamingProxy {
   // ============================================================
   // MOOV PRE-DETECTION AND POST-SEEK PRELOAD
   // ============================================================
+
+  /// Minimum prefix size needed to attempt moov detection at file start
+  static const int _moovDetectionMinPrefix = 1024; // 1KB
+
+  /// Prefix size to infer moov-at-end (no moov found in initial bytes)
+  static const int _moovAtEndInferenceThreshold = 5 * 1024 * 1024; // 5MB
+
+  /// Tracks files that have already had early detection triggered
+  final Set<int> _earlyMoovDetectionTriggered = {};
+
+  /// Triggers early MOOV detection when sufficient bytes arrive.
+  /// This is called from _onUpdate to detect moov position as early as possible.
+  /// - For moov-at-start: Detection happens as soon as 1KB is downloaded
+  /// - For moov-at-end: Detection triggers after 5MB without finding moov
+  void _triggerEarlyMoovDetection(int fileId, ProxyFileInfo info) {
+    // Skip if already detected or triggered
+    if (_moovPositionCache.containsKey(fileId)) return;
+    if (info.totalSize < 1024 * 1024) return; // Skip small files < 1MB
+
+    final prefix = info.downloadedPrefixSize;
+
+    // Stage 1: Try to detect moov at start (need ~1KB)
+    if (prefix >= _moovDetectionMinPrefix &&
+        !_earlyMoovDetectionTriggered.contains(fileId)) {
+      _earlyMoovDetectionTriggered.add(fileId);
+
+      // Asynchronously detect - this is non-blocking
+      _detectMoovPosition(fileId, info.totalSize).then((position) {
+        if (position == MoovPosition.start) {
+          // Great! Video is optimized for streaming
+          debugPrint('Proxy: EARLY DETECT - File $fileId has MOOV at START');
+        } else if (position == MoovPosition.end) {
+          // Video not optimized - update state for UI
+          _isMoovAtEnd[fileId] = true;
+          debugPrint('Proxy: EARLY DETECT - File $fileId has MOOV at END');
+        }
+        // MoovPosition.unknown means we need more data
+      });
+    }
+
+    // Stage 2: Infer moov-at-end if we have substantial prefix without finding moov
+    if (prefix >= _moovAtEndInferenceThreshold &&
+        !_moovPositionCache.containsKey(fileId)) {
+      // If we downloaded 5MB+ and still haven't found moov, it's at the end
+      _moovPositionCache[fileId] = MoovPosition.end;
+      _isMoovAtEnd[fileId] = true;
+      debugPrint(
+        'Proxy: EARLY DETECT - File $fileId inferred MOOV at END (${prefix ~/ (1024 * 1024)}MB downloaded)',
+      );
+    }
+  }
 
   /// Pre-detects the position of the MOOV atom by analyzing the first bytes of the file.
   /// Returns immediately if already cached.
