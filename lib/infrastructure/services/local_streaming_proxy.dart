@@ -7,6 +7,7 @@ import 'mp4_sample_table.dart';
 import 'telegram_cache_service.dart';
 import 'retry_tracker.dart';
 import 'download_priority.dart';
+import 'proxy_logger.dart';
 import '../../domain/value_objects/loading_progress.dart';
 import '../../domain/value_objects/streaming_error.dart';
 
@@ -382,18 +383,54 @@ class LocalStreamingProxy {
   LocalStreamingProxy._internal();
 
   // ============================================================
-  // OPTIMIZATION: Conditional Logging
+  // STRUCTURED LOGGING with ProxyLogger
   // ============================================================
-  // Set to false in production to eliminate debug output overhead.
-  // This significantly reduces main thread load during playback.
-  static const bool _enableVerboseLogging = false;
+  /// Access to the centralized logger with levels and buffering.
+  final ProxyLogger _logger = ProxyLogger.instance;
 
-  /// Conditional logging - only prints when verbose logging is enabled.
-  /// Use for non-critical debug messages. Critical errors should use debugPrint directly.
-  void _log(String message) {
-    if (_enableVerboseLogging) {
-      debugPrint('Proxy: $message');
+  /// Convenience method for trace-level logging (most verbose).
+  void _logTrace(String message, {int? fileId, Map<String, dynamic>? data}) {
+    _logger.trace(message, fileId: fileId, data: data);
+  }
+
+  /// Convenience method for debug-level logging.
+  void _log(String message, {int? fileId, Map<String, dynamic>? data}) {
+    _logger.debug(message, fileId: fileId, data: data);
+  }
+
+  /// Convenience method for info-level logging.
+  void _logInfo(String message, {int? fileId, Map<String, dynamic>? data}) {
+    _logger.info(message, fileId: fileId, data: data);
+  }
+
+  /// Convenience method for warning-level logging.
+  void _logWarning(String message, {int? fileId, Map<String, dynamic>? data}) {
+    _logger.warning(message, fileId: fileId, data: data);
+  }
+
+  /// Convenience method for error-level logging.
+  void _logError(
+    String message, {
+    int? fileId,
+    Map<String, dynamic>? data,
+    Object? exception,
+  }) {
+    _logger.error(message, fileId: fileId, data: data, exception: exception);
+  }
+
+  /// Set the log level at runtime.
+  void setLogLevel(ProxyLogLevel level) {
+    _logger.setLevel(level);
+  }
+
+  /// Get buffered logs for debugging.
+  List<ProxyLogEntry> getBufferedLogs({int? fileId, ProxyLogLevel? minLevel}) {
+    if (fileId != null) {
+      return _logger.getLogsForFile(fileId);
+    } else if (minLevel != null) {
+      return _logger.getLogsAtLevel(minLevel);
     }
+    return _logger.getBufferedLogs();
   }
 
   // ============================================================
@@ -618,7 +655,10 @@ class LocalStreamingProxy {
 
     // Notify callback
     onStreamingError?.call(error);
-    debugPrint('Proxy: ERROR for $fileId - ${error.type}: ${error.message}');
+    _logError(
+      'ERROR for file - ${error.type}: ${error.message}',
+      fileId: fileId,
+    );
   }
 
   /// Get the current load state for a file
@@ -780,7 +820,7 @@ class LocalStreamingProxy {
 
     _server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
     _port = _server!.port;
-    debugPrint('LocalStreamingProxy running on port $_port');
+    _logInfo('Running on port $_port');
 
     _server!.listen(_handleRequest);
 
@@ -948,7 +988,7 @@ class LocalStreamingProxy {
   Future<void> _runEnforcement() async {
     _lastEnforcementTime = DateTime.now();
     _totalBytesDownloadedSinceEnforcement = 0; // Reset counter
-    debugPrint('Proxy: Running cache limit enforcement');
+    _logTrace('Running cache limit enforcement');
     await TelegramCacheService().enforceVideoSizeLimit();
   }
 
@@ -2549,9 +2589,14 @@ class LocalStreamingProxy {
         priority < activePriority - DownloadPriority.priorityProtectionGap &&
         (requestedOffset - activeDownloadTarget).abs() >
             DownloadPriority.cacheEdgeDistanceBytes) {
-      debugPrint(
-        'Proxy: PROTECTED active download (prio $activePriority) from lower-priority request '
-        'at $requestedOffset (prio $priority). Ignoring.',
+      _logWarning(
+        'PROTECTED active download from lower-priority request',
+        fileId: fileId,
+        data: {
+          'activePriority': activePriority,
+          'requestPriority': priority,
+          'requestOffset': requestedOffset,
+        },
       );
       return;
     }
