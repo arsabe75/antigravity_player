@@ -6,6 +6,7 @@ import 'telegram_service.dart';
 import 'mp4_sample_table.dart';
 import 'telegram_cache_service.dart';
 import 'retry_tracker.dart';
+import 'download_priority.dart';
 import '../../domain/value_objects/loading_progress.dart';
 import '../../domain/value_objects/streaming_error.dart';
 
@@ -2024,7 +2025,7 @@ class LocalStreamingProxy {
           TelegramService().send({
             '@type': 'downloadFile',
             'file_id': fileId,
-            'priority': 32,
+            'priority': DownloadPriority.critical,
             'offset': 0,
             'limit': 0, // Download entire file
             'synchronous': true, // Sequential download, no file parts
@@ -2419,21 +2420,23 @@ class LocalStreamingProxy {
     }
 
     // PRIORITY HIERARCHY FIX:
-    // Split Blocking Priority into "Critical" (32) and "Deep Buffering" (28).
+    // Split Blocking Priority into "Critical" and "Deep Buffering".
     // This prevents a "Deep Buffer" request (e.g. 500MB ahead) from displacing an
-    // "Immediate Playback" request (e.g. 1MB ahead), which is also Prio 32.
-    // They used to fight and cancel each other. Now Prio 32 wins.
+    // "Immediate Playback" request (e.g. 1MB ahead), which is also Critical.
+    // They used to fight and cancel each other. Now Critical wins.
     //
-    // EXCEPTION: Low-offset requests (<150MB) always get priority 32 because
+    // EXCEPTION: Low-offset requests (<150MB) always get critical priority because
     // they represent contiguous cache data needed for playback.
-    int blockingPriority = 32;
+    int blockingPriority = DownloadPriority.critical;
     if (shouldForcePriority) {
       final distToPrimary = (requestedOffset - primaryOffset).abs();
-      final isLowOffsetRequest = requestedOffset < 300 * 1024 * 1024;
-      if (distToPrimary > 20 * 1024 * 1024 &&
+      final isLowOffsetRequest =
+          requestedOffset < DownloadPriority.lowOffsetThresholdBytes;
+      if (distToPrimary > DownloadPriority.closestToPrimaryBytes &&
           !isMoovDownload &&
           !isLowOffsetRequest) {
-        blockingPriority = 28; // Urgent, but interruptible by Critical
+        blockingPriority = DownloadPriority
+            .deepBuffer; // Urgent, but interruptible by Critical
       }
     }
 
@@ -2442,28 +2445,34 @@ class LocalStreamingProxy {
         : _calculateDynamicPriority(fileId, distanceToPlayback);
 
     // LOW OFFSET PRIORITY FLOOR:
-    // Ensure requests for early file data (< 300MB) get at least priority 20.
-    // BUT: To prevent ping-pong, only give CRITICAL priority (32) to the request
+    // Ensure requests for early file data (<300MB) get at least highFloor priority.
+    // BUT: To prevent ping-pong, only give CRITICAL priority to the request
     // that is closest to the primary playback offset. Other low-offset requests
-    // get priority 20 (high enough to interrupt background, but can be superseded
+    // get highFloor (high enough to interrupt background, but can be superseded
     // by the truly critical request).
-    final isLowOffsetRequest = requestedOffset < 300 * 1024 * 1024;
+    final isLowOffsetRequest =
+        requestedOffset < DownloadPriority.lowOffsetThresholdBytes;
     final distToPrimaryForFloor = (requestedOffset - primaryOffset).abs();
     final isClosestToPrimary =
-        distToPrimaryForFloor < 20 * 1024 * 1024; // Within 20MB of primary
+        distToPrimaryForFloor < DownloadPriority.closestToPrimaryBytes;
 
     int priority;
     if (isLowOffsetRequest) {
-      // PHASE3: Simplified LOW OFFSET priority logic
+      // Simplified LOW OFFSET priority logic
       // Use active download priority instead of removed lock mechanism
-      final hasActiveHighPriority = (_activePriority[fileId] ?? 0) >= 28;
+      final hasActiveHighPriority =
+          (_activePriority[fileId] ?? 0) >= DownloadPriority.deepBuffer;
 
       if (hasActiveHighPriority) {
-        // When there's an active high-priority download, cap LOW OFFSET at 20
-        priority = (calculatedPriority > 20) ? 20 : calculatedPriority;
-      } else if (calculatedPriority < 20) {
+        // When there's an active high-priority download, cap LOW OFFSET at highFloor
+        priority = (calculatedPriority > DownloadPriority.highFloor)
+            ? DownloadPriority.highFloor
+            : calculatedPriority;
+      } else if (calculatedPriority < DownloadPriority.highFloor) {
         // Apply floor, but differentiate between closest-to-primary and others
-        priority = isClosestToPrimary ? 32 : 20;
+        priority = isClosestToPrimary
+            ? DownloadPriority.critical
+            : DownloadPriority.highFloor;
       } else {
         priority = calculatedPriority;
       }
@@ -2476,7 +2485,7 @@ class LocalStreamingProxy {
     // We must prevent a Low Priority request (e.g. background preload) from killing
     // a High Priority Active Download (e.g. user watching video).
     final activePriority = _activePriority[fileId] ?? 0;
-    final isHighPriorityActive = activePriority >= 20;
+    final isHighPriorityActive = activePriority >= DownloadPriority.highFloor;
 
     // PHASE3: Removed STICKY PRIORITY PROTECTION - was too conservative\n    // The simplified distance-based protection below is sufficient
 
@@ -2493,7 +2502,8 @@ class LocalStreamingProxy {
         // Check if the LAST known active offset was close to primary
         final lastActiveOffset = _lastActiveDownloadOffset[fileId] ?? -1;
         // reuse primaryOffset from scope
-        if ((lastActiveOffset - primaryOffset).abs() < 5 * 1024 * 1024) {
+        if ((lastActiveOffset - primaryOffset).abs() <
+            DownloadPriority.cacheEdgeDistanceBytes) {
           isVirtualActive = true;
           // Inherit priority from previous active state (assume high)
           // This effectively extends the shield
@@ -2536,8 +2546,9 @@ class LocalStreamingProxy {
     // Only block if priority is significantly lower AND not blocking
     if (!isBlocking &&
         isHighPriorityActive &&
-        priority < activePriority - 5 &&
-        (requestedOffset - activeDownloadTarget).abs() > 5 * 1024 * 1024) {
+        priority < activePriority - DownloadPriority.priorityProtectionGap &&
+        (requestedOffset - activeDownloadTarget).abs() >
+            DownloadPriority.cacheEdgeDistanceBytes) {
       debugPrint(
         'Proxy: PROTECTED active download (prio $activePriority) from lower-priority request '
         'at $requestedOffset (prio $priority). Ignoring.',
@@ -2597,73 +2608,14 @@ class LocalStreamingProxy {
   }
 
   /// Calculate dynamic priority based on distance from playback position.
-  /// Follows the 32-level scale requested by User:
-  /// - 32: Critical (Immediate playback, 0-1s ahead)
-  /// - 20-31: High (Pre-buffering, 1-10s ahead) - Scaled linearly
-  /// - 1-10: Low (Background/Far-ahead, >10s ahead)
+  /// Delegates to [DownloadPriority.fromDistance] for centralized calculation.
+  ///
+  /// Priority ranges:
+  /// - 32: Critical (0-1MB ahead)
+  /// - 20-31: High (1-10MB ahead)
+  /// - 1-10: Low (>10MB ahead)
   int _calculateDynamicPriority(int fileId, int distanceBytes) {
-    // 1. Critical Priority (0-1s ahead or < 500KB if duration unknown)
-    // We need to estimate byte rate to convert seconds to bytes.
-
-    // Estimate bitrate mechanism: Default fallback 500KB/s (~4Mbps)
-    // int bytesPerSecond = 500 * 1024; // Commented out until used or removed completely if heuristic is sufficient
-
-    // Try to get more accurate bitrate from known file duration
-    // Note: We don't have duration in ProxyFileInfo yet, but we might have it in Mp4SampleTable
-
-    // Try to get more accurate bitrate from known file duration
-    // Note: We don't have duration in ProxyFileInfo yet, but we might have it in Mp4SampleTable
-    // or we can fallback to reasonable defaults.
-    // For now, let's use the default fallback or adjust if we had duration.
-    // Ideally we should pass duration to this method or store it.
-
-    // Using simple byte thresholds corresponding to generic HD video (approx 500KB/s - 1MB/s)
-
-    // Critical Window: 0 - 1MB (approx 1-2 seconds)
-    // Priority 32
-    if (distanceBytes < 1 * 1024 * 1024) {
-      return 32;
-    }
-
-    // High Priority Window: 1MB - 10MB (approx 2s - 20s)
-    // Priority 31 down to 20
-    if (distanceBytes < 10 * 1024 * 1024) {
-      // Map 1MB..10MB to 31..20
-      const minDist = 1 * 1024 * 1024;
-      const maxDist = 10 * 1024 * 1024;
-      const range = maxDist - minDist;
-
-      const maxPrio = 31;
-      const minPrio = 20;
-
-      // Calculate linear interpolation
-      final progress = (distanceBytes - minDist) / range;
-      // Invert progress because closer = higher priority
-      // 0.0 (1MB) -> 31
-      // 1.0 (10MB) -> 20
-      final prio = maxPrio - (progress * (maxPrio - minPrio)).round();
-      return prio.clamp(minPrio, maxPrio);
-    }
-
-    // Low Priority Window: > 10MB
-    // Priority 10 down to 1
-    // Let's cap the "far ahead" at 50MB for priority 1
-    if (distanceBytes >= 10 * 1024 * 1024) {
-      const minDist = 10 * 1024 * 1024;
-      const maxDist = 50 * 1024 * 1024;
-
-      if (distanceBytes >= maxDist) return 1;
-
-      const range = maxDist - minDist;
-      const maxPrio = 10;
-      const minPrio = 1;
-
-      final progress = (distanceBytes - minDist) / range;
-      final prio = maxPrio - (progress * (maxPrio - minPrio)).round();
-      return prio.clamp(minPrio, maxPrio);
-    }
-
-    return 1;
+    return DownloadPriority.fromDistance(distanceBytes);
   }
 
   /// PHASE 1: Smart adaptive preload calculation
@@ -2915,7 +2867,7 @@ class LocalStreamingProxy {
     TelegramService().send({
       '@type': 'downloadFile',
       'file_id': fileId,
-      'priority': 20, // High but below playback (32)
+      'priority': DownloadPriority.highFloor, // High but below critical
       'offset': targetOffset,
       'limit': preloadAheadBytes,
       'synchronous': false,
@@ -2962,7 +2914,7 @@ class LocalStreamingProxy {
     TelegramService().send({
       '@type': 'downloadFile',
       'file_id': fileId,
-      'priority': 20, // High priority (bottom of range) for seek preview
+      'priority': DownloadPriority.highFloor, // High priority for seek preview
       'offset': estimatedOffset,
       'limit': 2 * 1024 * 1024, // Preload 2MB around target
       'synchronous': false,
