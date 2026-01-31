@@ -2584,7 +2584,11 @@ class LocalStreamingProxy {
 
     // PHASE3: Simplified priority protection
     // Only block if priority is significantly lower AND not blocking
+    // CRITICAL FIX: Never block low-offset requests (needed for MOOV/playback start)
+    final isLowOffsetRequestForProtection =
+        requestedOffset < DownloadPriority.lowOffsetThresholdBytes;
     if (!isBlocking &&
+        !isLowOffsetRequestForProtection && // NEVER block initial file data
         isHighPriorityActive &&
         priority < activePriority - DownloadPriority.priorityProtectionGap &&
         (requestedOffset - activeDownloadTarget).abs() >

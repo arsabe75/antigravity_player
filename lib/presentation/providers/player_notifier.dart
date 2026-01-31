@@ -113,6 +113,9 @@ class PlayerNotifier extends _$PlayerNotifier {
   // Track the position when initial loading started to detect actual playback
   Duration? _initialLoadingStartPosition;
 
+  // Track the position when ANY error occurred (MediaKit or streaming) to detect recovery
+  Duration? _errorOccurredAtPosition;
+
   // Note: isInitialLoading is now exposed in PlayerState for UI visibility
 
   // Stable Telegram identifiers for progress persistence
@@ -182,7 +185,29 @@ class PlayerNotifier extends _$PlayerNotifier {
             'PlayerNotifier: Playback confirmed, clearing initial loading',
           );
           _initialLoadingStartPosition = null;
-          state = state.copyWith(isInitialLoading: false, isBuffering: false);
+          // Also clear any streaming error since playback resumed successfully
+          state = state.copyWith(
+            isInitialLoading: false,
+            isBuffering: false,
+            streamingError: null,
+          );
+        }
+      }
+
+      // UX FIX: Auto-dismiss error overlay when playback continues successfully
+      // This handles the case where an error occurs mid-playback but video recovers
+      // Works for BOTH MediaKit errors (state.error) and streaming errors (state.streamingError)
+      if (_errorOccurredAtPosition != null &&
+          (state.error != null || state.streamingError != null)) {
+        // If position has advanced 500ms from when error occurred, playback recovered
+        final errorPos = _errorOccurredAtPosition!;
+        if (pos.inMilliseconds > errorPos.inMilliseconds + 500 ||
+            pos.inMilliseconds < errorPos.inMilliseconds - 500) {
+          debugPrint(
+            'PlayerNotifier: Playback recovered (pos: ${pos.inMilliseconds}ms, error was at: ${errorPos.inMilliseconds}ms), clearing errors',
+          );
+          _errorOccurredAtPosition = null;
+          state = state.copyWith(error: null, streamingError: null);
         }
       }
     });
@@ -240,6 +265,8 @@ class PlayerNotifier extends _$PlayerNotifier {
     _errorSub = _repository.errorStream.listen((error) {
       if (!ref.mounted) return;
       debugPrint('PlayerNotifier: Player error received: $error');
+      // Store position when error occurred to detect recovery later
+      _errorOccurredAtPosition = state.position;
       // Stop forced loading on error
       state = state.copyWith(error: error, isBuffering: false);
     });
@@ -253,6 +280,8 @@ class PlayerNotifier extends _$PlayerNotifier {
     );
     // Only update if this error is for the current video
     if (_currentProxyFileId == error.fileId) {
+      // Store the position when error occurred to detect recovery later
+      _errorOccurredAtPosition = state.position;
       state = state.copyWith(
         streamingError: error,
         isBuffering: false,
