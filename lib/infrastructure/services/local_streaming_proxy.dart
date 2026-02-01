@@ -554,6 +554,11 @@ class LocalStreamingProxy {
   // Track when download started for each file (for metrics)
   final Map<int, DateTime> _downloadStartTime = {};
 
+  // INITIALIZATION GRACE PERIOD: Track when video was first opened
+  // Used to prevent false stalls during MOOV-at-end video initialization
+  static const Duration _initializationGracePeriod = Duration(seconds: 30);
+  final Map<int, DateTime> _videoOpenTime = {};
+
   // PHASE2: MOOV state tracking simplified - only track moov-at-end detection
   // Removed: _moovUnblockTime, _moovStabilizeCompleted, _moovDownloadStart
 
@@ -737,6 +742,9 @@ class LocalStreamingProxy {
 
     // Clean up early MOOV detection tracking
     _earlyMoovDetectionTriggered.remove(fileId);
+
+    // Clean up initialization grace period tracking
+    _videoOpenTime.remove(fileId);
 
     // Notify any waiting loops to wake up and check abort status
     _fileUpdateNotifiers[fileId]?.add(null);
@@ -1082,6 +1090,9 @@ class LocalStreamingProxy {
 
       fileId = int.parse(fileIdStr);
       final totalSize = int.tryParse(sizeStr ?? '') ?? 0;
+
+      // Track when video was first opened for initialization grace period
+      _videoOpenTime.putIfAbsent(fileId, () => DateTime.now());
 
       // Wait for TDLib client to be ready (max 10 seconds)
       // This is crucial on app start when TDLib might still be initializing
@@ -1815,6 +1826,17 @@ class LocalStreamingProxy {
                 debugPrint(
                   'Proxy: Stall timer - MOOV download in progress for $capturedFileId, skipping restart',
                 );
+                return;
+              }
+
+              // INITIALIZATION GRACE PERIOD: Don't count stalls during first 30 seconds
+              // This prevents false stalls for MOOV-at-end videos where multiple offsets
+              // are being served simultaneously and TDLib is downloading the MOOV first
+              final openTime = _videoOpenTime[capturedFileId];
+              if (openTime != null &&
+                  DateTime.now().difference(openTime) <
+                      _initializationGracePeriod) {
+                // During grace period, don't count as stall - just keep waiting
                 return;
               }
 
