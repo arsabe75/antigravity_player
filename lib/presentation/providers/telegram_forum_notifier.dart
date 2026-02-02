@@ -127,7 +127,7 @@ class TelegramForum extends _$TelegramForum {
           topics: currentTopics,
           isLoading: false,
           isLoadingMore: false,
-          hasMore: topics.length >= 20,
+          hasMore: topics.length >= 50,
         );
       } else if (update['@type'] == 'updateForumTopicInfo') {
         final chatIdUpdate = update['chat_id'];

@@ -10,7 +10,6 @@ part 'telegram_chat_notifier.g.dart';
 @Riverpod(keepAlive: true)
 class TelegramChat extends _$TelegramChat {
   late final TelegramService _service;
-  int _retryCount = 0;
 
   @override
   TelegramChatState build(TelegramChatParams params) {
@@ -27,6 +26,7 @@ class TelegramChat extends _$TelegramChat {
   int get chatId => params.chatId;
   int? get messageThreadId => params.messageThreadId;
 
+  // Handle ONLY live updates here (new messages arriving in real-time)
   void _handleUpdate(Map<String, dynamic> update) {
     // Guard against disposed provider
     if (!ref.mounted) return;
@@ -38,7 +38,6 @@ class TelegramChat extends _$TelegramChat {
         debugPrint(
           'TelegramChat: TDLib error: ${update['code']} - ${update['message']}',
         );
-        // Mark hasMore as false to prevent infinite retry loops on errors
         state = state.copyWith(
           isLoading: false,
           isLoadingMore: false,
@@ -54,10 +53,16 @@ class TelegramChat extends _$TelegramChat {
           // For thread messages, check message_thread_id
           if (messageThreadId != null) {
             final msgThreadId = message['message_thread_id'] as int?;
-            if (msgThreadId != messageThreadId) return;
+            // Accept nulls? Usually live updates have explicit thread ID.
+            if (msgThreadId != null && msgThreadId != messageThreadId) return;
           }
 
           if (_isMessageExists(message['id'])) {
+            return;
+          }
+
+          // ONLY add if it is a video (Smart Filter)
+          if (!_isVideoMessage(message)) {
             return;
           }
 
@@ -68,121 +73,8 @@ class TelegramChat extends _$TelegramChat {
           currentMessages.insert(0, message);
           state = state.copyWith(messages: currentMessages);
         }
-      } else if (updateType == 'messages') {
-        final msgs = (update['messages'] as List).cast<Map<String, dynamic>>();
-        debugPrint(
-          'TelegramChat[$chatId/${messageThreadId ?? "main"}]: Received ${msgs.length} messages',
-        );
-        if (msgs.isEmpty || msgs.length <= 1) {
-          if (state.isLoadingMore) {
-            state = state.copyWith(isLoadingMore: false, hasMore: false);
-          } else if (state.isLoading) {
-            if (_retryCount < 3) {
-              _retryCount++;
-              final delay = _retryCount * 2;
-              debugPrint(
-                'TelegramChat: Initial load empty, retry $_retryCount/3 in ${delay}s...',
-              );
-              Future.delayed(Duration(seconds: delay), () {
-                loadMessages();
-              });
-              return;
-            }
-            state = state.copyWith(isLoading: false, hasMore: false);
-          }
-          return;
-        }
-
-        _retryCount = 0;
-
-        if (msgs.first['chat_id'] != chatId) {
-          return;
-        }
-
-        // Note: For forum topics, messages come via foundChatMessages response
-        // This handler is for regular chats using getChatHistory
-
-        // Merge messages
-        final currentMessages = List<Map<String, dynamic>>.from(state.messages);
-
-        for (final msg in msgs) {
-          if (!_isMessageExists(msg['id'], list: currentMessages)) {
-            currentMessages.add(msg);
-          }
-        }
-
-        currentMessages.sort((a, b) {
-          final dateA = a['date'] as int;
-          final dateB = b['date'] as int;
-          if (dateB != dateA) return dateB.compareTo(dateA);
-          return (b['id'] as int).compareTo(a['id'] as int);
-        });
-
-        debugPrint(
-          'TelegramChat: Loaded ${currentMessages.length} messages (hasMore: ${msgs.length >= 20})',
-        );
-        state = state.copyWith(
-          messages: currentMessages,
-          isLoading: false,
-          isLoadingMore: false,
-          hasMore: msgs.length >= 20,
-        );
-      } else if (updateType == 'foundChatMessages') {
-        // Response from searchChatMessages
-        final msgsList = update['messages'] as List?;
-
-        if (msgsList == null || msgsList.isEmpty) {
-          state = state.copyWith(
-            isLoading: false,
-            isLoadingMore: false,
-            hasMore: false,
-          );
-          return;
-        }
-
-        final msgs = msgsList.cast<Map<String, dynamic>>();
-
-        // Verify messages belong to this chat
-        if (msgs.first['chat_id'] != chatId) {
-          return; // Messages for different chat, ignore
-        }
-
-        // TDLib returns @extra in the response matching what we sent
-        if (messageThreadId != null) {
-          final extra = update['@extra'] as String?;
-          final expectedExtra = 'topic_$messageThreadId';
-
-          if (extra != expectedExtra) {
-            return; // Response for different topic
-          }
-        }
-
-        debugPrint('TelegramChat: Loaded ${msgs.length} messages');
-
-        _retryCount = 0;
-
-        final currentMessages = List<Map<String, dynamic>>.from(state.messages);
-
-        for (final msg in msgs) {
-          if (!_isMessageExists(msg['id'], list: currentMessages)) {
-            currentMessages.add(msg);
-          }
-        }
-
-        currentMessages.sort((a, b) {
-          final dateA = a['date'] as int;
-          final dateB = b['date'] as int;
-          if (dateB != dateA) return dateB.compareTo(dateA);
-          return (b['id'] as int).compareTo(a['id'] as int);
-        });
-
-        state = state.copyWith(
-          messages: currentMessages,
-          isLoading: false,
-          isLoadingMore: false,
-          hasMore: msgs.length >= 20,
-        );
       }
+      // Note: We no longer handle 'foundChatMessages' here because we use sendWithResult
     } catch (e) {
       debugPrint('TelegramChat Error: $e');
     }
@@ -193,56 +85,142 @@ class TelegramChat extends _$TelegramChat {
     return l.any((m) => m['id'] == id);
   }
 
+  /// Check if message is a video or video-document
+  bool _isVideoMessage(Map<String, dynamic> message) {
+    final content = message['content'];
+    if (content == null) return false;
+
+    // Standard video
+    if (content['@type'] == 'messageVideo') return true;
+
+    // MKV/AVI as Document
+    if (content['@type'] == 'messageDocument') {
+      final document = content['document'];
+      final mimeType = (document['mime_type'] as String? ?? '').toLowerCase();
+      final fileName = (document['file_name'] as String? ?? '').toLowerCase();
+
+      if (mimeType.startsWith('video/')) return true;
+
+      const videoExtensions = ['.mkv', '.avi', '.mp4', '.mov', '.webm', '.flv'];
+      for (final ext in videoExtensions) {
+        if (fileName.endsWith(ext)) return true;
+      }
+    }
+    return false;
+  }
+
+  /// Helper to fetch a batch of messages using specific filter
+  Future<List<Map<String, dynamic>>> _fetchBatch({
+    required int fromMessageId,
+    required Map<String, dynamic>? filter,
+  }) async {
+    try {
+      final result = await _service.sendWithResult({
+        '@type': 'searchChatMessages',
+        'chat_id': chatId,
+        // For forum topics, we rely on topic_id, NOT message_thread_id for scope
+        'topic_id': messageThreadId != null
+            ? {'@type': 'messageTopicForum', 'forum_topic_id': messageThreadId}
+            : null,
+        'query': '',
+        'sender_id': null,
+        'from_message_id': fromMessageId,
+        'offset': 0,
+        'limit': 20,
+        'filter': filter,
+      });
+
+      if (result['@type'] == 'error') {
+        debugPrint('TelegramChat: Fetch Batch Error: ${result['message']}');
+        return [];
+      }
+
+      final msgsList = result['messages'] as List?;
+      if (msgsList == null) return [];
+      return msgsList.cast<Map<String, dynamic>>();
+    } catch (e) {
+      debugPrint('TelegramChat: Fetch Batch Exception: $e');
+      return [];
+    }
+  }
+
   Future<void> loadMessages({bool forceRefresh = false}) async {
     try {
       if (forceRefresh) {
         state = state.copyWith(isLoading: true, messages: []);
       } else {
-        state = state.copyWith(isLoading: true);
+        if (!state.isLoading) {
+          state = state.copyWith(isLoading: true);
+        }
       }
 
-      if (messageThreadId != null) {
-        // For forum topics, use searchChatMessages with topic_id
-        // Use @extra to identify this request when receiving the response
-        debugPrint(
-          'TelegramChat: Searching messages for forum topic chat=$chatId, topic=$messageThreadId',
-        );
-        _service.send({
-          '@type': 'searchChatMessages',
-          'chat_id': chatId,
-          'topic_id': {
-            '@type': 'messageTopicForum',
-            'forum_topic_id': messageThreadId,
-          },
-          'query': '',
-          'sender_id': null,
-          'from_message_id': 0,
-          'offset': 0,
-          'limit': 100,
-          'filter': null,
-          '@extra': 'topic_$messageThreadId', // Identifier for this request
-        });
-      } else {
-        _service.send({
-          '@type': 'getChatHistory',
-          'chat_id': chatId,
-          'from_message_id': 0,
-          'offset': 0,
-          'limit': 100,
-          'only_local': false,
-        });
+      debugPrint(
+        'TelegramChat: Searching video+docs for chat=$chatId thread=$messageThreadId...',
+      );
+
+      // Parallel Fetch: Videos AND Documents (for MKV support)
+      final results = await Future.wait([
+        _fetchBatch(
+          fromMessageId: 0,
+          filter: {'@type': 'searchMessagesFilterVideo'},
+        ),
+        _fetchBatch(
+          fromMessageId: 0,
+          filter: {'@type': 'searchMessagesFilterDocument'},
+        ),
+      ]);
+
+      final allMsgs = <Map<String, dynamic>>[];
+      for (final batch in results) {
+        allMsgs.addAll(batch);
       }
+
+      // Filter: Keep only actual videos (Documents that are MKV/etc)
+      // And strict topic check
+      final validMsgs = allMsgs.where((msg) {
+        // Topic Check
+        if (messageThreadId != null) {
+          final msgThreadId = msg['message_thread_id'] as int?;
+          if (msgThreadId != null && msgThreadId != messageThreadId) {
+            return false;
+          }
+        }
+        // Video Check (Documents provided by filter might be PDFs, etc)
+        return _isVideoMessage(msg);
+      }).toList();
+
+      debugPrint('TelegramChat: Loaded ${validMsgs.length} valid video items');
+
+      // Dedupe & Merge with empty state (since it's initial load)
+      final messageMap = <int, Map<String, dynamic>>{};
+      for (final m in validMsgs) {
+        messageMap[m['id'] as int] = m;
+      }
+
+      final sortedMessages = messageMap.values.toList()
+        ..sort((a, b) {
+          final dateA = a['date'] as int;
+          final dateB = b['date'] as int;
+          if (dateB != dateA) return dateB.compareTo(dateA);
+          return (b['id'] as int).compareTo(a['id'] as int);
+        });
+
+      state = state.copyWith(
+        messages: sortedMessages,
+        isLoading: false,
+        isLoadingMore: false,
+        // Heuristic: If we got ANY videos, assume maybe more.
+        // Or if ANY batch was full (20).
+        // Let's stick to: if at least one request returned >= 20, hasMore = true.
+        hasMore: results.any((batch) => batch.length >= 20),
+      );
     } catch (e) {
-      if (e.toString().contains('StateError') ||
-          e.toString().contains('disposed')) {
-        return;
-      }
       debugPrint('TelegramChat: Error loading messages: $e');
+      state = state.copyWith(isLoading: false, error: e.toString());
     }
   }
 
   Future<void> refreshMessages() async {
-    _retryCount = 0;
     await loadMessages(forceRefresh: true);
   }
 
@@ -254,38 +232,67 @@ class TelegramChat extends _$TelegramChat {
       return;
     }
 
+    // Debounce/Protection against multiple calls
+    if (state.isLoadingMore) return;
+
     debugPrint('TelegramChat: Loading more messages...');
     state = state.copyWith(isLoadingMore: true);
 
     final lastMessageId = state.messages.last['id'] as int;
 
-    if (messageThreadId != null) {
-      // For forum topics, use searchChatMessages with from_message_id for pagination
-      // This matches the same API used in loadMessages()
-      _service.send({
-        '@type': 'searchChatMessages',
-        'chat_id': chatId,
-        'topic_id': {
-          '@type': 'messageTopicForum',
-          'forum_topic_id': messageThreadId,
-        },
-        'query': '',
-        'sender_id': null,
-        'from_message_id': lastMessageId,
-        'offset': 0,
-        'limit': 100,
-        'filter': null,
-        '@extra': 'topic_$messageThreadId',
+    try {
+      // Parallel Fetch
+      final results = await Future.wait([
+        _fetchBatch(
+          fromMessageId: lastMessageId,
+          filter: {'@type': 'searchMessagesFilterVideo'},
+        ),
+        _fetchBatch(
+          fromMessageId: lastMessageId,
+          filter: {'@type': 'searchMessagesFilterDocument'},
+        ),
+      ]);
+
+      final allMsgs = <Map<String, dynamic>>[];
+      for (final batch in results) {
+        allMsgs.addAll(batch);
+      }
+
+      final validMsgs = allMsgs.where((msg) {
+        if (messageThreadId != null) {
+          final msgThreadId = msg['message_thread_id'] as int?;
+          if (msgThreadId != null && msgThreadId != messageThreadId) {
+            return false;
+          }
+        }
+        return _isVideoMessage(msg);
+      }).toList();
+
+      debugPrint('TelegramChat: Loaded ${validMsgs.length} more valid items');
+
+      // Merge with existing
+      final currentMessages = List<Map<String, dynamic>>.from(state.messages);
+      for (final msg in validMsgs) {
+        if (!_isMessageExists(msg['id'], list: currentMessages)) {
+          currentMessages.add(msg);
+        }
+      }
+
+      currentMessages.sort((a, b) {
+        final dateA = a['date'] as int;
+        final dateB = b['date'] as int;
+        if (dateB != dateA) return dateB.compareTo(dateA);
+        return (b['id'] as int).compareTo(a['id'] as int);
       });
-    } else {
-      _service.send({
-        '@type': 'getChatHistory',
-        'chat_id': chatId,
-        'from_message_id': lastMessageId,
-        'offset': 0,
-        'limit': 100,
-        'only_local': false,
-      });
+
+      state = state.copyWith(
+        messages: currentMessages,
+        isLoadingMore: false,
+        hasMore: results.any((batch) => batch.length >= 20),
+      );
+    } catch (e) {
+      debugPrint('TelegramChat: Error loading more: $e');
+      state = state.copyWith(isLoadingMore: false, hasMore: false);
     }
   }
 }
