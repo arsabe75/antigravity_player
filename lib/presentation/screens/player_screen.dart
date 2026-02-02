@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
@@ -51,6 +52,8 @@ class PlayerScreen extends ConsumerStatefulWidget {
 class _PlayerScreenState extends ConsumerState<PlayerScreen>
     with WindowListener {
   Timer? _hideTimer;
+  Timer? _tapTimer;
+  int _tapCount = 0;
   bool _isDisposing = false;
   bool _showPlaylist = false;
   final _mediaControl = MediaControlService();
@@ -160,6 +163,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _mediaControl.dispose();
     windowManager.removeListener(this);
     _hideTimer?.cancel();
+    _tapTimer?.cancel();
     _focusNode.dispose();
     super.dispose();
   }
@@ -194,7 +198,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     });
   }
 
-  void _onHover() {
+  void _onHover(PointerHoverEvent event) {
+    // Ignore micro-movements (jitter) that can keep controls awake
+    if (event.delta.distance < 1.0) return;
     _startHideTimer();
   }
 
@@ -434,7 +440,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             cursor: state.isFullscreen && !state.areControlsVisible
                 ? SystemMouseCursors.none
                 : SystemMouseCursors.basic,
-            onHover: (_) => _onHover(),
+            onHover: _onHover,
             onExit: (_) => _onExit(),
             child: Stack(
               children: [
@@ -734,17 +740,40 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       );
     }
 
-    return GestureDetector(
-      onTap: () {
-        if (_showPlaylist) {
-          setState(() {
-            _showPlaylist = false;
-          });
+    return Listener(
+      onPointerDown: (event) {
+        // Handle input directly to support problematic devices like K400
+        // and fix double-click issues
+        if (event.kind == PointerDeviceKind.mouse &&
+            event.buttons == kSecondaryMouseButton) {
+          // Right click - toggle play/pause or show menu (currently just toggle)
+          return;
+        }
+
+        _tapCount++;
+        _tapTimer?.cancel();
+
+        if (_tapCount == 2) {
+          // Double tap detected
+          _tapCount = 0;
+          _handleToggleFullscreen();
         } else {
-          notifier.togglePlay();
+          // Wait for potential second tap
+          _tapTimer = Timer(const Duration(milliseconds: 300), () {
+            if (_tapCount == 1) {
+              // Confirmed single tap
+              if (_showPlaylist) {
+                setState(() {
+                  _showPlaylist = false;
+                });
+              } else {
+                notifier.togglePlay();
+              }
+            }
+            _tapCount = 0;
+          });
         }
       },
-      onDoubleTap: _handleToggleFullscreen,
       child: Center(child: videoWidget),
     );
   }
