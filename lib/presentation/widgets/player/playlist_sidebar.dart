@@ -362,7 +362,7 @@ class _PlaylistItemTile extends StatelessWidget {
               constraints: const BoxConstraints(),
             ),
             const SizedBox(width: 8),
-            const Icon(LucideIcons.gripVertical, color: Colors.grey, size: 16),
+            const Icon(Icons.drag_handle, color: Colors.grey, size: 16),
           ],
         ),
         onTap: onTap,

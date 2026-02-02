@@ -735,7 +735,15 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     }
 
     return GestureDetector(
-      onTap: notifier.togglePlay,
+      onTap: () {
+        if (_showPlaylist) {
+          setState(() {
+            _showPlaylist = false;
+          });
+        } else {
+          notifier.togglePlay();
+        }
+      },
       onDoubleTap: _handleToggleFullscreen,
       child: Center(child: videoWidget),
     );
