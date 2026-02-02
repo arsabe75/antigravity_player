@@ -67,24 +67,39 @@ class _TelegramSelectionScreenState
 
   /// Get subtitle based on chat type
   String _getChatSubtitle(Map<String, dynamic> chat) {
+    String typeStr = 'Chat';
     final chatType = chat['type'];
     if (chatType != null) {
       final type = chatType['@type'];
       if (type == 'chatTypeSupergroup') {
         if (chatType['is_channel'] == true) {
-          return 'Canal';
+          typeStr = 'Canal';
+        } else if (_isForum(chat)) {
+          typeStr = 'Grupo con temas';
+        } else {
+          typeStr = 'Supergrupo';
         }
-        if (_isForum(chat)) {
-          return 'Grupo con temas';
-        }
-        return 'Supergrupo';
       } else if (type == 'chatTypeBasicGroup') {
-        return 'Grupo';
+        typeStr = 'Grupo';
       } else if (type == 'chatTypePrivate') {
-        return 'Chat privado';
+        typeStr = 'Chat privado';
       }
     }
-    return 'ID: ${chat['id']}';
+
+    // Check if archived
+    bool isArchived = false;
+    final positions = chat['positions'] as List<dynamic>? ?? [];
+    for (final pos in positions) {
+      if (pos['list'] != null && pos['list']['@type'] == 'chatListArchive') {
+        isArchived = true;
+        break;
+      }
+    }
+
+    if (isArchived) {
+      return '$typeStr (Archivado)';
+    }
+    return typeStr;
   }
 
   @override

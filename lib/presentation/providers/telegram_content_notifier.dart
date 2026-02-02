@@ -146,10 +146,34 @@ class TelegramContent extends _$TelegramContent {
       }
     }
 
-    // Sort chats by order in Main List
+    // Sort chats by order: Main List first, then Archive
     try {
       currentChats.sort((a, b) {
-        return _getChatOrder(b).compareTo(_getChatOrder(a));
+        final orderMainA = _getChatOrder(a, 'chatListMain');
+        final orderMainB = _getChatOrder(b, 'chatListMain');
+
+        final inMainA = orderMainA != BigInt.zero;
+        final inMainB = orderMainB != BigInt.zero;
+
+        // 1. Both in Main: Sort by Main order
+        if (inMainA && inMainB) {
+          return orderMainB.compareTo(orderMainA);
+        }
+
+        // 2. A in Main, B not: A comes first
+        if (inMainA && !inMainB) {
+          return -1;
+        }
+
+        // 3. B in Main, A not: B comes first
+        if (!inMainA && inMainB) {
+          return 1;
+        }
+
+        // 4. Neither in Main (Both likely Archive): Sort by Archive order
+        final orderArchA = _getChatOrder(a, 'chatListArchive');
+        final orderArchB = _getChatOrder(b, 'chatListArchive');
+        return orderArchB.compareTo(orderArchA);
       });
     } catch (_) {}
 
@@ -157,11 +181,11 @@ class TelegramContent extends _$TelegramContent {
     _bufferedChats.clear();
   }
 
-  BigInt _getChatOrder(Map<String, dynamic> chat) {
+  BigInt _getChatOrder(Map<String, dynamic> chat, String listType) {
     try {
       final positions = chat['positions'] as List<dynamic>? ?? [];
       for (final pos in positions) {
-        if (pos['list'] != null && pos['list']['@type'] == 'chatListMain') {
+        if (pos['list'] != null && pos['list']['@type'] == listType) {
           final order = pos['order'];
           if (order is String) return BigInt.tryParse(order) ?? BigInt.zero;
           if (order is int) return BigInt.from(order);
@@ -182,10 +206,19 @@ class TelegramContent extends _$TelegramContent {
 
     // Request getting chats with higher limit
     // TDLib will send updates via updateNewChat for each chat
+
+    // 1. Request Main List
     _service.send({
       '@type': 'getChats',
       'chat_list': {'@type': 'chatListMain'},
-      'limit': 200, // Increased limit to get more chats
+      'limit': 100,
+    });
+
+    // 2. Request Archive List
+    _service.send({
+      '@type': 'getChats',
+      'chat_list': {'@type': 'chatListArchive'},
+      'limit': 100,
     });
 
     // Safety timeout - if no chats arrived, retry

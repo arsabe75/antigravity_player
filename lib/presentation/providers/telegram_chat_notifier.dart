@@ -11,6 +11,12 @@ part 'telegram_chat_notifier.g.dart';
 class TelegramChat extends _$TelegramChat {
   late final TelegramService _service;
 
+  // Pagination State
+  int _nextVideoFromId = 0;
+  int _nextDocFromId = 0;
+  bool _hasMoreVideos = true;
+  bool _hasMoreDocs = true;
+
   @override
   TelegramChatState build(TelegramChatParams params) {
     _service = TelegramService();
@@ -158,16 +164,30 @@ class TelegramChat extends _$TelegramChat {
         'TelegramChat: Searching video+docs for chat=$chatId thread=$messageThreadId...',
       );
 
+      // Reset Cursors
+      _nextVideoFromId = 0;
+      _nextDocFromId = 0;
+      _hasMoreVideos = true;
+      _hasMoreDocs = true;
+
       // Parallel Fetch: Videos AND Documents (for MKV support)
       final results = await Future.wait([
         _fetchBatch(
-          fromMessageId: 0,
+          fromMessageId: _nextVideoFromId,
           filter: {'@type': 'searchMessagesFilterVideo'},
-        ),
+        ).then((batch) {
+          if (batch.length < 20) _hasMoreVideos = false;
+          if (batch.isNotEmpty) _nextVideoFromId = batch.last['id'];
+          return batch;
+        }),
         _fetchBatch(
-          fromMessageId: 0,
+          fromMessageId: _nextDocFromId,
           filter: {'@type': 'searchMessagesFilterDocument'},
-        ),
+        ).then((batch) {
+          if (batch.length < 20) _hasMoreDocs = false;
+          if (batch.isNotEmpty) _nextDocFromId = batch.last['id'];
+          return batch;
+        }),
       ]);
 
       final allMsgs = <Map<String, dynamic>>[];
@@ -209,10 +229,7 @@ class TelegramChat extends _$TelegramChat {
         messages: sortedMessages,
         isLoading: false,
         isLoadingMore: false,
-        // Heuristic: If we got ANY videos, assume maybe more.
-        // Or if ANY batch was full (20).
-        // Let's stick to: if at least one request returned >= 20, hasMore = true.
-        hasMore: results.any((batch) => batch.length >= 20),
+        hasMore: _hasMoreVideos || _hasMoreDocs,
       );
     } catch (e) {
       debugPrint('TelegramChat: Error loading messages: $e');
@@ -238,20 +255,42 @@ class TelegramChat extends _$TelegramChat {
     debugPrint('TelegramChat: Loading more messages...');
     state = state.copyWith(isLoadingMore: true);
 
-    final lastMessageId = state.messages.last['id'] as int;
-
     try {
-      // Parallel Fetch
-      final results = await Future.wait([
-        _fetchBatch(
-          fromMessageId: lastMessageId,
-          filter: {'@type': 'searchMessagesFilterVideo'},
-        ),
-        _fetchBatch(
-          fromMessageId: lastMessageId,
-          filter: {'@type': 'searchMessagesFilterDocument'},
-        ),
-      ]);
+      final futures = <Future<List<Map<String, dynamic>>>>[];
+
+      // Fetch Videos if available
+      if (_hasMoreVideos) {
+        futures.add(
+          _fetchBatch(
+            fromMessageId: _nextVideoFromId,
+            filter: {'@type': 'searchMessagesFilterVideo'},
+          ).then((batch) {
+            if (batch.length < 20) _hasMoreVideos = false;
+            if (batch.isNotEmpty) _nextVideoFromId = batch.last['id'];
+            return batch;
+          }),
+        );
+      } else {
+        futures.add(Future.value([]));
+      }
+
+      // Fetch Docs if available
+      if (_hasMoreDocs) {
+        futures.add(
+          _fetchBatch(
+            fromMessageId: _nextDocFromId,
+            filter: {'@type': 'searchMessagesFilterDocument'},
+          ).then((batch) {
+            if (batch.length < 20) _hasMoreDocs = false;
+            if (batch.isNotEmpty) _nextDocFromId = batch.last['id'];
+            return batch;
+          }),
+        );
+      } else {
+        futures.add(Future.value([]));
+      }
+
+      final results = await Future.wait(futures);
 
       final allMsgs = <Map<String, dynamic>>[];
       for (final batch in results) {
@@ -288,7 +327,7 @@ class TelegramChat extends _$TelegramChat {
       state = state.copyWith(
         messages: currentMessages,
         isLoadingMore: false,
-        hasMore: results.any((batch) => batch.length >= 20),
+        hasMore: _hasMoreVideos || _hasMoreDocs,
       );
     } catch (e) {
       debugPrint('TelegramChat: Error loading more: $e');
