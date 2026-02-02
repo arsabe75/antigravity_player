@@ -177,7 +177,14 @@ class TelegramContent extends _$TelegramContent {
       });
     } catch (_) {}
 
-    state = state.copyWith(chats: currentChats, isLoading: false);
+    // Filter out chats that are not in either list (order 0 in both)
+    final filteredChats = currentChats.where((chat) {
+      final orderMain = _getChatOrder(chat, 'chatListMain');
+      final orderArch = _getChatOrder(chat, 'chatListArchive');
+      return orderMain != BigInt.zero || orderArch != BigInt.zero;
+    }).toList();
+
+    state = state.copyWith(chats: filteredChats, isLoading: false);
     _bufferedChats.clear();
   }
 
