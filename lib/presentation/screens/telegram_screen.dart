@@ -25,6 +25,7 @@ class TelegramScreen extends ConsumerStatefulWidget {
 
 class _TelegramScreenState extends ConsumerState<TelegramScreen> {
   List<Map<String, dynamic>> _favorites = []; // No longer final
+  bool _hasRefreshedFavorites = false;
   final _recentVideosKey = GlobalKey<RecentVideosWidgetState>();
 
   @override
@@ -47,9 +48,6 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
       setState(() {
         _favorites = cachedFavorites;
       });
-
-      // Refresh from TDLib to get fresh file IDs
-      _refreshFavoritesFromTdlib(cachedFavorites);
     }
   }
 
@@ -155,6 +153,16 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
     // If not authenticated, show login
     if (authState.list != AuthState.ready) {
       return const TelegramLoginScreen();
+    }
+
+    // Trigger refresh once when ready
+    if (!_hasRefreshedFavorites && _favorites.isNotEmpty) {
+      Future.microtask(() {
+        if (mounted && !_hasRefreshedFavorites) {
+          _hasRefreshedFavorites = true;
+          _refreshFavoritesFromTdlib(_favorites);
+        }
+      });
     }
 
     return Scaffold(
