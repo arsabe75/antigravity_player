@@ -41,7 +41,7 @@ final class TelegramContentProvider
   }
 }
 
-String _$telegramContentHash() => r'3faeee5282bdc21b42c0b21511ebe497d16d98f3';
+String _$telegramContentHash() => r'9548c4c55e9f9a2449356a85539d7463c63681ff';
 
 abstract class _$TelegramContent extends $Notifier<TelegramContentState> {
   TelegramContentState build();

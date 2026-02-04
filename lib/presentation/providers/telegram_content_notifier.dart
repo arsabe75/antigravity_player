@@ -15,6 +15,12 @@ class TelegramContent extends _$TelegramContent {
   final Map<int, Map<String, dynamic>> _bufferedChats = {}; // Buffer by Chat ID
   Timer? _debounceTimer;
 
+  // Pagination Cursors
+  BigInt _lastMainOrder = BigInt.from(9223372036854775807); // Max int64
+  BigInt _lastArchiveOrder = BigInt.from(9223372036854775807); // Max int64
+  bool _hasMoreMain = true;
+  bool _hasMoreArchive = true;
+
   @override
   TelegramContentState build() {
     _service = TelegramService();
@@ -55,8 +61,21 @@ class TelegramContent extends _$TelegramContent {
         );
 
         if (chatIds.isEmpty) {
-          // No chats, stop loading
-          state = state.copyWith(isLoading: false);
+          // No chats, stop loading for this specific list?
+          // We don't know WHICH list was empty from just 'chats' update unless we track requests.
+          // But usually empty means end of list.
+          // Since we request both, we might need a better way.
+          // For now, if we receive 0 chats, we assume NO MORE for that direction.
+          // Ideally we would inspect the request ID if TDLib passed it back, but it doesn't in update.
+
+          // Heuristic: If we were loading more, and got 0, stop loading more.
+          if (state.isLoadingMore) {
+            // We can't distinguish Main vs Archive easily here without complex tracking.
+            // But usually if one runs out, we might still have the other.
+            // We'll rely on the flush update heuristic or timeout.
+          } else {
+            state = state.copyWith(isLoading: false);
+          }
           _loadRetryCount = 0;
           return;
         }
@@ -184,7 +203,37 @@ class TelegramContent extends _$TelegramContent {
       return orderMain != BigInt.zero || orderArch != BigInt.zero;
     }).toList();
 
-    state = state.copyWith(chats: filteredChats, isLoading: false);
+    // Update Pagination Cursors based on the LAST chat in each list found
+    // This is an approximation. Ideally we track what getChats returns.
+    // However, getChats returns IDs via updates. We can scan the sorted list.
+
+    // Find last Main order
+    BigInt lowestMain = _lastMainOrder;
+    BigInt lowestArch = _lastArchiveOrder;
+
+    for (var c in filteredChats.reversed) {
+      final om = _getChatOrder(c, 'chatListMain');
+      if (om != BigInt.zero && om < lowestMain) lowestMain = om;
+
+      final oa = _getChatOrder(c, 'chatListArchive');
+      if (oa != BigInt.zero && oa < lowestArch) lowestArch = oa;
+    }
+
+    // Only update if we received new items (simple heuristic since TDLib doesn't signal "end of page" easily in update stream)
+    // Actually, getChats sends a 'chats' update. Using that to detect end is safer.
+    // See _handleUpdate 'chats' section.
+
+    if (_bufferedChats.isEmpty) {
+      // Flush complete
+      _lastMainOrder = lowestMain;
+      _lastArchiveOrder = lowestArch;
+    }
+
+    state = state.copyWith(
+      chats: filteredChats,
+      isLoading: false,
+      isLoadingMore: false,
+    );
     _bufferedChats.clear();
   }
 
@@ -206,7 +255,13 @@ class TelegramContent extends _$TelegramContent {
   static const int _maxLoadRetries = 3;
 
   void loadChats() {
-    state = state.copyWith(isLoading: true);
+    // Reset Pagination
+    _lastMainOrder = BigInt.from(9223372036854775807);
+    _lastArchiveOrder = BigInt.from(9223372036854775807);
+    _hasMoreMain = true;
+    _hasMoreArchive = true;
+
+    state = state.copyWith(isLoading: true, hasMore: true, chats: []);
     debugPrint(
       'TelegramContentNotifier: Loading chats (attempt ${_loadRetryCount + 1})...',
     );
@@ -218,14 +273,14 @@ class TelegramContent extends _$TelegramContent {
     _service.send({
       '@type': 'getChats',
       'chat_list': {'@type': 'chatListMain'},
-      'limit': 100,
+      'limit': 50, // Initial batch
     });
 
     // 2. Request Archive List
     _service.send({
       '@type': 'getChats',
       'chat_list': {'@type': 'chatListArchive'},
-      'limit': 100,
+      'limit': 50, // Initial batch
     });
 
     // Safety timeout - if no chats arrived, retry
@@ -248,6 +303,40 @@ class TelegramContent extends _$TelegramContent {
         // Notifier likely disposed
       }
     });
+  }
+
+  /// Load next page of chats
+  void loadMoreChats() {
+    if (state.isLoading || state.isLoadingMore || !state.hasMore) return;
+
+    state = state.copyWith(isLoadingMore: true);
+    debugPrint('TelegramContentNotifier: Loading MORE chats...');
+
+    // 1. Request Main List (Next Batch)
+    if (_hasMoreMain) {
+      _service.send({
+        '@type': 'getChats',
+        'chat_list': {'@type': 'chatListMain'},
+        'offset_order': _lastMainOrder.toString(),
+        'limit': 50,
+      });
+    }
+
+    // 2. Request Archive List (Next Batch)
+    if (_hasMoreArchive) {
+      // NOTE: Archive often starts after Main is done, but we load concurrently for now
+      _service.send({
+        '@type': 'getChats',
+        'chat_list': {'@type': 'chatListArchive'},
+        'offset_order': _lastArchiveOrder.toString(),
+        'limit': 50,
+      });
+    }
+
+    // If no more in both, set hasMore = false
+    if (!_hasMoreMain && !_hasMoreArchive) {
+      state = state.copyWith(isLoadingMore: false, hasMore: false);
+    }
   }
 
   /// Force reload chats from server, clearing the current state

@@ -14,7 +14,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$TelegramContentState {
 
- List<Map<String, dynamic>> get chats; bool get isLoading; String? get error;
+ List<Map<String, dynamic>> get chats; bool get isLoading; bool get isLoadingMore; bool get hasMore; String? get error;
 /// Create a copy of TelegramContentState
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -25,16 +25,16 @@ $TelegramContentStateCopyWith<TelegramContentState> get copyWith => _$TelegramCo
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is TelegramContentState&&const DeepCollectionEquality().equals(other.chats, chats)&&(identical(other.isLoading, isLoading) || other.isLoading == isLoading)&&(identical(other.error, error) || other.error == error));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is TelegramContentState&&const DeepCollectionEquality().equals(other.chats, chats)&&(identical(other.isLoading, isLoading) || other.isLoading == isLoading)&&(identical(other.isLoadingMore, isLoadingMore) || other.isLoadingMore == isLoadingMore)&&(identical(other.hasMore, hasMore) || other.hasMore == hasMore)&&(identical(other.error, error) || other.error == error));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(chats),isLoading,error);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(chats),isLoading,isLoadingMore,hasMore,error);
 
 @override
 String toString() {
-  return 'TelegramContentState(chats: $chats, isLoading: $isLoading, error: $error)';
+  return 'TelegramContentState(chats: $chats, isLoading: $isLoading, isLoadingMore: $isLoadingMore, hasMore: $hasMore, error: $error)';
 }
 
 
@@ -45,7 +45,7 @@ abstract mixin class $TelegramContentStateCopyWith<$Res>  {
   factory $TelegramContentStateCopyWith(TelegramContentState value, $Res Function(TelegramContentState) _then) = _$TelegramContentStateCopyWithImpl;
 @useResult
 $Res call({
- List<Map<String, dynamic>> chats, bool isLoading, String? error
+ List<Map<String, dynamic>> chats, bool isLoading, bool isLoadingMore, bool hasMore, String? error
 });
 
 
@@ -62,10 +62,12 @@ class _$TelegramContentStateCopyWithImpl<$Res>
 
 /// Create a copy of TelegramContentState
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? chats = null,Object? isLoading = null,Object? error = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? chats = null,Object? isLoading = null,Object? isLoadingMore = null,Object? hasMore = null,Object? error = freezed,}) {
   return _then(_self.copyWith(
 chats: null == chats ? _self.chats : chats // ignore: cast_nullable_to_non_nullable
 as List<Map<String, dynamic>>,isLoading: null == isLoading ? _self.isLoading : isLoading // ignore: cast_nullable_to_non_nullable
+as bool,isLoadingMore: null == isLoadingMore ? _self.isLoadingMore : isLoadingMore // ignore: cast_nullable_to_non_nullable
+as bool,hasMore: null == hasMore ? _self.hasMore : hasMore // ignore: cast_nullable_to_non_nullable
 as bool,error: freezed == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
 as String?,
   ));
@@ -152,10 +154,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<Map<String, dynamic>> chats,  bool isLoading,  String? error)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( List<Map<String, dynamic>> chats,  bool isLoading,  bool isLoadingMore,  bool hasMore,  String? error)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _TelegramContentState() when $default != null:
-return $default(_that.chats,_that.isLoading,_that.error);case _:
+return $default(_that.chats,_that.isLoading,_that.isLoadingMore,_that.hasMore,_that.error);case _:
   return orElse();
 
 }
@@ -173,10 +175,10 @@ return $default(_that.chats,_that.isLoading,_that.error);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<Map<String, dynamic>> chats,  bool isLoading,  String? error)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( List<Map<String, dynamic>> chats,  bool isLoading,  bool isLoadingMore,  bool hasMore,  String? error)  $default,) {final _that = this;
 switch (_that) {
 case _TelegramContentState():
-return $default(_that.chats,_that.isLoading,_that.error);case _:
+return $default(_that.chats,_that.isLoading,_that.isLoadingMore,_that.hasMore,_that.error);case _:
   throw StateError('Unexpected subclass');
 
 }
@@ -193,10 +195,10 @@ return $default(_that.chats,_that.isLoading,_that.error);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<Map<String, dynamic>> chats,  bool isLoading,  String? error)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( List<Map<String, dynamic>> chats,  bool isLoading,  bool isLoadingMore,  bool hasMore,  String? error)?  $default,) {final _that = this;
 switch (_that) {
 case _TelegramContentState() when $default != null:
-return $default(_that.chats,_that.isLoading,_that.error);case _:
+return $default(_that.chats,_that.isLoading,_that.isLoadingMore,_that.hasMore,_that.error);case _:
   return null;
 
 }
@@ -208,7 +210,7 @@ return $default(_that.chats,_that.isLoading,_that.error);case _:
 
 
 class _TelegramContentState implements TelegramContentState {
-  const _TelegramContentState({final  List<Map<String, dynamic>> chats = const [], this.isLoading = false, this.error}): _chats = chats;
+  const _TelegramContentState({final  List<Map<String, dynamic>> chats = const [], this.isLoading = false, this.isLoadingMore = false, this.hasMore = true, this.error}): _chats = chats;
   
 
  final  List<Map<String, dynamic>> _chats;
@@ -219,6 +221,8 @@ class _TelegramContentState implements TelegramContentState {
 }
 
 @override@JsonKey() final  bool isLoading;
+@override@JsonKey() final  bool isLoadingMore;
+@override@JsonKey() final  bool hasMore;
 @override final  String? error;
 
 /// Create a copy of TelegramContentState
@@ -231,16 +235,16 @@ _$TelegramContentStateCopyWith<_TelegramContentState> get copyWith => __$Telegra
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _TelegramContentState&&const DeepCollectionEquality().equals(other._chats, _chats)&&(identical(other.isLoading, isLoading) || other.isLoading == isLoading)&&(identical(other.error, error) || other.error == error));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _TelegramContentState&&const DeepCollectionEquality().equals(other._chats, _chats)&&(identical(other.isLoading, isLoading) || other.isLoading == isLoading)&&(identical(other.isLoadingMore, isLoadingMore) || other.isLoadingMore == isLoadingMore)&&(identical(other.hasMore, hasMore) || other.hasMore == hasMore)&&(identical(other.error, error) || other.error == error));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_chats),isLoading,error);
+int get hashCode => Object.hash(runtimeType,const DeepCollectionEquality().hash(_chats),isLoading,isLoadingMore,hasMore,error);
 
 @override
 String toString() {
-  return 'TelegramContentState(chats: $chats, isLoading: $isLoading, error: $error)';
+  return 'TelegramContentState(chats: $chats, isLoading: $isLoading, isLoadingMore: $isLoadingMore, hasMore: $hasMore, error: $error)';
 }
 
 
@@ -251,7 +255,7 @@ abstract mixin class _$TelegramContentStateCopyWith<$Res> implements $TelegramCo
   factory _$TelegramContentStateCopyWith(_TelegramContentState value, $Res Function(_TelegramContentState) _then) = __$TelegramContentStateCopyWithImpl;
 @override @useResult
 $Res call({
- List<Map<String, dynamic>> chats, bool isLoading, String? error
+ List<Map<String, dynamic>> chats, bool isLoading, bool isLoadingMore, bool hasMore, String? error
 });
 
 
@@ -268,10 +272,12 @@ class __$TelegramContentStateCopyWithImpl<$Res>
 
 /// Create a copy of TelegramContentState
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? chats = null,Object? isLoading = null,Object? error = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? chats = null,Object? isLoading = null,Object? isLoadingMore = null,Object? hasMore = null,Object? error = freezed,}) {
   return _then(_TelegramContentState(
 chats: null == chats ? _self._chats : chats // ignore: cast_nullable_to_non_nullable
 as List<Map<String, dynamic>>,isLoading: null == isLoading ? _self.isLoading : isLoading // ignore: cast_nullable_to_non_nullable
+as bool,isLoadingMore: null == isLoadingMore ? _self.isLoadingMore : isLoadingMore // ignore: cast_nullable_to_non_nullable
+as bool,hasMore: null == hasMore ? _self.hasMore : hasMore // ignore: cast_nullable_to_non_nullable
 as bool,error: freezed == error ? _self.error : error // ignore: cast_nullable_to_non_nullable
 as String?,
   ));

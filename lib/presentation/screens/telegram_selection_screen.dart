@@ -16,10 +16,15 @@ class TelegramSelectionScreen extends ConsumerStatefulWidget {
 
 class _TelegramSelectionScreenState
     extends ConsumerState<TelegramSelectionScreen> {
+  final ScrollController _scrollController = ScrollController();
+
   @override
   void initState() {
     super.initState();
     debugPrint('TelegramSelectionScreen: initState');
+
+    _scrollController.addListener(_onScroll);
+
     // Load chats on init, deferred to avoid navigation jank or race conditions
     Future.delayed(const Duration(milliseconds: 500), () {
       if (mounted) {
@@ -27,6 +32,19 @@ class _TelegramSelectionScreenState
         ref.read(telegramContentProvider.notifier).loadChats();
       }
     });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >=
+        _scrollController.position.maxScrollExtent - 200) {
+      ref.read(telegramContentProvider.notifier).loadMoreChats();
+    }
   }
 
   /// Check if a chat is a forum (supergroup with topics enabled)
@@ -160,8 +178,16 @@ class _TelegramSelectionScreenState
               ),
             )
           : ListView.builder(
-              itemCount: state.chats.length,
+              controller: _scrollController,
+              itemCount: state.chats.length + (state.isLoadingMore ? 1 : 0),
               itemBuilder: (context, index) {
+                if (index == state.chats.length) {
+                  return const Padding(
+                    padding: EdgeInsets.all(16.0),
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+
                 final chat = state.chats[index];
                 final title = chat['title'] ?? 'Unknown Chat';
                 final isForum = _isForum(chat);
