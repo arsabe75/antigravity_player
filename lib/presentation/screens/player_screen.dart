@@ -9,6 +9,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:video_player/video_player.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:path/path.dart' as p;
 
 import '../../config/router/routes.dart';
 import '../../config/constants/app_constants.dart';
@@ -464,7 +465,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                       if (!state.isFullscreen)
                         PlayerTopBar(
                           videoTitle:
-                              state.currentVideoTitle ?? state.currentVideoPath,
+                              state.currentVideoTitle ??
+                              (state.currentVideoPath != null
+                                  ? p.basename(state.currentVideoPath!)
+                                  : null),
                           onBack: _handleBack,
                           onClose: () => windowManager.close(),
                         ),
