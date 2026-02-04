@@ -13,6 +13,7 @@ import '../widgets/dialogs/url_input_dialog.dart';
 import '../widgets/home/recent_videos_widget.dart';
 import '../widgets/settings_dialog.dart';
 import '../widgets/window_controls.dart';
+import '../../config/constants/app_constants.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
@@ -99,7 +100,7 @@ class HomeScreen extends ConsumerWidget {
                                   ),
                                   const SizedBox(height: 32),
                                   Text(
-                                    'Antigravity Player',
+                                    AppConstants.appName,
                                     style: TextStyle(
                                       fontSize: 24,
                                       fontWeight: FontWeight.bold,
@@ -266,7 +267,7 @@ class HomeScreen extends ConsumerWidget {
                   children: [
                     const SizedBox(width: 16),
                     Text(
-                      'Antigravity Player',
+                      AppConstants.appName,
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurface,
                         fontWeight: FontWeight.bold,

@@ -90,7 +90,7 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.arsabe75.videoplayerapp" "\0"
-            VALUE "FileDescription", "video_player_app" "\0"
+            VALUE "FileDescription", "Video Player App" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "video_player_app" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2025 com.arsabe75.videoplayerapp. All rights reserved." "\0"

@@ -118,5 +118,5 @@ class AppConstants {
   // ============================================
 
   /// Nombre de la aplicación
-  static const appName = 'Antigravity Player';
+  static const appName = 'Video Player App';
 }

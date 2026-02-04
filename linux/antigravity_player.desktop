@@ -1,6 +1,6 @@
 [Desktop Entry]
 Version=1.0
-Name=Antigravity Player
+Name=Video Player App
 Comment=Futuristic Video Player
 # Update Exec to the actual path of the executable
 Exec=/path/to/antigravity_player
