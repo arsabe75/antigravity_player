@@ -113,6 +113,11 @@ class PlaylistSidebar extends ConsumerWidget {
     PlaylistNotifier notifier,
     WidgetRef ref,
   ) {
+    final hasTelegramItems = playlist.items.any(
+      (item) =>
+          item.extras != null && item.extras!.containsKey('telegramChatId'),
+    );
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -164,8 +169,10 @@ class PlaylistSidebar extends ConsumerWidget {
                   color: Colors.white54,
                   size: 18,
                 ),
-                onPressed: () => _addFiles(notifier),
-                tooltip: 'Add files',
+                onPressed: hasTelegramItems ? null : () => _addFiles(notifier),
+                tooltip: hasTelegramItems
+                    ? 'Cannot add files to Telegram playlist'
+                    : 'Add files',
               ),
               // Save
               IconButton(
@@ -174,10 +181,12 @@ class PlaylistSidebar extends ConsumerWidget {
                   color: Colors.white54,
                   size: 18,
                 ),
-                onPressed: playlist.isEmpty
+                onPressed: (playlist.isEmpty || hasTelegramItems)
                     ? null
                     : () => _savePlaylist(context, playlist, ref),
-                tooltip: 'Save playlist',
+                tooltip: hasTelegramItems
+                    ? 'Cannot save Telegram playlist'
+                    : 'Save playlist',
               ),
               // Shuffle
               IconButton(
