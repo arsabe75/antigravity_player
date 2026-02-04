@@ -40,6 +40,11 @@ class TelegramForumState {
 class TelegramForum extends _$TelegramForum {
   late final TelegramService _service;
 
+  // Pagination cursors - track server-side order
+  int _lastOffsetDate = 0;
+  int _lastOffsetMessageId = 0;
+  int _lastOffsetMessageThreadId = 0;
+
   @override
   TelegramForumState build(int chatId) {
     _service = TelegramService();
@@ -73,6 +78,17 @@ class TelegramForum extends _$TelegramForum {
           }
           return;
         }
+
+        // UPDATE CURSORS from the LAST received topic (Server Order)
+        final lastTopicInBatch = topicsData.last as Map<String, dynamic>;
+        final lastInfo = lastTopicInBatch['info'] as Map<String, dynamic>?;
+        final lastMsg =
+            lastTopicInBatch['last_message'] as Map<String, dynamic>?;
+
+        _lastOffsetDate = lastMsg?['date'] as int? ?? 0;
+        _lastOffsetMessageId = lastMsg?['id'] as int? ?? 0;
+        _lastOffsetMessageThreadId =
+            lastInfo?['message_thread_id'] as int? ?? 0;
 
         final topics = topicsData
             .map((t) => t as Map<String, dynamic>)
@@ -155,7 +171,15 @@ class TelegramForum extends _$TelegramForum {
 
   Future<void> loadTopics() async {
     try {
-      state = state.copyWith(isLoading: true);
+      // Reset cursors
+      _lastOffsetDate = 0;
+      _lastOffsetMessageId = 0;
+      _lastOffsetMessageThreadId = 0;
+
+      state = state.copyWith(
+        isLoading: true,
+        topics: [],
+      ); // Clear prev topics on fresh load
       debugPrint('TelegramForum: Loading topics for chat $chatId');
 
       _service.send({
@@ -190,33 +214,20 @@ class TelegramForum extends _$TelegramForum {
   }
 
   Future<void> loadMoreTopics() async {
-    if (state.isLoading ||
-        state.isLoadingMore ||
-        !state.hasMore ||
-        state.topics.isEmpty) {
+    if (state.isLoading || state.isLoadingMore || !state.hasMore) {
       return;
     }
 
     state = state.copyWith(isLoadingMore: true);
-
-    final lastTopic = state.topics.last;
-    final lastTopicInfo = lastTopic['info'] as Map<String, dynamic>?;
-    final lastMessage = lastTopic['last_message'] as Map<String, dynamic>?;
-
-    final offsetDate = lastMessage?['date'] as int? ?? 0;
-    final offsetMessageId = lastMessage?['id'] as int? ?? 0;
-    final offsetMessageThreadId =
-        lastTopicInfo?['message_thread_id'] as int? ?? 0;
-
     debugPrint('TelegramForum: Loading more topics...');
 
     _service.send({
       '@type': 'getForumTopics',
       'chat_id': chatId,
       'query': '',
-      'offset_date': offsetDate,
-      'offset_message_id': offsetMessageId,
-      'offset_message_thread_id': offsetMessageThreadId,
+      'offset_date': _lastOffsetDate,
+      'offset_message_id': _lastOffsetMessageId,
+      'offset_message_thread_id': _lastOffsetMessageThreadId,
       'limit': 50,
     });
   }
