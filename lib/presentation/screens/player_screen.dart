@@ -239,6 +239,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       ref.read(playerProvider.notifier).toggleFullscreen();
     }
 
+    // Ensure we disable "Always on Top" before leaving
+    if (state.isAlwaysOnTop) {
+      // Toggle will set it to false and update window manager
+      await ref.read(playerProvider.notifier).toggleAlwaysOnTop();
+    }
+
     setState(() {
       _isDisposing = true;
     });
