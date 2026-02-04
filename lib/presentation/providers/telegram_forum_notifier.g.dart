@@ -58,7 +58,7 @@ final class TelegramForumProvider
   }
 }
 
-String _$telegramForumHash() => r'dd53c3b0a3e970f18ce66ee2719b86ecf2aa84fe';
+String _$telegramForumHash() => r'bce7d5fbe3084e21f57e1045b80fb89b6bfb7f47';
 
 final class TelegramForumFamily extends $Family
     with

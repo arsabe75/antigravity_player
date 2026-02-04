@@ -14,7 +14,7 @@ T _$identity<T>(T value) => value;
 /// @nodoc
 mixin _$PlaylistItem {
 
- String get path; bool get isNetwork; String? get title; Duration? get duration;
+ String get path; bool get isNetwork; String? get title; Duration? get duration; Map<String, dynamic>? get extras;
 /// Create a copy of PlaylistItem
 /// with the given fields replaced by the non-null parameter values.
 @JsonKey(includeFromJson: false, includeToJson: false)
@@ -25,16 +25,16 @@ $PlaylistItemCopyWith<PlaylistItem> get copyWith => _$PlaylistItemCopyWithImpl<P
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is PlaylistItem&&(identical(other.path, path) || other.path == path)&&(identical(other.isNetwork, isNetwork) || other.isNetwork == isNetwork)&&(identical(other.title, title) || other.title == title)&&(identical(other.duration, duration) || other.duration == duration));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is PlaylistItem&&(identical(other.path, path) || other.path == path)&&(identical(other.isNetwork, isNetwork) || other.isNetwork == isNetwork)&&(identical(other.title, title) || other.title == title)&&(identical(other.duration, duration) || other.duration == duration)&&const DeepCollectionEquality().equals(other.extras, extras));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,path,isNetwork,title,duration);
+int get hashCode => Object.hash(runtimeType,path,isNetwork,title,duration,const DeepCollectionEquality().hash(extras));
 
 @override
 String toString() {
-  return 'PlaylistItem(path: $path, isNetwork: $isNetwork, title: $title, duration: $duration)';
+  return 'PlaylistItem(path: $path, isNetwork: $isNetwork, title: $title, duration: $duration, extras: $extras)';
 }
 
 
@@ -45,7 +45,7 @@ abstract mixin class $PlaylistItemCopyWith<$Res>  {
   factory $PlaylistItemCopyWith(PlaylistItem value, $Res Function(PlaylistItem) _then) = _$PlaylistItemCopyWithImpl;
 @useResult
 $Res call({
- String path, bool isNetwork, String? title, Duration? duration
+ String path, bool isNetwork, String? title, Duration? duration, Map<String, dynamic>? extras
 });
 
 
@@ -62,13 +62,14 @@ class _$PlaylistItemCopyWithImpl<$Res>
 
 /// Create a copy of PlaylistItem
 /// with the given fields replaced by the non-null parameter values.
-@pragma('vm:prefer-inline') @override $Res call({Object? path = null,Object? isNetwork = null,Object? title = freezed,Object? duration = freezed,}) {
+@pragma('vm:prefer-inline') @override $Res call({Object? path = null,Object? isNetwork = null,Object? title = freezed,Object? duration = freezed,Object? extras = freezed,}) {
   return _then(_self.copyWith(
 path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
 as String,isNetwork: null == isNetwork ? _self.isNetwork : isNetwork // ignore: cast_nullable_to_non_nullable
 as bool,title: freezed == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
 as String?,duration: freezed == duration ? _self.duration : duration // ignore: cast_nullable_to_non_nullable
-as Duration?,
+as Duration?,extras: freezed == extras ? _self.extras : extras // ignore: cast_nullable_to_non_nullable
+as Map<String, dynamic>?,
   ));
 }
 
@@ -150,10 +151,10 @@ return $default(_that);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String path,  bool isNetwork,  String? title,  Duration? duration)?  $default,{required TResult orElse(),}) {final _that = this;
+@optionalTypeArgs TResult maybeWhen<TResult extends Object?>(TResult Function( String path,  bool isNetwork,  String? title,  Duration? duration,  Map<String, dynamic>? extras)?  $default,{required TResult orElse(),}) {final _that = this;
 switch (_that) {
 case _PlaylistItem() when $default != null:
-return $default(_that.path,_that.isNetwork,_that.title,_that.duration);case _:
+return $default(_that.path,_that.isNetwork,_that.title,_that.duration,_that.extras);case _:
   return orElse();
 
 }
@@ -171,10 +172,10 @@ return $default(_that.path,_that.isNetwork,_that.title,_that.duration);case _:
 /// }
 /// ```
 
-@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String path,  bool isNetwork,  String? title,  Duration? duration)  $default,) {final _that = this;
+@optionalTypeArgs TResult when<TResult extends Object?>(TResult Function( String path,  bool isNetwork,  String? title,  Duration? duration,  Map<String, dynamic>? extras)  $default,) {final _that = this;
 switch (_that) {
 case _PlaylistItem():
-return $default(_that.path,_that.isNetwork,_that.title,_that.duration);}
+return $default(_that.path,_that.isNetwork,_that.title,_that.duration,_that.extras);}
 }
 /// A variant of `when` that fallback to returning `null`
 ///
@@ -188,10 +189,10 @@ return $default(_that.path,_that.isNetwork,_that.title,_that.duration);}
 /// }
 /// ```
 
-@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String path,  bool isNetwork,  String? title,  Duration? duration)?  $default,) {final _that = this;
+@optionalTypeArgs TResult? whenOrNull<TResult extends Object?>(TResult? Function( String path,  bool isNetwork,  String? title,  Duration? duration,  Map<String, dynamic>? extras)?  $default,) {final _that = this;
 switch (_that) {
 case _PlaylistItem() when $default != null:
-return $default(_that.path,_that.isNetwork,_that.title,_that.duration);case _:
+return $default(_that.path,_that.isNetwork,_that.title,_that.duration,_that.extras);case _:
   return null;
 
 }
@@ -203,13 +204,22 @@ return $default(_that.path,_that.isNetwork,_that.title,_that.duration);case _:
 
 
 class _PlaylistItem implements PlaylistItem {
-  const _PlaylistItem({required this.path, required this.isNetwork, this.title, this.duration});
+  const _PlaylistItem({required this.path, required this.isNetwork, this.title, this.duration, final  Map<String, dynamic>? extras}): _extras = extras;
   
 
 @override final  String path;
 @override final  bool isNetwork;
 @override final  String? title;
 @override final  Duration? duration;
+ final  Map<String, dynamic>? _extras;
+@override Map<String, dynamic>? get extras {
+  final value = _extras;
+  if (value == null) return null;
+  if (_extras is EqualUnmodifiableMapView) return _extras;
+  // ignore: implicit_dynamic_type
+  return EqualUnmodifiableMapView(value);
+}
+
 
 /// Create a copy of PlaylistItem
 /// with the given fields replaced by the non-null parameter values.
@@ -221,16 +231,16 @@ _$PlaylistItemCopyWith<_PlaylistItem> get copyWith => __$PlaylistItemCopyWithImp
 
 @override
 bool operator ==(Object other) {
-  return identical(this, other) || (other.runtimeType == runtimeType&&other is _PlaylistItem&&(identical(other.path, path) || other.path == path)&&(identical(other.isNetwork, isNetwork) || other.isNetwork == isNetwork)&&(identical(other.title, title) || other.title == title)&&(identical(other.duration, duration) || other.duration == duration));
+  return identical(this, other) || (other.runtimeType == runtimeType&&other is _PlaylistItem&&(identical(other.path, path) || other.path == path)&&(identical(other.isNetwork, isNetwork) || other.isNetwork == isNetwork)&&(identical(other.title, title) || other.title == title)&&(identical(other.duration, duration) || other.duration == duration)&&const DeepCollectionEquality().equals(other._extras, _extras));
 }
 
 
 @override
-int get hashCode => Object.hash(runtimeType,path,isNetwork,title,duration);
+int get hashCode => Object.hash(runtimeType,path,isNetwork,title,duration,const DeepCollectionEquality().hash(_extras));
 
 @override
 String toString() {
-  return 'PlaylistItem(path: $path, isNetwork: $isNetwork, title: $title, duration: $duration)';
+  return 'PlaylistItem(path: $path, isNetwork: $isNetwork, title: $title, duration: $duration, extras: $extras)';
 }
 
 
@@ -241,7 +251,7 @@ abstract mixin class _$PlaylistItemCopyWith<$Res> implements $PlaylistItemCopyWi
   factory _$PlaylistItemCopyWith(_PlaylistItem value, $Res Function(_PlaylistItem) _then) = __$PlaylistItemCopyWithImpl;
 @override @useResult
 $Res call({
- String path, bool isNetwork, String? title, Duration? duration
+ String path, bool isNetwork, String? title, Duration? duration, Map<String, dynamic>? extras
 });
 
 
@@ -258,13 +268,14 @@ class __$PlaylistItemCopyWithImpl<$Res>
 
 /// Create a copy of PlaylistItem
 /// with the given fields replaced by the non-null parameter values.
-@override @pragma('vm:prefer-inline') $Res call({Object? path = null,Object? isNetwork = null,Object? title = freezed,Object? duration = freezed,}) {
+@override @pragma('vm:prefer-inline') $Res call({Object? path = null,Object? isNetwork = null,Object? title = freezed,Object? duration = freezed,Object? extras = freezed,}) {
   return _then(_PlaylistItem(
 path: null == path ? _self.path : path // ignore: cast_nullable_to_non_nullable
 as String,isNetwork: null == isNetwork ? _self.isNetwork : isNetwork // ignore: cast_nullable_to_non_nullable
 as bool,title: freezed == title ? _self.title : title // ignore: cast_nullable_to_non_nullable
 as String?,duration: freezed == duration ? _self.duration : duration // ignore: cast_nullable_to_non_nullable
-as Duration?,
+as Duration?,extras: freezed == extras ? _self._extras : extras // ignore: cast_nullable_to_non_nullable
+as Map<String, dynamic>?,
   ));
 }
 

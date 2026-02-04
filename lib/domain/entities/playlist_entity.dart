@@ -17,6 +17,7 @@ sealed class PlaylistItem with _$PlaylistItem {
     required bool isNetwork,
     String? title,
     Duration? duration,
+    Map<String, dynamic>? extras,
   }) = _PlaylistItem;
 }
 

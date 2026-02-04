@@ -7,6 +7,8 @@ import '../providers/telegram_chat_notifier.dart';
 import '../providers/telegram_content_notifier.dart'; // For getStreamUrl helper if needed
 import '../../infrastructure/services/local_streaming_proxy.dart';
 import '../../config/router/routes.dart';
+import '../../domain/entities/playlist_entity.dart';
+import '../providers/playlist_notifier.dart';
 
 class TelegramChatScreen extends ConsumerStatefulWidget {
   final int chatId;
@@ -68,9 +70,6 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
     // Auto-load more if we have very few videos and there's more history
     // We check !state.isLoadingMore to prevent spamming
     // And !state.isLoading to ensure initial load is done
-
-    // DEBUG: Print status
-    // print('ChatScreen check: isLoading=${state.isLoading}, isLoadingMore=${state.isLoadingMore}, hasMore=${state.hasMore}, videos=${videoMessages.length}, total=${state.messages.length}');
 
     if (!state.isLoading &&
         !state.isLoadingMore &&
@@ -155,6 +154,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                       delegate: SliverChildBuilderDelegate((context, index) {
                         final msg = videoMessages[index];
                         final content = msg['content'];
+                        final messageId = msg['id'] as int;
 
                         int fileId;
                         int? size;
@@ -225,100 +225,126 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                             effectiveFileName ??
                             'Video sin título';
 
+                        final isSelected = _selectedMessages.contains(
+                          messageId,
+                        );
+
                         return Card(
                           clipBehavior: Clip.antiAlias,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            side: isSelected
+                                ? BorderSide(
+                                    color: Theme.of(context).primaryColor,
+                                    width: 3,
+                                  )
+                                : BorderSide.none,
+                          ),
                           child: InkWell(
                             onTap: () async {
-                              // Get Stream URL
-                              final url = await ref
-                                  .read(telegramContentProvider.notifier)
-                                  .getStreamUrl(fileId, size ?? 0);
-
-                              // Get message ID for stable progress persistence
-                              final messageId = msg['id'] as int?;
-
-                              if (context.mounted) {
-                                PlayerRoute(
-                                  $extra: PlayerRouteExtra(
-                                    url: url,
-                                    title: fileName,
-                                    telegramChatId: widget.chatId,
-                                    telegramMessageId: messageId,
-                                    telegramFileSize: size,
-                                    telegramTopicId: widget.messageThreadId,
-                                    telegramTopicName:
-                                        widget.messageThreadId != null
-                                        ? widget.title
-                                        : null,
-                                  ),
-                                ).push(context);
+                              if (_selectedMessages.isNotEmpty) {
+                                _toggleSelection(messageId);
+                                return;
                               }
+                              _playVideo(msg, fileId, size, fileName);
                             },
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                            onSecondaryTap: () {
+                              _toggleSelection(messageId);
+                            },
+                            child: Stack(
                               children: [
-                                Expanded(
-                                  child: Stack(
-                                    fit: StackFit.expand,
-                                    children: [
-                                      Container(
-                                        color: Colors.black12,
-                                      ), // Placeholder
-                                      const Center(
-                                        child: Icon(
-                                          LucideIcons.playCircle,
-                                          size: 48,
-                                          color: Colors.white70,
-                                        ),
-                                      ),
-                                      Positioned(
-                                        bottom: 8,
-                                        right: 8,
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(
-                                            horizontal: 4,
-                                            vertical: 2,
-                                          ),
-                                          decoration: BoxDecoration(
-                                            color: Colors.black54,
-                                            borderRadius: BorderRadius.circular(
-                                              4,
+                                Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.stretch,
+                                  children: [
+                                    Expanded(
+                                      child: Stack(
+                                        fit: StackFit.expand,
+                                        children: [
+                                          Container(
+                                            color: Colors.black12,
+                                          ), // Placeholder
+                                          const Center(
+                                            child: Icon(
+                                              LucideIcons.playCircle,
+                                              size: 48,
+                                              color: Colors.white70,
                                             ),
                                           ),
-                                          child: duration > 0
-                                              ? Text(
-                                                  _formatDuration(duration),
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 12,
+                                          Positioned(
+                                            bottom: 8,
+                                            right: 8,
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 4,
+                                                    vertical: 2,
                                                   ),
-                                                )
-                                              : const Text(
-                                                  'MKV', // Badge for files without duration (likely MKV)
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.bold,
-                                                  ),
-                                                ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.black54,
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
+                                              ),
+                                              child: duration > 0
+                                                  ? Text(
+                                                      _formatDuration(duration),
+                                                      style: const TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 12,
+                                                      ),
+                                                    )
+                                                  : const Text(
+                                                      'MKV', // Badge for files without duration (likely MKV)
+                                                      style: TextStyle(
+                                                        color: Colors.white,
+                                                        fontSize: 10,
+                                                        fontWeight:
+                                                            FontWeight.bold,
+                                                      ),
+                                                    ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      color: isSelected
+                                          ? Theme.of(context).primaryColor
+                                                .withValues(alpha: 0.1)
+                                          : Theme.of(context).cardColor,
+                                      child: Text(
+                                        fileName,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w500,
+                                          color: isSelected
+                                              ? Theme.of(context).primaryColor
+                                              : null,
                                         ),
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
-                                Container(
-                                  padding: const EdgeInsets.all(8),
-                                  color: Theme.of(context).cardColor,
-                                  child: Text(
-                                    fileName,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w500,
+                                if (isSelected)
+                                  Positioned(
+                                    top: 8,
+                                    right: 8,
+                                    child: Container(
+                                      decoration: BoxDecoration(
+                                        color: Theme.of(context).primaryColor,
+                                        shape: BoxShape.circle,
+                                      ),
+                                      padding: const EdgeInsets.all(4),
+                                      child: const Icon(
+                                        LucideIcons.check,
+                                        size: 16,
+                                        color: Colors.white,
+                                      ),
                                     ),
                                   ),
-                                ),
                               ],
                             ),
                           ),
@@ -336,7 +362,170 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                 ],
               ),
             ),
+      floatingActionButton: _selectedMessages.isNotEmpty
+          ? FloatingActionButton.extended(
+              onPressed: () => _playSelectedVideos(videoMessages),
+              icon: const Icon(LucideIcons.play),
+              label: Text('Play (${_selectedMessages.length})'),
+              backgroundColor: Theme.of(context).primaryColor,
+              foregroundColor: Colors.white,
+            )
+          : null,
     );
+  }
+
+  // Set of selected message IDs (ordered by insertion if we used a LinkedHashSet, but here List is easier to maintain order if needed)
+  // Actually, Set doesn't guarantee order. We want to play in the order selected OR chronological.
+  // User request: "ir seleccionando videos... comenzar a reproducir la PlayList"
+  // Implies order of selection matters? Or easier -> just play those selected in chronological order?
+  // Usually "Add to playlist" appends. "Play selected" usually plays them in list order.
+  // Let's use a List to preserve selection order which gives the user maximum control.
+  final List<int> _selectedMessages = [];
+
+  void _toggleSelection(int messageId) {
+    setState(() {
+      if (_selectedMessages.contains(messageId)) {
+        _selectedMessages.remove(messageId);
+      } else {
+        _selectedMessages.add(messageId);
+      }
+    });
+  }
+
+  Future<void> _playVideo(
+    Map<String, dynamic> msg,
+    int fileId,
+    int? size,
+    String title,
+  ) async {
+    // Get Stream URL
+    final url = await ref
+        .read(telegramContentProvider.notifier)
+        .getStreamUrl(fileId, size ?? 0);
+
+    // Get message ID for stable progress persistence
+    final messageId = msg['id'] as int?;
+
+    if (mounted) {
+      PlayerRoute(
+        $extra: PlayerRouteExtra(
+          url: url,
+          title: title,
+          telegramChatId: widget.chatId,
+          telegramMessageId: messageId,
+          telegramFileSize: size,
+          telegramTopicId: widget.messageThreadId,
+          telegramTopicName: widget.messageThreadId != null
+              ? widget.title
+              : null,
+        ),
+      ).push(context);
+    }
+  }
+
+  Future<void> _playSelectedVideos(List<Map<String, dynamic>> allVideos) async {
+    if (_selectedMessages.isEmpty) return;
+
+    final playlistNotifier = ref.read(playlistProvider.notifier);
+    final playlistItems = <PlaylistItem>[];
+    final telegramContent = ref.read(telegramContentProvider.notifier);
+
+    // Map message ID to video info for O(1) lookup
+    final videoMap = {for (var v in allVideos) v['id'] as int: v};
+
+    for (final msgId in _selectedMessages) {
+      final msg = videoMap[msgId];
+      if (msg == null) continue;
+
+      final content = msg['content'];
+      int fileId = 0;
+      int? size;
+      String? rawFileName;
+
+      if (content['@type'] == 'messageVideo') {
+        final video = content['video'];
+        fileId = video['video']['id'];
+        size = video['video']['size'];
+        rawFileName = video['file_name'];
+      } else if (content['@type'] == 'messageDocument') {
+        final doc = content['document'];
+        fileId = doc['document']['id'];
+        size = doc['document']['size'];
+        rawFileName = doc['file_name'];
+      } else {
+        continue;
+      }
+
+      // Calculate title (same logic as builder)
+      String? captionText;
+      final caption = content['caption'];
+      if (caption != null && caption['text'] != null) {
+        final text = caption['text'].toString().trim();
+        if (text.isNotEmpty) {
+          captionText = text.split('\n').first;
+          if (captionText.length > 100) {
+            captionText = '${captionText.substring(0, 97)}...';
+          }
+        }
+      }
+      String? effectiveFileName = rawFileName;
+      if (effectiveFileName != null && effectiveFileName.trim().isEmpty) {
+        effectiveFileName = null;
+      }
+      final title = captionText ?? effectiveFileName ?? 'Video sin título';
+
+      // Get URL (can be async, but for playlist we might need it now OR just store fileId and let player handle it?)
+      // The current Player expects a path/URL.
+      // We'll generate the proxy URL here.
+      final url = await telegramContent.getStreamUrl(fileId, size ?? 0);
+
+      playlistItems.add(
+        PlaylistItem(
+          path: url,
+          isNetwork: true,
+          title: title,
+          extras: {
+            'telegramChatId': widget.chatId,
+            'telegramMessageId': msgId,
+            'telegramFileSize': size,
+            'telegramTopicId': widget.messageThreadId,
+            'telegramTopicName': widget.messageThreadId != null
+                ? widget.title
+                : null,
+          },
+        ),
+      );
+    }
+
+    // Set Playlist
+    playlistNotifier.setPlaylist(playlistItems, startIndex: 0);
+
+    // Get first item to start player
+    if (playlistItems.isNotEmpty) {
+      final firstItem = playlistItems.first;
+
+      if (!mounted) return;
+
+      await PlayerRoute(
+        $extra: PlayerRouteExtra(
+          url: firstItem.path,
+          title: firstItem.title,
+          telegramChatId: widget.chatId,
+          telegramMessageId: firstItem.extras?['telegramMessageId'] as int?,
+          telegramFileSize: firstItem.extras?['telegramFileSize'] as int?,
+          telegramTopicId: widget.messageThreadId,
+          telegramTopicName: widget.messageThreadId != null
+              ? widget.title
+              : null,
+        ),
+      ).push(context);
+
+      if (mounted) {
+        setState(() {
+          _selectedMessages.clear();
+        });
+      }
+    }
   }
 
   String _formatDuration(int seconds) {

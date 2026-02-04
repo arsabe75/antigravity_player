@@ -114,6 +114,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               .loadVideo(
                 newItem.path,
                 isNetwork: newItem.isNetwork,
+                title: newItem.title,
+                telegramChatId: newItem.extras?['telegramChatId'] as int?,
+                telegramMessageId: newItem.extras?['telegramMessageId'] as int?,
+                telegramFileSize: newItem.extras?['telegramFileSize'] as int?,
+                telegramTopicId: newItem.extras?['telegramTopicId'] as int?,
+                telegramTopicName:
+                    newItem.extras?['telegramTopicName'] as String?,
                 startAtZero: ref.read(playlistProvider).startFromBeginning,
               );
         }
@@ -129,6 +136,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
               .loadVideo(
                 newItem.path,
                 isNetwork: newItem.isNetwork,
+                title: newItem.title,
+                telegramChatId: newItem.extras?['telegramChatId'] as int?,
+                telegramMessageId: newItem.extras?['telegramMessageId'] as int?,
+                telegramFileSize: newItem.extras?['telegramFileSize'] as int?,
+                telegramTopicId: newItem.extras?['telegramTopicId'] as int?,
+                telegramTopicName:
+                    newItem.extras?['telegramTopicName'] as String?,
                 startAtZero: ref.read(playlistProvider).startFromBeginning,
               );
         }
@@ -325,6 +339,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             notifier.loadVideo(
               newItem.path,
               isNetwork: newItem.isNetwork,
+              title: newItem.title,
+              telegramChatId: newItem.extras?['telegramChatId'] as int?,
+              telegramMessageId: newItem.extras?['telegramMessageId'] as int?,
+              telegramFileSize: newItem.extras?['telegramFileSize'] as int?,
+              telegramTopicId: newItem.extras?['telegramTopicId'] as int?,
+              telegramTopicName:
+                  newItem.extras?['telegramTopicName'] as String?,
               startAtZero: ref.read(playlistProvider).startFromBeginning,
             );
           }
@@ -378,6 +399,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           notifier.loadVideo(
             newItem.path,
             isNetwork: newItem.isNetwork,
+            title: newItem.title,
+            telegramChatId: newItem.extras?['telegramChatId'] as int?,
+            telegramMessageId: newItem.extras?['telegramMessageId'] as int?,
+            telegramFileSize: newItem.extras?['telegramFileSize'] as int?,
+            telegramTopicId: newItem.extras?['telegramTopicId'] as int?,
+            telegramTopicName: newItem.extras?['telegramTopicName'] as String?,
             startAtZero: ref.read(playlistProvider).startFromBeginning,
           );
         }
@@ -391,6 +418,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           notifier.loadVideo(
             newItem.path,
             isNetwork: newItem.isNetwork,
+            title: newItem.title,
+            telegramChatId: newItem.extras?['telegramChatId'] as int?,
+            telegramMessageId: newItem.extras?['telegramMessageId'] as int?,
+            telegramFileSize: newItem.extras?['telegramFileSize'] as int?,
+            telegramTopicId: newItem.extras?['telegramTopicId'] as int?,
+            telegramTopicName: newItem.extras?['telegramTopicName'] as String?,
             startAtZero: ref.read(playlistProvider).startFromBeginning,
           );
         }
@@ -559,6 +592,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                           notifier.loadVideo(
                             item.path,
                             isNetwork: item.isNetwork,
+                            title: item.title,
+                            telegramChatId:
+                                item.extras?['telegramChatId'] as int?,
+                            telegramMessageId:
+                                item.extras?['telegramMessageId'] as int?,
+                            telegramFileSize:
+                                item.extras?['telegramFileSize'] as int?,
+                            telegramTopicId:
+                                item.extras?['telegramTopicId'] as int?,
+                            telegramTopicName:
+                                item.extras?['telegramTopicName'] as String?,
                             startAtZero: playlist.startFromBeginning,
                           );
                         }
