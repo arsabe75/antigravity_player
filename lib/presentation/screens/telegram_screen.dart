@@ -206,7 +206,28 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
             icon: const Icon(LucideIcons.logOut),
             tooltip: 'Logout',
             onPressed: () {
-              ref.read(telegramAuthProvider.notifier).logout();
+              showDialog(
+                context: context,
+                builder: (context) => AlertDialog(
+                  title: const Text('Logout'),
+                  content: const Text(
+                    'Are you sure you want to log out from Telegram?',
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Cancel'),
+                    ),
+                    TextButton(
+                      onPressed: () {
+                        Navigator.of(context).pop();
+                        ref.read(telegramAuthProvider.notifier).logout();
+                      },
+                      child: const Text('Logout'),
+                    ),
+                  ],
+                ),
+              );
             },
           ),
           const SizedBox(width: 8),
