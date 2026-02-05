@@ -234,10 +234,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                             side: isSelected
-                                ? BorderSide(
-                                    color: Theme.of(context).primaryColor,
-                                    width: 3,
-                                  )
+                                ? const BorderSide(color: Colors.blue, width: 3)
                                 : BorderSide.none,
                           ),
                           child: InkWell(
@@ -262,13 +259,24 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                         fit: StackFit.expand,
                                         children: [
                                           Container(
-                                            color: Colors.black12,
-                                          ), // Placeholder
-                                          const Center(
-                                            child: Icon(
-                                              LucideIcons.playCircle,
-                                              size: 48,
-                                              color: Colors.white70,
+                                            decoration: const BoxDecoration(
+                                              color: Colors.transparent,
+                                            ),
+                                          ),
+                                          Center(
+                                            child: Container(
+                                              padding: const EdgeInsets.all(12),
+                                              decoration: BoxDecoration(
+                                                color: Colors.black.withValues(
+                                                  alpha: 0.5,
+                                                ),
+                                                shape: BoxShape.circle,
+                                              ),
+                                              child: const Icon(
+                                                LucideIcons.play,
+                                                color: Colors.white,
+                                                size: 32,
+                                              ),
                                             ),
                                           ),
                                           Positioned(
@@ -321,7 +329,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                           fontSize: 12,
                                           fontWeight: FontWeight.w500,
                                           color: isSelected
-                                              ? Theme.of(context).primaryColor
+                                              ? Colors.blue
                                               : null,
                                         ),
                                       ),
