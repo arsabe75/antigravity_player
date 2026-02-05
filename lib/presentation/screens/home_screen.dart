@@ -49,11 +49,17 @@ class HomeScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _enterUrl(BuildContext context) async {
+  Future<void> _enterUrl(BuildContext context, WidgetRef ref) async {
     final url = await UrlInputDialog.show(context);
 
     if (url != null && url.isNotEmpty) {
       if (context.mounted) {
+        // Create playlist item
+        final item = PlaylistItem(path: url, isNetwork: true, title: url);
+
+        // Set playlist
+        ref.read(playlistProvider.notifier).setPlaylist([item]);
+
         PlayerRoute($extra: PlayerRouteExtra(url: url)).go(context);
       }
     }
@@ -198,7 +204,8 @@ class HomeScreen extends ConsumerWidget {
                                         width: 200,
                                         height: 50,
                                         child: OutlinedButton.icon(
-                                          onPressed: () => _enterUrl(context),
+                                          onPressed: () =>
+                                              _enterUrl(context, ref),
                                           icon: const Icon(LucideIcons.globe),
                                           label: const Text('Open Network URL'),
                                         ),
@@ -234,6 +241,16 @@ class HomeScreen extends ConsumerWidget {
                       panelWidth: panelWidth,
                       // showTelegramVideos: false (default) - only local/network videos
                       onVideoSelected: (video) {
+                        // Create playlist item
+                        final item = PlaylistItem(
+                          path: video.path,
+                          isNetwork: video.isNetwork,
+                          title: video.displayName,
+                        );
+
+                        // Set playlist
+                        ref.read(playlistProvider.notifier).setPlaylist([item]);
+
                         PlayerRoute(
                           $extra: PlayerRouteExtra(url: video.path),
                         ).go(context);

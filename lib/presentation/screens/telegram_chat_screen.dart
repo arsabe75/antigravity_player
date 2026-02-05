@@ -406,6 +406,27 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
     // Get message ID for stable progress persistence
     final messageId = msg['id'] as int?;
 
+    // Create playlist item
+    final playlistItem = PlaylistItem(
+      path: url,
+      isNetwork: true,
+      title: title,
+      extras: {
+        'telegramChatId': widget.chatId,
+        'telegramMessageId': messageId,
+        'telegramFileSize': size,
+        'telegramTopicId': widget.messageThreadId,
+        'telegramTopicName': widget.messageThreadId != null
+            ? widget.title
+            : null,
+      },
+    );
+
+    // Set playlist with single item
+    ref.read(playlistProvider.notifier).setPlaylist([
+      playlistItem,
+    ], startIndex: 0);
+
     if (mounted) {
       PlayerRoute(
         $extra: PlayerRouteExtra(

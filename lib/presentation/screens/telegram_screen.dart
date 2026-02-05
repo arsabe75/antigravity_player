@@ -15,6 +15,8 @@ import '../../infrastructure/services/local_streaming_proxy.dart';
 import '../../infrastructure/services/telegram_service.dart';
 import 'telegram_login_screen.dart';
 import '../widgets/chat_icon.dart';
+import '../../domain/entities/playlist_entity.dart';
+import '../providers/playlist_notifier.dart';
 
 class TelegramScreen extends ConsumerStatefulWidget {
   const TelegramScreen({super.key});
@@ -519,6 +521,25 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                     }
 
                     if (!context.mounted) return;
+
+                    // Create playlist item
+                    final playlistItem = PlaylistItem(
+                      path: url,
+                      isNetwork: true,
+                      title: video.title,
+                      extras: {
+                        'telegramChatId': video.telegramChatId,
+                        'telegramMessageId': video.telegramMessageId,
+                        'telegramFileSize': video.telegramFileSize,
+                        'telegramTopicId': video.telegramTopicId,
+                        'telegramTopicName': video.telegramTopicName,
+                      },
+                    );
+
+                    // Set playlist with single item
+                    ref.read(playlistProvider.notifier).setPlaylist([
+                      playlistItem,
+                    ], startIndex: 0);
 
                     PlayerRoute(
                       $extra: PlayerRouteExtra(
