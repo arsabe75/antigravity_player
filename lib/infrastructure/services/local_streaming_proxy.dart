@@ -2780,9 +2780,12 @@ class LocalStreamingProxy {
     }
 
     // Stage 2: Infer moov-at-end if we have substantial prefix without finding moov
+    // GUARD: Skip inference if async detection (Stage 1) is still in progress
+    // This prevents race condition where sync inference sets END before async finds START
     if (prefix >= _moovAtEndInferenceThreshold &&
-        _getOrCreateState(fileId).moovPosition == null) {
-      // If we downloaded 5MB+ and still haven't found moov, it's at the end
+        _getOrCreateState(fileId).moovPosition == null &&
+        !_earlyMoovDetectionTriggered.contains(fileId)) {
+      // If we downloaded 5MB+ and async detection never started, infer END
       _getOrCreateState(fileId).moovPosition = MoovPosition.end;
       _getOrCreateState(fileId).isMoovAtEnd = true;
       debugPrint(
@@ -2855,7 +2858,9 @@ class LocalStreamingProxy {
         }
 
         // If we have enough prefix but no moov found near start, assume end
-        if (cached.downloadedPrefixSize > 5 * 1024 * 1024) {
+        // GUARD: Only infer if not already detected to prevent race condition
+        if (cached.downloadedPrefixSize > 5 * 1024 * 1024 &&
+            _getOrCreateState(fileId).moovPosition == null) {
           _getOrCreateState(fileId).moovPosition = MoovPosition.end;
           _getOrCreateState(fileId).isMoovAtEnd =
               true; // Sync with existing flag
