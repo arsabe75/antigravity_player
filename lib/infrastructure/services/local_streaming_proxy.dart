@@ -8,6 +8,7 @@ import 'telegram_cache_service.dart';
 import 'retry_tracker.dart';
 import 'download_priority.dart';
 import 'proxy_logger.dart';
+import 'proxy_file_state.dart';
 import '../../domain/value_objects/loading_progress.dart';
 import '../../domain/value_objects/streaming_error.dart';
 
@@ -487,6 +488,16 @@ class LocalStreamingProxy {
 
   // Cache of file_id -> ProxyFileInfo
   final Map<int, ProxyFileInfo> _filePaths = {};
+
+  // PHASE1 REFACTOR: Consolidated per-file state
+  // Replaces scattered Maps for better maintainability
+  final Map<int, ProxyFileState> _fileStates = {};
+
+  /// Get or create consolidated state for a file.
+  /// Use this instead of accessing individual Maps.
+  ProxyFileState _getOrCreateState(int fileId) {
+    return _fileStates.putIfAbsent(fileId, () => ProxyFileState(fileId));
+  }
 
   // Active download requests
   final Set<int> _activeDownloadRequests = {};
@@ -1092,7 +1103,8 @@ class LocalStreamingProxy {
       final totalSize = int.tryParse(sizeStr ?? '') ?? 0;
 
       // Track when video was first opened for initialization grace period
-      _videoOpenTime.putIfAbsent(fileId, () => DateTime.now());
+      final state = _getOrCreateState(fileId);
+      state.openTime ??= DateTime.now();
 
       // Wait for TDLib client to be ready (max 10 seconds)
       // This is crucial on app start when TDLib might still be initializing
@@ -1832,10 +1844,8 @@ class LocalStreamingProxy {
               // INITIALIZATION GRACE PERIOD: Don't count stalls during first 30 seconds
               // This prevents false stalls for MOOV-at-end videos where multiple offsets
               // are being served simultaneously and TDLib is downloading the MOOV first
-              final openTime = _videoOpenTime[capturedFileId];
-              if (openTime != null &&
-                  DateTime.now().difference(openTime) <
-                      _initializationGracePeriod) {
+              final fileState = _getOrCreateState(capturedFileId);
+              if (fileState.isWithinGracePeriod(_initializationGracePeriod)) {
                 // During grace period, don't count as stall - just keep waiting
                 return;
               }
@@ -1845,9 +1855,7 @@ class LocalStreamingProxy {
                 // DOWNLOAD COOLDOWN PROTECTION:
                 // TDLib may briefly report isDownloadingActive=false between download chunks.
                 // If we recently started a download (within 5 seconds), don't count as stall.
-                final downloadStart = _downloadStartTime[capturedFileId];
-                if (downloadStart != null &&
-                    DateTime.now().difference(downloadStart).inSeconds < 5) {
+                if (fileState.isRecentDownload(const Duration(seconds: 5))) {
                   // Download started very recently - still initializing
                   return;
                 }
@@ -2666,7 +2674,8 @@ class LocalStreamingProxy {
     _activeDownloadOffset[fileId] = requestedOffset;
     _activePriority[fileId] = priority; // Track priority
     _lastOffsetChangeTime[fileId] = now;
-    _downloadStartTime[fileId] = now; // Track for stall cooldown protection
+    _getOrCreateState(fileId).downloadStartTime =
+        now; // Track for stall cooldown protection
 
     // PHASE3: HIGH-PRIORITY LOCK ACQUISITION REMOVED
     // No longer tracking locks - TDLib handles priority naturally
