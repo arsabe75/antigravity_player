@@ -1842,9 +1842,32 @@ class LocalStreamingProxy {
 
               final updatedCache = _filePaths[capturedFileId];
               if (updatedCache != null) {
-                // ACTIVE DOWNLOAD PROTECTION: Don't restart if download is actively running
-                // The download may be at a different offset but will eventually provide data
+                // DOWNLOAD COOLDOWN PROTECTION:
+                // TDLib may briefly report isDownloadingActive=false between download chunks.
+                // If we recently started a download (within 5 seconds), don't count as stall.
+                final downloadStart = _downloadStartTime[capturedFileId];
+                if (downloadStart != null &&
+                    DateTime.now().difference(downloadStart).inSeconds < 5) {
+                  // Download started very recently - still initializing
+                  return;
+                }
+
+                // ACTIVE DOWNLOAD PROTECTION (IMPROVED):
+                // Don't count as stall if download is actively running, even at a different offset.
+                // This fixes false stalls for MOOV-at-end videos where TDLib prioritizes
+                // downloading the MOOV atom at the end of the file before serving start data.
                 if (updatedCache.isDownloadingActive) {
+                  // Check if download is at a different offset than what we're waiting for
+                  final activeOffset = _activeDownloadOffset[capturedFileId];
+                  if (activeOffset != null && activeOffset != capturedOffset) {
+                    // Download is active at a different offset - this is normal for MOOV-at-end
+                    // Don't count as stall, just wait for the data
+                    _logTrace(
+                      'Stall timer - download active at different offset '
+                      '($activeOffset vs waiting for $capturedOffset), not a stall',
+                      fileId: capturedFileId,
+                    );
+                  }
                   return;
                 }
 
@@ -2643,6 +2666,7 @@ class LocalStreamingProxy {
     _activeDownloadOffset[fileId] = requestedOffset;
     _activePriority[fileId] = priority; // Track priority
     _lastOffsetChangeTime[fileId] = now;
+    _downloadStartTime[fileId] = now; // Track for stall cooldown protection
 
     // PHASE3: HIGH-PRIORITY LOCK ACQUISITION REMOVED
     // No longer tracking locks - TDLib handles priority naturally
