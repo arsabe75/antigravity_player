@@ -540,7 +540,6 @@ class LocalStreamingProxy {
   final Map<int, int> _lastActiveDownloadOffset = {};
   final Set<int> _userSeekInProgress = {};
   final Map<int, int> _lastExplicitSeekOffset = {};
-  final Map<int, DateTime> _lastExplicitSeekTime = {};
 
   // INITIALIZATION GRACE PERIOD: Track when video was first opened
   // Used to prevent false stalls during MOOV-at-end video initialization
@@ -560,10 +559,6 @@ class LocalStreamingProxy {
   final Map<int, Timer?> _seekDebounceTimers = {};
   final Map<int, int> _pendingSeekOffsets = {};
   static const int _seekDebounceMs = 50;
-
-  // MOOV-AT-END DETECTION: Track files where moov atom is at the end
-  final Map<int, bool> _isMoovAtEnd = {};
-
   // PRE-DETECTION: Cache of detected MOOV position
   final Map<int, MoovPosition> _moovPositionCache = {};
 
@@ -572,7 +567,7 @@ class LocalStreamingProxy {
 
   /// Check if a file has moov atom at the end (not optimized for streaming)
   bool isVideoNotOptimizedForStreaming(int fileId) =>
-      _isMoovAtEnd[fileId] ?? false;
+      _getOrCreateState(fileId).isMoovAtEnd;
 
   // FORCE MOOV DOWNLOAD: Track files that MUST download moov before anything else
   // This prevents the player's request for the start of the file from canceling
@@ -712,7 +707,6 @@ class LocalStreamingProxy {
 
     _log('===== ABORTING REQUEST for fileId $fileId =====');
     _abortedRequests.add(fileId);
-    _isMoovAtEnd.remove(fileId);
 
     // Clean up retry and error tracking
     _retryTracker.reset(fileId);
@@ -735,7 +729,6 @@ class LocalStreamingProxy {
     _filePaths.clear();
     _activeHttpRequestOffsets.clear();
 
-    _isMoovAtEnd.clear();
     _moovPositionCache.clear();
     _downloadMetrics.clear();
     _sampleTableCache.clear();
@@ -776,7 +769,6 @@ class LocalStreamingProxy {
     _streamingCaches.remove(fileId);
     _forcedMoovOffset.remove(fileId);
     _moovPositionCache.remove(fileId);
-    _isMoovAtEnd.remove(fileId);
   }
 
   /// Signal that user explicitly initiated a seek.
@@ -1154,7 +1146,7 @@ class LocalStreamingProxy {
           _fileLoadStates[fileId] = FileLoadState.loadingMoov;
 
           // P1: Check if we know MOOV location for this file
-          final isMoovAtEnd = _isMoovAtEnd[fileId] ?? false;
+          final isMoovAtEnd = _getOrCreateState(fileId).isMoovAtEnd;
 
           if (isMoovAtEnd) {
             // MOOV is at end - don't redirect to 0, let the existing
@@ -1256,7 +1248,7 @@ class LocalStreamingProxy {
           _userSeekInProgress.remove(fileId);
           // P1 FIX: Track this seek to protect from stagnant adoption
           _lastExplicitSeekOffset[fileId] = start;
-          _lastExplicitSeekTime[fileId] = DateTime.now();
+          _getOrCreateState(fileId).lastExplicitSeekTime = DateTime.now();
         } else {
           debugPrint(
             'Proxy: USER SEEK SIGNAL active but offset $start too close to Primary $existingPrimary (${distFromPrimary ~/ 1024}KB)',
@@ -2318,8 +2310,8 @@ class LocalStreamingProxy {
       // No blocking or stabilization - let TDLib and player handle naturally
       final isMoovAtomRequest = mightBeMoovRequest && !isConfirmedVideoData;
 
-      if (isMoovAtomRequest && !_isMoovAtEnd.containsKey(fileId)) {
-        _isMoovAtEnd[fileId] = true;
+      if (isMoovAtomRequest && !_getOrCreateState(fileId).isMoovAtEnd) {
+        _getOrCreateState(fileId).isMoovAtEnd = true;
         debugPrint(
           'Proxy: File $fileId has moov atom at end (not optimized for streaming)',
         );
@@ -2407,7 +2399,7 @@ class LocalStreamingProxy {
     // The lock was blocking video data requests and causing stalls.
     // TDLib handles priority naturally - let it manage MOOV vs video data.
     final isMoovDownload =
-        _isMoovAtEnd[fileId] == true &&
+        _getOrCreateState(fileId).isMoovAtEnd &&
         totalSize > 0 &&
         (totalSize - requestedOffset) <
             (totalSize * 0.01).round().clamp(5 * 1024 * 1024, 50 * 1024 * 1024);
@@ -2796,7 +2788,7 @@ class LocalStreamingProxy {
           debugPrint('Proxy: EARLY DETECT - File $fileId has MOOV at START');
         } else if (position == MoovPosition.end) {
           // Video not optimized - update state for UI
-          _isMoovAtEnd[fileId] = true;
+          _getOrCreateState(fileId).isMoovAtEnd = true;
           debugPrint('Proxy: EARLY DETECT - File $fileId has MOOV at END');
         }
         // MoovPosition.unknown means we need more data
@@ -2808,7 +2800,7 @@ class LocalStreamingProxy {
         !_moovPositionCache.containsKey(fileId)) {
       // If we downloaded 5MB+ and still haven't found moov, it's at the end
       _moovPositionCache[fileId] = MoovPosition.end;
-      _isMoovAtEnd[fileId] = true;
+      _getOrCreateState(fileId).isMoovAtEnd = true;
       debugPrint(
         'Proxy: EARLY DETECT - File $fileId inferred MOOV at END (${prefix ~/ (1024 * 1024)}MB downloaded)',
       );
@@ -2880,7 +2872,8 @@ class LocalStreamingProxy {
         // If we have enough prefix but no moov found near start, assume end
         if (cached.downloadedPrefixSize > 5 * 1024 * 1024) {
           _moovPositionCache[fileId] = MoovPosition.end;
-          _isMoovAtEnd[fileId] = true; // Sync with existing flag
+          _getOrCreateState(fileId).isMoovAtEnd =
+              true; // Sync with existing flag
           debugPrint(
             'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at END (inferred)',
           );
