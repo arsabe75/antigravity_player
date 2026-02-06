@@ -562,13 +562,9 @@ class LocalStreamingProxy {
   final Map<int, int> _lastExplicitSeekOffset = {};
   final Map<int, DateTime> _lastExplicitSeekTime = {};
 
-  // Track when download started for each file (for metrics)
-  final Map<int, DateTime> _downloadStartTime = {};
-
   // INITIALIZATION GRACE PERIOD: Track when video was first opened
   // Used to prevent false stalls during MOOV-at-end video initialization
   static const Duration _initializationGracePeriod = Duration(seconds: 30);
-  final Map<int, DateTime> _videoOpenTime = {};
 
   // PHASE2: MOOV state tracking simplified - only track moov-at-end detection
   // Removed: _moovUnblockTime, _moovStabilizeCompleted, _moovDownloadStart
@@ -744,7 +740,6 @@ class LocalStreamingProxy {
     _activeDownloadOffset.remove(fileId);
     _lastOffsetChangeTime.remove(fileId);
     _primaryPlaybackOffset.remove(fileId);
-    _downloadStartTime.remove(fileId);
     _isMoovAtEnd.remove(fileId);
 
     // Clean up retry and error tracking
@@ -754,8 +749,8 @@ class LocalStreamingProxy {
     // Clean up early MOOV detection tracking
     _earlyMoovDetectionTriggered.remove(fileId);
 
-    // Clean up initialization grace period tracking
-    _videoOpenTime.remove(fileId);
+    // Reset consolidated state for this file
+    _fileStates[fileId]?.reset();
 
     // Notify any waiting loops to wake up and check abort status
     _fileUpdateNotifiers[fileId]?.add(null);
@@ -774,12 +769,14 @@ class LocalStreamingProxy {
     // Clear moov-related state to prevent stale behavior after cache clear
     _isMoovAtEnd.clear();
     _moovPositionCache.clear();
-    _downloadStartTime.clear();
     _downloadMetrics.clear();
     _sampleTableCache.clear();
     _lastSeekTime.clear();
     _lastServedOffset.clear();
     _forcedMoovOffset.clear();
+
+    // Clear consolidated file states
+    _fileStates.clear();
 
     // Clear LRU streaming caches
     for (final cache in _streamingCaches.values) {
@@ -2113,7 +2110,7 @@ class LocalStreamingProxy {
 
           // Trigger download to allocate the file - use synchronous mode
           // to download sequentially and avoid PartsManager issues
-          _downloadStartTime[fileId] =
+          _getOrCreateState(fileId).downloadStartTime =
               DateTime.now(); // Track when download started
           TelegramService().send({
             '@type': 'downloadFile',
