@@ -559,8 +559,6 @@ class LocalStreamingProxy {
   final Map<int, Timer?> _seekDebounceTimers = {};
   final Map<int, int> _pendingSeekOffsets = {};
   static const int _seekDebounceMs = 50;
-  // PRE-DETECTION: Cache of detected MOOV position
-  final Map<int, MoovPosition> _moovPositionCache = {};
 
   // STALL DETECTION: Track last download progress
   final Map<int, int> _lastDownloadProgress = {};
@@ -594,15 +592,13 @@ class LocalStreamingProxy {
   /// Callback for unrecoverable errors - UI should subscribe to this
   void Function(StreamingError error)? onStreamingError;
 
-  /// Last error per file - for UI to query current error state
-  final Map<int, StreamingError> _lastErrors = {};
-
   /// Get the last error for a file, or null if no error
-  StreamingError? getLastError(int fileId) => _lastErrors[fileId];
+  StreamingError? getLastError(int fileId) =>
+      _getOrCreateState(fileId).lastError;
 
   /// Clear error state for a file (e.g., when retrying manually)
   void clearError(int fileId) {
-    _lastErrors.remove(fileId);
+    _getOrCreateState(fileId).lastError = null;
     _retryTracker.reset(fileId);
     // Reset load state back to idle if it was in error
     if (_fileLoadStates[fileId] == FileLoadState.error ||
@@ -614,7 +610,7 @@ class LocalStreamingProxy {
 
   /// Internal method to notify error and update state
   void _notifyError(int fileId, StreamingError error) {
-    _lastErrors[fileId] = error;
+    _getOrCreateState(fileId).lastError = error;
 
     // Transition to appropriate error state
     if (error.isRecoverable) {
@@ -706,7 +702,6 @@ class LocalStreamingProxy {
 
     // Clean up retry and error tracking
     _retryTracker.reset(fileId);
-    _lastErrors.remove(fileId);
 
     // Clean up early MOOV detection tracking
     _earlyMoovDetectionTriggered.remove(fileId);
@@ -725,7 +720,6 @@ class LocalStreamingProxy {
     _filePaths.clear();
     _activeHttpRequestOffsets.clear();
 
-    _moovPositionCache.clear();
     _downloadMetrics.clear();
     _sampleTableCache.clear();
 
@@ -745,7 +739,6 @@ class LocalStreamingProxy {
 
     // Clear retry tracking and error state
     _retryTracker.resetAll();
-    _lastErrors.clear();
 
     // Clear early MOOV detection tracking
     _earlyMoovDetectionTriggered.clear();
@@ -762,7 +755,6 @@ class LocalStreamingProxy {
     // Clear LRU streaming cache for this file
     _streamingCaches[fileId]?.clear();
     _streamingCaches.remove(fileId);
-    _moovPositionCache.remove(fileId);
   }
 
   /// Signal that user explicitly initiated a seek.
@@ -2765,7 +2757,7 @@ class LocalStreamingProxy {
   /// - For moov-at-end: Detection triggers after 5MB without finding moov
   void _triggerEarlyMoovDetection(int fileId, ProxyFileInfo info) {
     // Skip if already detected or triggered
-    if (_moovPositionCache.containsKey(fileId)) return;
+    if (_getOrCreateState(fileId).moovPosition != null) return;
     if (info.totalSize < 1024 * 1024) return; // Skip small files < 1MB
 
     final prefix = info.downloadedPrefixSize;
@@ -2791,9 +2783,9 @@ class LocalStreamingProxy {
 
     // Stage 2: Infer moov-at-end if we have substantial prefix without finding moov
     if (prefix >= _moovAtEndInferenceThreshold &&
-        !_moovPositionCache.containsKey(fileId)) {
+        _getOrCreateState(fileId).moovPosition == null) {
       // If we downloaded 5MB+ and still haven't found moov, it's at the end
-      _moovPositionCache[fileId] = MoovPosition.end;
+      _getOrCreateState(fileId).moovPosition = MoovPosition.end;
       _getOrCreateState(fileId).isMoovAtEnd = true;
       debugPrint(
         'Proxy: EARLY DETECT - File $fileId inferred MOOV at END (${prefix ~/ (1024 * 1024)}MB downloaded)',
@@ -2806,8 +2798,9 @@ class LocalStreamingProxy {
   /// This detection does NOT start downloads - only analyzes already available data.
   Future<MoovPosition> _detectMoovPosition(int fileId, int totalSize) async {
     // Check cache first
-    if (_moovPositionCache.containsKey(fileId)) {
-      return _moovPositionCache[fileId]!;
+    final cachedPosition = _getOrCreateState(fileId).moovPosition;
+    if (cachedPosition != null) {
+      return cachedPosition;
     }
 
     final cached = _filePaths[fileId];
@@ -2834,7 +2827,7 @@ class LocalStreamingProxy {
         final atomType = String.fromCharCodes(header.sublist(4, 8));
 
         if (atomType == 'moov') {
-          _moovPositionCache[fileId] = MoovPosition.start;
+          _getOrCreateState(fileId).moovPosition = MoovPosition.start;
           debugPrint('Proxy: MOOV PRE-DETECT - File $fileId has MOOV at START');
           return MoovPosition.start;
         }
@@ -2853,7 +2846,7 @@ class LocalStreamingProxy {
                 nextHeader.sublist(4, 8),
               );
               if (nextAtomType == 'moov') {
-                _moovPositionCache[fileId] = MoovPosition.start;
+                _getOrCreateState(fileId).moovPosition = MoovPosition.start;
                 debugPrint(
                   'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at START (after ftyp)',
                 );
@@ -2865,7 +2858,7 @@ class LocalStreamingProxy {
 
         // If we have enough prefix but no moov found near start, assume end
         if (cached.downloadedPrefixSize > 5 * 1024 * 1024) {
-          _moovPositionCache[fileId] = MoovPosition.end;
+          _getOrCreateState(fileId).moovPosition = MoovPosition.end;
           _getOrCreateState(fileId).isMoovAtEnd =
               true; // Sync with existing flag
           debugPrint(
