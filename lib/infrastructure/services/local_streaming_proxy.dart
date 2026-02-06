@@ -514,13 +514,6 @@ class LocalStreamingProxy {
   // Track aborted requests to cancel waiting loops
   final Set<int> _abortedRequests = {};
 
-  // DIRECT 1:1 MAPPING: Track the current download offset per file
-  // No predictive/two-phase logic - we serve exactly what the player requests
-  final Map<int, int> _activeDownloadOffset = {};
-
-  // Throttle offset changes to avoid excessive downloadFile calls
-  final Map<int, DateTime> _lastOffsetChangeTime = {};
-
   // ============================================================
   // TELEGRAM ANDROID-INSPIRED IMPROVEMENTS
   // ============================================================
@@ -736,9 +729,6 @@ class LocalStreamingProxy {
 
     _log('===== ABORTING REQUEST for fileId $fileId =====');
     _abortedRequests.add(fileId);
-    _activeDownloadRequests.remove(fileId);
-    _activeDownloadOffset.remove(fileId);
-    _lastOffsetChangeTime.remove(fileId);
     _primaryPlaybackOffset.remove(fileId);
     _isMoovAtEnd.remove(fileId);
 
@@ -761,8 +751,6 @@ class LocalStreamingProxy {
   void invalidateAllFiles() {
     _log('Invalidating all cached file info');
     _filePaths.clear();
-    _activeDownloadOffset.clear();
-    _lastOffsetChangeTime.clear();
     _activeHttpRequestOffsets.clear();
     _primaryPlaybackOffset.clear();
 
@@ -803,8 +791,6 @@ class LocalStreamingProxy {
   void invalidateFile(int fileId) {
     _log('Invalidating cached info for file $fileId');
     _filePaths.remove(fileId);
-    _activeDownloadOffset.remove(fileId);
-    _lastOffsetChangeTime.remove(fileId);
     _activeHttpRequestOffsets.remove(fileId);
     _primaryPlaybackOffset.remove(fileId);
 
@@ -1863,7 +1849,9 @@ class LocalStreamingProxy {
                 // downloading the MOOV atom at the end of the file before serving start data.
                 if (updatedCache.isDownloadingActive) {
                   // Check if download is at a different offset than what we're waiting for
-                  final activeOffset = _activeDownloadOffset[capturedFileId];
+                  final activeOffset = _getOrCreateState(
+                    capturedFileId,
+                  ).activeDownloadOffset;
                   if (activeOffset != null && activeOffset != capturedOffset) {
                     // Download is active at a different offset - this is normal for MOOV-at-end
                     // Don't count as stall, just wait for the data
@@ -2261,7 +2249,7 @@ class LocalStreamingProxy {
     }
 
     // Check if we're already downloading from this offset (or very close)
-    final currentActiveOffset = _activeDownloadOffset[fileId];
+    final currentActiveOffset = _getOrCreateState(fileId).activeDownloadOffset;
     final currentDownloadOffset = cached?.downloadOffset ?? 0;
     final currentPrefix = cached?.downloadedPrefixSize ?? 0;
 
@@ -2360,7 +2348,8 @@ class LocalStreamingProxy {
     final now = DateTime.now();
 
     // Calculate distance to CURRENT download offset
-    final activeDownloadTarget = _activeDownloadOffset[fileId] ?? 0;
+    final activeDownloadTarget =
+        _getOrCreateState(fileId).activeDownloadOffset ?? 0;
     final distanceFromCurrent = (requestedOffset - activeDownloadTarget).abs();
 
     // Calculate distance to primary offset for priority calculation
@@ -2391,7 +2380,7 @@ class LocalStreamingProxy {
 
     // PARTSMANAGER FIX: Increased cooldown to prevent TDLib crashes
     // TDLib's PartsManager can crash if offset changes happen too rapidly
-    final lastChange = _lastOffsetChangeTime[fileId];
+    final lastChange = _getOrCreateState(fileId).lastOffsetChangeTime;
     final isSequentialRead =
         requestedOffset > activeDownloadTarget &&
         distanceFromCurrent < 2 * 1024 * 1024; // Within 2MB ahead
@@ -2608,12 +2597,12 @@ class LocalStreamingProxy {
 
     // PHASE1: SIMPLIFIED SEEK DEBOUNCE
     // Always allow seek requests through immediately - the player knows best where it needs data
-    final lastStart = _lastOffsetChangeTime[fileId];
+    final lastStart = _getOrCreateState(fileId).lastOffsetChangeTime;
     if (lastStart != null &&
         now.difference(lastStart).inMilliseconds < 100 &&
         !isBlocking &&
         !isSeekRequest) {
-      final activeOffset = _activeDownloadOffset[fileId] ?? -1;
+      final activeOffset = _getOrCreateState(fileId).activeDownloadOffset ?? -1;
       // Allow if sequential (reading forward within 2MB)
       if (requestedOffset >= activeOffset &&
           requestedOffset < activeOffset + 2 * 1024 * 1024) {
@@ -2668,11 +2657,11 @@ class LocalStreamingProxy {
       '(priority: $priority, preload: ${preloadBytes ~/ 1024}KB)',
     );
 
-    _activeDownloadOffset[fileId] = requestedOffset;
+    final state = _getOrCreateState(fileId);
+    state.activeDownloadOffset = requestedOffset;
     _activePriority[fileId] = priority; // Track priority
-    _lastOffsetChangeTime[fileId] = now;
-    _getOrCreateState(fileId).downloadStartTime =
-        now; // Track for stall cooldown protection
+    state.lastOffsetChangeTime = now;
+    state.downloadStartTime = now; // Track for stall cooldown protection
 
     // PHASE3: HIGH-PRIORITY LOCK ACQUISITION REMOVED
     // No longer tracking locks - TDLib handles priority naturally
