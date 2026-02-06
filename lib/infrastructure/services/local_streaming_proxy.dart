@@ -571,9 +571,6 @@ class LocalStreamingProxy {
   // P0 FIX: MOOV-FIRST STATE MACHINE
   // ============================================================
 
-  /// Track the current loading state for each file
-  final Map<int, FileLoadState> _fileLoadStates = {};
-
   /// Track files with stale playback positions (after cache clear)
   /// These files need MOOV verification before seeking to saved position
   final Set<int> _stalePlaybackPositions = {};
@@ -601,10 +598,11 @@ class LocalStreamingProxy {
     _getOrCreateState(fileId).lastError = null;
     _retryTracker.reset(fileId);
     // Reset load state back to idle if it was in error
-    if (_fileLoadStates[fileId] == FileLoadState.error ||
-        _fileLoadStates[fileId] == FileLoadState.timeout ||
-        _fileLoadStates[fileId] == FileLoadState.unsupported) {
-      _fileLoadStates[fileId] = FileLoadState.idle;
+    final state = _getOrCreateState(fileId);
+    if (state.loadState == FileLoadState.error ||
+        state.loadState == FileLoadState.timeout ||
+        state.loadState == FileLoadState.unsupported) {
+      state.loadState = FileLoadState.idle;
     }
   }
 
@@ -614,17 +612,17 @@ class LocalStreamingProxy {
 
     // Transition to appropriate error state
     if (error.isRecoverable) {
-      _fileLoadStates[fileId] = FileLoadState.error;
+      _getOrCreateState(fileId).loadState = FileLoadState.error;
     } else {
       switch (error.type) {
         case StreamingErrorType.timeout:
-          _fileLoadStates[fileId] = FileLoadState.timeout;
+          _getOrCreateState(fileId).loadState = FileLoadState.timeout;
           break;
         case StreamingErrorType.unsupportedCodec:
-          _fileLoadStates[fileId] = FileLoadState.unsupported;
+          _getOrCreateState(fileId).loadState = FileLoadState.unsupported;
           break;
         default:
-          _fileLoadStates[fileId] = FileLoadState.error;
+          _getOrCreateState(fileId).loadState = FileLoadState.error;
       }
     }
 
@@ -638,7 +636,7 @@ class LocalStreamingProxy {
 
   /// Get the current load state for a file
   FileLoadState getFileLoadState(int fileId) =>
-      _fileLoadStates[fileId] ?? FileLoadState.idle;
+      _getOrCreateState(fileId).loadState;
 
   /// Check if a file has a stale playback position (needs MOOV first)
   bool hasStalePlaybackPosition(int fileId) =>
@@ -654,7 +652,7 @@ class LocalStreamingProxy {
   void acknowledgePendingSeek(int fileId) {
     _pendingSeekAfterMoov.remove(fileId);
     _stalePlaybackPositions.remove(fileId);
-    _fileLoadStates[fileId] = FileLoadState.playing;
+    _getOrCreateState(fileId).loadState = FileLoadState.playing;
     debugPrint('Proxy: P0 FIX - Pending seek acknowledged for $fileId');
   }
 
@@ -668,7 +666,7 @@ class LocalStreamingProxy {
     if (cached == null) return null;
 
     final metrics = _downloadMetrics[fileId];
-    final loadState = _fileLoadStates[fileId] ?? FileLoadState.idle;
+    final loadState = _getOrCreateState(fileId).loadState;
     final isFetchingMoov =
         _getOrCreateState(fileId).forcedMoovOffset != null ||
         loadState == FileLoadState.loadingMoov;
@@ -732,8 +730,7 @@ class LocalStreamingProxy {
     }
     _streamingCaches.clear();
 
-    // Clear file load states
-    _fileLoadStates.clear();
+    // Clear file load states (handled by _fileStates.clear())
     _pendingSeekAfterMoov.clear();
     _stalePlaybackPositions.clear();
 
@@ -1123,13 +1120,13 @@ class LocalStreamingProxy {
       if (_stalePlaybackPositions.contains(fileId) && start > 1024 * 1024) {
         // File has stale position from cache clear, and player wants to seek far
         // Check current load state
-        final currentState = _fileLoadStates[fileId] ?? FileLoadState.idle;
+        final currentState = _getOrCreateState(fileId).loadState;
 
         if (currentState == FileLoadState.idle ||
             currentState == FileLoadState.loadingMoov) {
           // Store the desired seek position for after MOOV loads
           _pendingSeekAfterMoov[fileId] = start;
-          _fileLoadStates[fileId] = FileLoadState.loadingMoov;
+          _getOrCreateState(fileId).loadState = FileLoadState.loadingMoov;
 
           // P1: Check if we know MOOV location for this file
           final isMoovAtEnd = _getOrCreateState(fileId).isMoovAtEnd;
@@ -1158,7 +1155,7 @@ class LocalStreamingProxy {
           debugPrint(
             'Proxy: P1 FIX - MOOV ready for $fileId. Processing pending seek to ${start ~/ 1024}KB',
           );
-          _fileLoadStates[fileId] = FileLoadState.seeking;
+          _getOrCreateState(fileId).loadState = FileLoadState.seeking;
           _stalePlaybackPositions.remove(fileId);
           _pendingSeekAfterMoov.remove(fileId);
         }
@@ -1166,7 +1163,7 @@ class LocalStreamingProxy {
           start <= 1024 * 1024) {
         // Stale file but requesting near start - this is fine, likely loading MOOV
         // Mark as loading MOOV and clear stale status once we get some data
-        _fileLoadStates[fileId] = FileLoadState.loadingMoov;
+        _getOrCreateState(fileId).loadState = FileLoadState.loadingMoov;
       }
 
       // SEEK DETECTION: Mark if this is a seek (jump > 1MB from last served offset)
@@ -1539,9 +1536,10 @@ class LocalStreamingProxy {
             // P0 FIX: MOOV state transition
             // If we were in loadingMoov state and have now loaded enough data (2MB),
             // transition to moovReady so pending seeks can proceed
-            if (_fileLoadStates[fileId] == FileLoadState.loadingMoov &&
+            final fileState = _getOrCreateState(fileId);
+            if (fileState.loadState == FileLoadState.loadingMoov &&
                 currentReadOffset >= 2 * 1024 * 1024) {
-              _fileLoadStates[fileId] = FileLoadState.moovReady;
+              fileState.loadState = FileLoadState.moovReady;
               final pendingSeek = _pendingSeekAfterMoov[fileId];
               if (pendingSeek != null) {
                 debugPrint(
@@ -1551,7 +1549,7 @@ class LocalStreamingProxy {
               } else {
                 // No pending seek means this was a fresh start, clear stale status
                 _stalePlaybackPositions.remove(fileId);
-                _fileLoadStates[fileId] = FileLoadState.playing;
+                fileState.loadState = FileLoadState.playing;
               }
             }
 
