@@ -539,14 +539,6 @@ class LocalStreamingProxy {
   // Track all active HTTP request offsets per file for cleanup on close
   final Map<int, Set<int>> _activeHttpRequestOffsets = {};
 
-  // PRIMARY PLAYBACK TRACKING: Track the lowest requested offset as the "primary playback" position.
-  // This helps distinguish actual playback from metadata probes at end-of-file (moov atom).
-  // Stall recovery should only act on the primary playback position, not on metadata probes.
-  final Map<int, int> _primaryPlaybackOffset = {};
-
-  // Track last served offset to detect seeks
-  final Map<int, int> _lastServedOffset = {};
-
   // PHASE4: Partially consolidated state - keeping Maps still in use
   final Map<int, DateTime> _lastPrimaryUpdateTime = {};
   final Map<int, DateTime> _lastActiveDownloadEndTime = {};
@@ -729,7 +721,6 @@ class LocalStreamingProxy {
 
     _log('===== ABORTING REQUEST for fileId $fileId =====');
     _abortedRequests.add(fileId);
-    _primaryPlaybackOffset.remove(fileId);
     _isMoovAtEnd.remove(fileId);
 
     // Clean up retry and error tracking
@@ -752,15 +743,12 @@ class LocalStreamingProxy {
     _log('Invalidating all cached file info');
     _filePaths.clear();
     _activeHttpRequestOffsets.clear();
-    _primaryPlaybackOffset.clear();
 
-    // Clear moov-related state to prevent stale behavior after cache clear
     _isMoovAtEnd.clear();
     _moovPositionCache.clear();
     _downloadMetrics.clear();
     _sampleTableCache.clear();
     _lastSeekTime.clear();
-    _lastServedOffset.clear();
     _forcedMoovOffset.clear();
 
     // Clear consolidated file states
@@ -792,7 +780,6 @@ class LocalStreamingProxy {
     _log('Invalidating cached info for file $fileId');
     _filePaths.remove(fileId);
     _activeHttpRequestOffsets.remove(fileId);
-    _primaryPlaybackOffset.remove(fileId);
 
     // Clear LRU streaming cache for this file
     _streamingCaches[fileId]?.clear();
@@ -1218,7 +1205,9 @@ class LocalStreamingProxy {
       // IMPORTANT: Do this BEFORE primary tracking so we can reset primary on seek
       // Skip seek detection if we did MOOV-first redirect (start was changed to 0)
       bool isSeekRequest = false;
-      final lastOffset = moovFirstRedirect ? null : _lastServedOffset[fileId];
+      final lastOffset = moovFirstRedirect
+          ? null
+          : _getOrCreateState(fileId).lastServedOffset;
       if (lastOffset != null) {
         final jump = (start - lastOffset).abs();
         if (jump > 1024 * 1024) {
@@ -1257,7 +1246,7 @@ class LocalStreamingProxy {
       // PRIMARY PLAYBACK TRACKING (STABILIZED):
       // The player often fires multiple "Seek" requests (video, audio, etc.) to different offsets.
       // We must lock onto the FIRST one (user's intent) and ignore subsequent divergent "seeks".
-      final existingPrimary = _primaryPlaybackOffset[fileId];
+      final existingPrimary = _getOrCreateState(fileId).primaryPlaybackOffset;
       final lastPrimaryUpdate = _lastPrimaryUpdateTime[fileId];
 
       bool shouldUpdatePrimary = false;
@@ -1383,7 +1372,7 @@ class LocalStreamingProxy {
       }
 
       if (shouldUpdatePrimary) {
-        _primaryPlaybackOffset[fileId] = start;
+        _getOrCreateState(fileId).primaryPlaybackOffset = start;
         _lastPrimaryUpdateTime[fileId] = DateTime.now();
         if (isSeekRequest) {
           // Only log if it was a seek
@@ -1577,7 +1566,7 @@ class LocalStreamingProxy {
             _downloadMetrics[fileId]!.recordBytes(data.length);
 
             // Update last served offset for seek detection
-            _lastServedOffset[fileId] = currentReadOffset;
+            _getOrCreateState(fileId).lastServedOffset = currentReadOffset;
 
             // P0 FIX: MOOV state transition
             // If we were in loadingMoov state and have now loaded enough data (2MB),
@@ -1626,7 +1615,8 @@ class LocalStreamingProxy {
             // 1. Only allow Primary to advance by MAX_SPEED (e.g. 5MB/s) relative to elapsed time.
             // 2. Seeks (handled in _handleRequest) break this limit instantly.
             if (data.isNotEmpty) {
-              final lastPrimary = _primaryPlaybackOffset[fileId] ?? 0;
+              final lastPrimary =
+                  _getOrCreateState(fileId).primaryPlaybackOffset ?? 0;
               final lastUpdateTime = _lastPrimaryUpdateTime[fileId];
 
               // If this is sequential (close to last known primary)
@@ -1657,7 +1647,8 @@ class LocalStreamingProxy {
                   // Update at most every 200ms
                   if (lastUpdateTime == null ||
                       now.difference(lastUpdateTime).inMilliseconds > 200) {
-                    _primaryPlaybackOffset[fileId] = currentReadOffset;
+                    _getOrCreateState(fileId).primaryPlaybackOffset =
+                        currentReadOffset;
                     _lastPrimaryUpdateTime[fileId] = now;
                   }
                 }
@@ -1700,7 +1691,8 @@ class LocalStreamingProxy {
                   debugPrint(
                     'Proxy: Recovering Primary Offset (Stagnant 2s in StreamLoop) -> Adopting $currentReadOffset',
                   );
-                  _primaryPlaybackOffset[fileId] = currentReadOffset;
+                  _getOrCreateState(fileId).primaryPlaybackOffset =
+                      currentReadOffset;
                   _lastPrimaryUpdateTime[fileId] = DateTime.now();
                 }
               }
@@ -2221,7 +2213,7 @@ class LocalStreamingProxy {
     // to reduce TDLib download cancellations during rapid scrubbing.
     // IMPORTANT: Only debounce during ACTIVE PLAYBACK, not during initial load.
     // We detect active playback by checking if we've served at least 10MB of data.
-    final lastServed = _lastServedOffset[fileId] ?? 0;
+    final lastServed = _getOrCreateState(fileId).lastServedOffset ?? 0;
     final isActivePlayback =
         lastServed > 10 * 1024 * 1024; // At least 10MB served
 
@@ -2353,7 +2345,7 @@ class LocalStreamingProxy {
     final distanceFromCurrent = (requestedOffset - activeDownloadTarget).abs();
 
     // Calculate distance to primary offset for priority calculation
-    final primaryOffset = _primaryPlaybackOffset[fileId] ?? 0;
+    final primaryOffset = _getOrCreateState(fileId).primaryPlaybackOffset ?? 0;
     final distanceToPlayback = (requestedOffset - primaryOffset).abs();
 
     // Check if this is a recent seek (used for preload calculation)
@@ -2370,7 +2362,7 @@ class LocalStreamingProxy {
 
     // Determine if this is a Seek Request (jump > 1MB from last served offset)
     bool isSeekRequest = false;
-    final lastServedForCheck = _lastServedOffset[fileId];
+    final lastServedForCheck = _getOrCreateState(fileId).lastServedOffset;
     if (lastServedForCheck != null) {
       final jump = (requestedOffset - lastServedForCheck).abs();
       if (jump > 1024 * 1024) {
@@ -2438,7 +2430,7 @@ class LocalStreamingProxy {
     // it's likely a stalled zombie stream. IGNORE the blocking flag to prevent hijacking.
     bool shouldForcePriority = isMoovDownload;
     if (isBlocking) {
-      final primary = _primaryPlaybackOffset[fileId];
+      final primary = _getOrCreateState(fileId).primaryPlaybackOffset;
       // Trust blocking if:
       // 1. No primary set yet (start of playback)
       // 2. Explicit Moov request (End of File)
@@ -2930,7 +2922,7 @@ class LocalStreamingProxy {
     if (cached == null || cached.isCompleted) return;
 
     // Only preload if we're in active playback (not during initial load)
-    final primaryOffset = _primaryPlaybackOffset[fileId];
+    final primaryOffset = _getOrCreateState(fileId).primaryPlaybackOffset;
     if (primaryOffset == null) return;
 
     // Only if currentOffset is close to primary (seek just completed)
