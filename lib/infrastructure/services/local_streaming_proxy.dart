@@ -569,10 +569,6 @@ class LocalStreamingProxy {
   bool isVideoNotOptimizedForStreaming(int fileId) =>
       _getOrCreateState(fileId).isMoovAtEnd;
 
-  // FORCE MOOV DOWNLOAD: Track files that MUST download moov before anything else
-  // This prevents the player's request for the start of the file from canceling
-  // the critical metadata download needed to determine duration.
-  final Map<int, int> _forcedMoovOffset = {};
   // ============================================================
   // P0 FIX: MOOV-FIRST STATE MACHINE
   // ============================================================
@@ -678,7 +674,7 @@ class LocalStreamingProxy {
     final metrics = _downloadMetrics[fileId];
     final loadState = _fileLoadStates[fileId] ?? FileLoadState.idle;
     final isFetchingMoov =
-        _forcedMoovOffset.containsKey(fileId) ||
+        _getOrCreateState(fileId).forcedMoovOffset != null ||
         loadState == FileLoadState.loadingMoov;
 
     return LoadingProgress(
@@ -732,7 +728,6 @@ class LocalStreamingProxy {
     _moovPositionCache.clear();
     _downloadMetrics.clear();
     _sampleTableCache.clear();
-    _forcedMoovOffset.clear();
 
     // Clear consolidated file states
     _fileStates.clear();
@@ -767,7 +762,6 @@ class LocalStreamingProxy {
     // Clear LRU streaming cache for this file
     _streamingCaches[fileId]?.clear();
     _streamingCaches.remove(fileId);
-    _forcedMoovOffset.remove(fileId);
     _moovPositionCache.remove(fileId);
   }
 
@@ -1791,7 +1785,7 @@ class LocalStreamingProxy {
 
               // MOOV PROTECTION: Don't restart download if MOOV download is in progress
               // This prevents the cycle of cancellations seen with MOOV-at-end videos
-              if (_forcedMoovOffset.containsKey(capturedFileId)) {
+              if (_getOrCreateState(capturedFileId).forcedMoovOffset != null) {
                 debugPrint(
                   'Proxy: Stall timer - MOOV download in progress for $capturedFileId, skipping restart',
                 );
@@ -2156,7 +2150,7 @@ class LocalStreamingProxy {
 
     // CHECK FORCED MOOV: If we are forcing a moov download, ignore requests for other offsets
     // This allows the moov download to complete without being intercepted by start-of-file requests
-    final forcedOffset = _forcedMoovOffset[fileId];
+    final forcedOffset = _getOrCreateState(fileId).forcedMoovOffset;
     if (forcedOffset != null) {
       // Check if we have enough data at the forced offset now
       final availableAtForced = cached?.availableBytesFrom(forcedOffset) ?? 0;
@@ -2179,7 +2173,7 @@ class LocalStreamingProxy {
         debugPrint(
           'Proxy: Forced moov download satisfied ($availableAtForced bytes >= $targetSize), releasing lock for $fileId',
         );
-        _forcedMoovOffset.remove(fileId);
+        _getOrCreateState(fileId).forcedMoovOffset = null;
         _getOrCreateState(fileId).activePriority =
             0; // CRITICAL: Reset priority to avoid deadlock
       } else if (requestedOffset != forcedOffset) {
