@@ -531,11 +531,6 @@ class LocalStreamingProxy {
 
   // IN-MEMORY LRU CACHE: Cache recently read data for instant backward seeks
   final Map<int, _StreamingLRUCache> _streamingCaches = {};
-
-  // SEEK RÁPIDO: Track if we recently seeked to reduce buffer requirement
-  final Map<int, DateTime> _lastSeekTime = {};
-  // Note: Seek window is now 2000ms (inline in _startDownloadAtOffset for Phase 2)
-
   // Track all active HTTP request offsets per file for cleanup on close
   final Map<int, Set<int>> _activeHttpRequestOffsets = {};
 
@@ -583,10 +578,6 @@ class LocalStreamingProxy {
   // This prevents the player's request for the start of the file from canceling
   // the critical metadata download needed to determine duration.
   final Map<int, int> _forcedMoovOffset = {};
-
-  // Track priorities to prevent low-priority requests from displacing high-priority ones
-  final Map<int, int> _activePriority = {};
-
   // ============================================================
   // P0 FIX: MOOV-FIRST STATE MACHINE
   // ============================================================
@@ -748,7 +739,6 @@ class LocalStreamingProxy {
     _moovPositionCache.clear();
     _downloadMetrics.clear();
     _sampleTableCache.clear();
-    _lastSeekTime.clear();
     _forcedMoovOffset.clear();
 
     // Clear consolidated file states
@@ -1231,7 +1221,7 @@ class LocalStreamingProxy {
               lastOffset > 10 * 1024 * 1024;
 
           if (isTrueScrubbing) {
-            _lastSeekTime[fileId] = DateTime.now();
+            _getOrCreateState(fileId).lastSeekTime = DateTime.now();
           }
 
           // CRITICAL FIX: When a seek is detected, reset the primary offset to the seek target
@@ -1595,7 +1585,7 @@ class LocalStreamingProxy {
               _startDownloadAtOffset(fileId, currentReadOffset);
 
               // POST-SEEK PRELOAD: Trigger proactive preload if we recently seeked
-              final lastSeek = _lastSeekTime[fileId];
+              final lastSeek = _getOrCreateState(fileId).lastSeekTime;
               if (lastSeek != null &&
                   DateTime.now().difference(lastSeek).inMilliseconds < 2000) {
                 _triggerPostSeekPreload(fileId, currentReadOffset);
@@ -2198,9 +2188,8 @@ class LocalStreamingProxy {
           'Proxy: Forced moov download satisfied ($availableAtForced bytes >= $targetSize), releasing lock for $fileId',
         );
         _forcedMoovOffset.remove(fileId);
-        _activePriority.remove(
-          fileId,
-        ); // CRITICAL: Reset priority to avoid deadlock
+        _getOrCreateState(fileId).activePriority =
+            0; // CRITICAL: Reset priority to avoid deadlock
       } else if (requestedOffset != forcedOffset) {
         debugPrint(
           'Proxy: Ignoring request for $requestedOffset while forcing moov download at $forcedOffset for $fileId (have $availableAtForced/$targetSize)',
@@ -2217,7 +2206,7 @@ class LocalStreamingProxy {
     final isActivePlayback =
         lastServed > 10 * 1024 * 1024; // At least 10MB served
 
-    final debounceLastSeek = _lastSeekTime[fileId];
+    final debounceLastSeek = _getOrCreateState(fileId).lastSeekTime;
     final debounceNow = DateTime.now();
     final isRapidSeek =
         isActivePlayback &&
@@ -2349,7 +2338,7 @@ class LocalStreamingProxy {
     final distanceToPlayback = (requestedOffset - primaryOffset).abs();
 
     // Check if this is a recent seek (used for preload calculation)
-    final lastSeek = _lastSeekTime[fileId];
+    final lastSeek = _getOrCreateState(fileId).lastSeekTime;
     final seekWindowMs = 2000;
     final isRecentSeek =
         lastSeek != null &&
@@ -2532,7 +2521,8 @@ class LocalStreamingProxy {
       // Simplified LOW OFFSET priority logic
       // Use active download priority instead of removed lock mechanism
       final hasActiveHighPriority =
-          (_activePriority[fileId] ?? 0) >= DownloadPriority.deepBuffer;
+          _getOrCreateState(fileId).activePriority >=
+          DownloadPriority.deepBuffer;
 
       if (hasActiveHighPriority) {
         // When there's an active high-priority download, cap LOW OFFSET at highFloor
@@ -2555,7 +2545,7 @@ class LocalStreamingProxy {
     // TDLib cancels the current download for File X if a new request comes for File X.
     // We must prevent a Low Priority request (e.g. background preload) from killing
     // a High Priority Active Download (e.g. user watching video).
-    final activePriority = _activePriority[fileId] ?? 0;
+    final activePriority = _getOrCreateState(fileId).activePriority;
     final isHighPriorityActive = activePriority >= DownloadPriority.highFloor;
 
     // PHASE3: Removed STICKY PRIORITY PROTECTION - was too conservative\n    // The simplified distance-based protection below is sufficient
@@ -2651,7 +2641,7 @@ class LocalStreamingProxy {
 
     final state = _getOrCreateState(fileId);
     state.activeDownloadOffset = requestedOffset;
-    _activePriority[fileId] = priority; // Track priority
+    state.activePriority = priority; // Track priority
     state.lastOffsetChangeTime = now;
     state.downloadStartTime = now; // Track for stall cooldown protection
 
