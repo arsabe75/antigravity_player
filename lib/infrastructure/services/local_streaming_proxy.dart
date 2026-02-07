@@ -165,6 +165,16 @@ class LocalStreamingProxy {
     _logger.setLevel(level);
   }
 
+  /// Debug-only print that's completely eliminated in release builds.
+  /// The compiler removes this entirely when kDebugMode is false,
+  /// so there's zero overhead in production.
+  void _debugLog(String message) {
+    if (kDebugMode) {
+      // ignore: avoid_print
+      debugPrint(message);
+    }
+  }
+
   /// Get buffered logs for debugging.
   List<ProxyLogEntry> getBufferedLogs({int? fileId, ProxyLogLevel? minLevel}) {
     if (fileId != null) {
@@ -295,6 +305,14 @@ class LocalStreamingProxy {
   // STALL DETECTION: Track last download progress
   final Map<int, int> _lastDownloadProgress = {};
 
+  // LOG THROTTLING: Prevent excessive debug logs from consuming CPU
+  // Maps fileId -> last time "Waiting for data" was logged
+  final Map<int, DateTime> _lastWaitingLogTime = {};
+  // Maps fileId -> last time "PROTECTED" was logged
+  final Map<int, DateTime> _lastProtectedLogTime = {};
+  static const Duration _waitingLogThrottle = Duration(seconds: 2);
+  static const Duration _protectedLogThrottle = Duration(seconds: 5);
+
   /// Check if a file has moov atom at the end (not optimized for streaming)
   bool isVideoNotOptimizedForStreaming(int fileId) =>
       _getOrCreateState(fileId).isMoovAtEnd;
@@ -345,7 +363,7 @@ class LocalStreamingProxy {
     // Also reset stall count in metrics to prevent accumulated stall counts
     // from affecting buffer sizing after recovery
     _downloadMetrics[fileId]?.resetStallCount();
-    debugPrint('Proxy: Retry count reset for $fileId (playback recovered)');
+    _debugLog('Proxy: Retry count reset for $fileId (playback recovered)');
   }
 
   /// Internal method to notify error and update state.
@@ -405,7 +423,7 @@ class LocalStreamingProxy {
     _pendingSeekAfterMoov.remove(fileId);
     _stalePlaybackPositions.remove(fileId);
     _getOrCreateState(fileId).loadState = FileLoadState.playing;
-    debugPrint('Proxy: P0 FIX - Pending seek acknowledged for $fileId');
+    _debugLog('Proxy: P0 FIX - Pending seek acknowledged for $fileId');
   }
 
   int get port => _port;
@@ -564,7 +582,7 @@ class LocalStreamingProxy {
         // Check if we've crossed the threshold
         if (_totalBytesDownloadedSinceEnforcement >=
             _enforcementThresholdBytes) {
-          debugPrint(
+          _debugLog(
             'Proxy: Downloaded ${_totalBytesDownloadedSinceEnforcement ~/ (1024 * 1024)} MB since last enforcement, scheduling cleanup',
           );
           _scheduleEnforcement();
@@ -575,7 +593,7 @@ class LocalStreamingProxy {
     // Also trigger on download complete (for fully cached videos)
     final wasCompleted = previousInfo?.isCompleted ?? false;
     if (info.isCompleted && !wasCompleted) {
-      debugPrint(
+      _debugLog(
         'Proxy: Video $id download completed, scheduling cache enforcement',
       );
       _scheduleEnforcement();
@@ -736,7 +754,7 @@ class LocalStreamingProxy {
       });
 
       if (result['@type'] == 'error') {
-        debugPrint(
+        _debugLog(
           'Proxy: getFileDownloadedPrefixSize error: ${result['message']}',
         );
         return 0;
@@ -756,7 +774,7 @@ class LocalStreamingProxy {
         return 0;
       }
     } catch (e) {
-      debugPrint('Proxy: Error getting prefix size: $e');
+      _debugLog('Proxy: Error getting prefix size: $e');
     }
     return 0;
   }
@@ -766,12 +784,12 @@ class LocalStreamingProxy {
     int? fileId;
     int start = 0;
     try {
-      debugPrint('Proxy: Received request for ${request.uri}');
+      _debugLog('Proxy: Received request for ${request.uri}');
 
       // Security: Validate session token
       final tokenParam = request.uri.queryParameters['token'];
       if (tokenParam != _sessionToken) {
-        debugPrint('Proxy: Invalid or missing token - rejecting request');
+        _debugLog('Proxy: Invalid or missing token - rejecting request');
         request.response.statusCode = HttpStatus.forbidden;
         await request.response.close();
         return;
@@ -796,21 +814,21 @@ class LocalStreamingProxy {
       // Wait for TDLib client to be ready (max 10 seconds)
       // This is crucial on app start when TDLib might still be initializing
       if (!TelegramService().isClientReady) {
-        debugPrint('Proxy: Waiting for TDLib client to initialize...');
+        _debugLog('Proxy: Waiting for TDLib client to initialize...');
         int attempts = 0;
         while (!TelegramService().isClientReady && attempts < 100) {
           await Future.delayed(const Duration(milliseconds: 100));
           attempts++;
         }
         if (!TelegramService().isClientReady) {
-          debugPrint(
+          _debugLog(
             'Proxy: TDLib client failed to initialize after 10 seconds',
           );
           request.response.statusCode = HttpStatus.serviceUnavailable;
           await request.response.close();
           return;
         }
-        debugPrint('Proxy: TDLib client ready after ${attempts * 100}ms');
+        _debugLog('Proxy: TDLib client ready after ${attempts * 100}ms');
       }
 
       // If ANY files were recently aborted, give TDLib time to clean up
@@ -820,7 +838,7 @@ class LocalStreamingProxy {
         // Check if THIS file was aborted - needs longer wait
         final thisFileWasAborted = _abortedRequests.contains(fileId);
 
-        debugPrint(
+        _debugLog(
           'Proxy: Waiting for TDLib to stabilize (${_abortedRequests.length} aborted files, current file aborted: $thisFileWasAborted)...',
         );
         // Clear our abort tracking - we're about to start fresh
@@ -829,7 +847,7 @@ class LocalStreamingProxy {
         // Use shorter wait for unrelated files, longer if this file was aborted
         final waitMs = thisFileWasAborted ? 500 : 200;
         await Future.delayed(Duration(milliseconds: waitMs));
-        debugPrint('Proxy: TDLib stabilization wait complete (${waitMs}ms)');
+        _debugLog('Proxy: TDLib stabilization wait complete (${waitMs}ms)');
       }
 
       // Also clear stale cache for this specific file if it exists
@@ -887,7 +905,7 @@ class LocalStreamingProxy {
             // MOOV is at end - don't redirect to 0, let the existing
             // moov-at-end handling logic fetch from the correct offset.
             // We just mark the state and store pending seek.
-            debugPrint(
+            _debugLog(
               'Proxy: P1 FIX - Stale position for $fileId (MOOV at END). '
               'Requested: ${start ~/ 1024}KB. Pending seek stored. '
               'Letting moov-at-end logic handle MOOV fetch.',
@@ -895,7 +913,7 @@ class LocalStreamingProxy {
             // Don't redirect - moov will be fetched when player requests end of file
           } else {
             // MOOV is at start (or unknown) - redirect to 0
-            debugPrint(
+            _debugLog(
               'Proxy: P1 FIX - Stale position for $fileId (MOOV at START). '
               'Requested: ${start ~/ 1024}KB, forcing start from 0.',
             );
@@ -904,7 +922,7 @@ class LocalStreamingProxy {
           }
         } else if (currentState == FileLoadState.moovReady) {
           // MOOV is loaded, we can now process the stale seek
-          debugPrint(
+          _debugLog(
             'Proxy: P1 FIX - MOOV ready for $fileId. Processing pending seek to ${start ~/ 1024}KB',
           );
           _getOrCreateState(fileId).loadState = FileLoadState.seeking;
@@ -954,7 +972,7 @@ class LocalStreamingProxy {
           // CRITICAL FIX: When a seek is detected, reset the primary offset to the seek target
           // This prevents the primary from getting stuck at 0 when seeking forward
           // _primaryPlaybackOffset[fileId] = start; // MOVED BELOW for centralized logic
-          debugPrint(
+          _debugLog(
             'Proxy: Detected seek for $fileId: $lastOffset -> $start (jump: ${jump ~/ 1024}KB)',
           );
         }
@@ -976,7 +994,7 @@ class LocalStreamingProxy {
         // Accept any offset significantly different from current Primary (>50MB)
         final distFromPrimary = (start - existingPrimary).abs();
         if (distFromPrimary > 50 * 1024 * 1024) {
-          debugPrint(
+          _debugLog(
             'Proxy: EXPLICIT USER SEEK for $fileId. Primary $existingPrimary -> $start.',
           );
           shouldUpdatePrimary = true;
@@ -985,7 +1003,7 @@ class LocalStreamingProxy {
           _lastExplicitSeekOffset[fileId] = start;
           _getOrCreateState(fileId).lastExplicitSeekTime = DateTime.now();
         } else {
-          debugPrint(
+          _debugLog(
             'Proxy: USER SEEK SIGNAL active but offset $start too close to Primary $existingPrimary (${distFromPrimary ~/ 1024}KB)',
           );
         }
@@ -1018,7 +1036,7 @@ class LocalStreamingProxy {
                 start > 50 * 1024 * 1024;
 
             if (isResumeFromStart) {
-              debugPrint(
+              _debugLog(
                 'Proxy: RESUME DETECTED ($existingPrimary -> $start). Forcing Primary update.',
               );
               shouldUpdatePrimary = true;
@@ -1026,12 +1044,12 @@ class LocalStreamingProxy {
                     .difference(lastPrimaryUpdate)
                     .inMilliseconds >
                 2000) {
-              debugPrint(
+              _debugLog(
                 'Proxy: Recovering Primary Offset (Stagnant 2s in Seek) -> Adopting $start',
               );
               shouldUpdatePrimary = true;
             } else {
-              debugPrint(
+              _debugLog(
                 'Proxy: IGNORING rapid divergent seek to $start (kept primary at $existingPrimary)',
               );
               shouldUpdatePrimary = false;
@@ -1050,7 +1068,7 @@ class LocalStreamingProxy {
         if (jumpBack < 50 * 1024 * 1024) {
           shouldUpdatePrimary = true;
         } else {
-          debugPrint(
+          _debugLog(
             'Proxy: Ignoring primary offset reset $existingPrimary -> $start (diff: ${jumpBack ~/ (1024 * 1024)}MB) - likely zombie stream',
           );
         }
@@ -1073,12 +1091,12 @@ class LocalStreamingProxy {
           else if (lastPrimaryUpdate != null &&
               DateTime.now().difference(lastPrimaryUpdate).inMilliseconds >
                   2000) {
-            debugPrint(
+            _debugLog(
               'Proxy: Recovering Primary Offset (Stagnant 2s on Forward Jump) -> Adopting $start',
             );
             shouldUpdatePrimary = true;
           } else {
-            debugPrint(
+            _debugLog(
               'Proxy: Ignoring likely Read-Ahead Buffer Request at $start (Primary at $existingPrimary)',
             );
             shouldUpdatePrimary = false;
@@ -1093,7 +1111,7 @@ class LocalStreamingProxy {
         _lastPrimaryUpdateTime[fileId] = DateTime.now();
         if (isSeekRequest) {
           // Only log if it was a seek
-          debugPrint('Proxy: Primary Target UPDATED to $start');
+          _debugLog('Proxy: Primary Target UPDATED to $start');
         }
       }
 
@@ -1114,7 +1132,7 @@ class LocalStreamingProxy {
       // CRITICAL: Verify the file actually exists on disk
       // TDLib may report a path for a file that was deleted by cache cleanup
       if (!await file.exists()) {
-        debugPrint(
+        _debugLog(
           'Proxy: File does not exist on disk: ${fileInfo.path}, re-fetching...',
         );
 
@@ -1135,7 +1153,7 @@ class LocalStreamingProxy {
 
         fileInfo = _filePaths[fileId];
         if (fileInfo == null || fileInfo.path.isEmpty) {
-          debugPrint('Proxy: Failed to re-allocate file $fileId');
+          _debugLog('Proxy: Failed to re-allocate file $fileId');
           request.response.statusCode = HttpStatus.notFound;
           await request.response.close();
           return;
@@ -1145,7 +1163,7 @@ class LocalStreamingProxy {
 
         // Verify the new file exists
         if (!await file.exists()) {
-          debugPrint('Proxy: New file still does not exist: ${fileInfo.path}');
+          _debugLog('Proxy: New file still does not exist: ${fileInfo.path}');
           request.response.statusCode = HttpStatus.notFound;
           await request.response.close();
           return;
@@ -1206,7 +1224,7 @@ class LocalStreamingProxy {
             lastError = e;
             if (attempt < maxRetries - 1) {
               final delayMs = 50 * (1 << attempt); // 50, 100, 200, 400, 800ms
-              debugPrint(
+              _debugLog(
                 'Proxy: File locked, retrying in ${delayMs}ms (attempt ${attempt + 1}/$maxRetries): ${e.message}',
               );
               await Future.delayed(Duration(milliseconds: delayMs));
@@ -1216,7 +1234,7 @@ class LocalStreamingProxy {
 
         // If still null after retries, throw the last error
         if (raf == null) {
-          debugPrint('Proxy: Failed to open file after $maxRetries attempts');
+          _debugLog('Proxy: Failed to open file after $maxRetries attempts');
           throw lastError ?? FileSystemException('Failed to open file');
         }
 
@@ -1230,7 +1248,7 @@ class LocalStreamingProxy {
 
         while (remainingToSend > 0) {
           if (_abortedRequests.contains(fileId)) {
-            debugPrint('Proxy: Request aborted for $fileId');
+            _debugLog('Proxy: Request aborted for $fileId');
             break;
           }
 
@@ -1294,7 +1312,7 @@ class LocalStreamingProxy {
               fileState.loadState = FileLoadState.moovReady;
               final pendingSeek = _pendingSeekAfterMoov[fileId];
               if (pendingSeek != null) {
-                debugPrint(
+                _debugLog(
                   'Proxy: P0 FIX - MOOV ready for $fileId. '
                   'Player should now seek to ${pendingSeek ~/ 1024}KB',
                 );
@@ -1398,7 +1416,7 @@ class LocalStreamingProxy {
                     primaryNearSeek && proposedIsFarForward;
 
                 if (isOverridingBackwardSeek) {
-                  debugPrint(
+                  _debugLog(
                     'Proxy: BLOCKED Stagnant Adoption for $fileId. Would override recent backward seek '
                     '(seekTarget: ${lastExplicitSeek ~/ (1024 * 1024)}MB, primary: ${lastPrimary ~/ (1024 * 1024)}MB, proposed: ${currentReadOffset ~/ (1024 * 1024)}MB)',
                   );
@@ -1406,7 +1424,7 @@ class LocalStreamingProxy {
                 } else if (lastUpdateTime != null &&
                     DateTime.now().difference(lastUpdateTime).inMilliseconds >
                         2000) {
-                  debugPrint(
+                  _debugLog(
                     'Proxy: Recovering Primary Offset (Stagnant 2s in StreamLoop) -> Adopting $currentReadOffset',
                   );
                   _getOrCreateState(fileId).primaryPlaybackOffset =
@@ -1416,11 +1434,18 @@ class LocalStreamingProxy {
               }
             } else {
               // NO DATA AVAILABLE -> BLOCKING WAIT (EVENT-DRIVEN)
-              final cached = _filePaths[fileId];
-              debugPrint(
-                'Proxy: Waiting for data at $currentReadOffset for $fileId '
-                '(CachedOffset: ${cached?.downloadOffset}, CachedPrefix: ${cached?.downloadedPrefixSize})...',
-              );
+              // Throttled log: only print every 2 seconds per file to reduce CPU overhead
+              final now = DateTime.now();
+              final lastLog = _lastWaitingLogTime[fileId];
+              if (lastLog == null ||
+                  now.difference(lastLog) >= _waitingLogThrottle) {
+                _lastWaitingLogTime[fileId] = now;
+                final cached = _filePaths[fileId];
+                _debugLog(
+                  'Proxy: Waiting for data at $currentReadOffset for $fileId '
+                  '(CachedOffset: ${cached?.downloadOffset}, CachedPrefix: ${cached?.downloadedPrefixSize})...',
+                );
+              }
 
               // Ensure download is started at the exact offset the player needs
               _startDownloadAtOffset(
@@ -1468,7 +1493,7 @@ class LocalStreamingProxy {
 
                 // Check if aborted during wait
                 if (_abortedRequests.contains(fileId)) {
-                  debugPrint('Proxy: Wait aborted for $fileId');
+                  _debugLog('Proxy: Wait aborted for $fileId');
                   return;
                 }
               } catch (_) {
@@ -1484,11 +1509,18 @@ class LocalStreamingProxy {
             // _scheduleReadAhead(fileId, currentReadOffset);
           } else {
             // NO DATA AVAILABLE -> BLOCKING WAIT (EVENT-DRIVEN)
-            final cached = _filePaths[fileId];
-            debugPrint(
-              'Proxy: Waiting for data at $currentReadOffset for $fileId '
-              '(CachedOffset: ${cached?.downloadOffset}, CachedPrefix: ${cached?.downloadedPrefixSize})...',
-            );
+            // Throttled log: only print every 2 seconds per file to reduce CPU overhead
+            final now = DateTime.now();
+            final lastLog = _lastWaitingLogTime[fileId];
+            if (lastLog == null ||
+                now.difference(lastLog) >= _waitingLogThrottle) {
+              _lastWaitingLogTime[fileId] = now;
+              final cached = _filePaths[fileId];
+              _debugLog(
+                'Proxy: Waiting for data at $currentReadOffset for $fileId '
+                '(CachedOffset: ${cached?.downloadOffset}, CachedPrefix: ${cached?.downloadedPrefixSize})...',
+              );
+            }
 
             // Ensure download is started at the exact offset the player needs
             _startDownloadAtOffset(fileId, currentReadOffset, isBlocking: true);
@@ -1528,7 +1560,7 @@ class LocalStreamingProxy {
               // MOOV PROTECTION: Don't restart download if MOOV download is in progress
               // This prevents the cycle of cancellations seen with MOOV-at-end videos
               if (_getOrCreateState(capturedFileId).forcedMoovOffset != null) {
-                debugPrint(
+                _debugLog(
                   'Proxy: Stall timer - MOOV download in progress for $capturedFileId, skipping restart',
                 );
                 return;
@@ -1595,7 +1627,7 @@ class LocalStreamingProxy {
                     );
                     stallTimer?.cancel();
                     if (wasNotified) {
-                      debugPrint(
+                      _debugLog(
                         'Proxy: MAX RETRIES EXCEEDED for $capturedFileId after $attempts attempts',
                       );
                     }
@@ -1611,7 +1643,7 @@ class LocalStreamingProxy {
                   final metrics = _downloadMetrics[capturedFileId];
                   if (metrics != null) {
                     metrics.recordStall();
-                    debugPrint(
+                    _debugLog(
                       'Proxy: P2 STALL RECORDED for $capturedFileId '
                       '(stalls: ${metrics.recentStallCount}, retries remaining: $remaining)',
                     );
@@ -1639,7 +1671,7 @@ class LocalStreamingProxy {
 
               // Check if aborted during wait
               if (_abortedRequests.contains(fileId)) {
-                debugPrint('Proxy: Wait aborted for $fileId');
+                _debugLog('Proxy: Wait aborted for $fileId');
                 stallTimer.cancel();
                 break;
               }
@@ -1652,7 +1684,7 @@ class LocalStreamingProxy {
         }
       } catch (e) {
         if (e is! SocketException && e is! HttpException) {
-          debugPrint('Proxy: Error streaming: $e');
+          _debugLog('Proxy: Error streaming: $e');
         }
       } finally {
         await raf?.close();
@@ -1680,7 +1712,7 @@ class LocalStreamingProxy {
       if (e is HttpException) {
         // Ignore expected HttpExceptions on abort/close
       } else {
-        debugPrint('Proxy: Top-level error: $e');
+        _debugLog('Proxy: Top-level error: $e');
       }
       // Clean up on error too
       if (fileId != null) {
@@ -1720,7 +1752,7 @@ class LocalStreamingProxy {
             local?['is_downloading_active'] as bool? ?? false;
         final canBeDownloaded = local?['can_be_downloaded'] as bool? ?? true;
 
-        debugPrint(
+        _debugLog(
           'Proxy: File $fileId - path: ${path.isNotEmpty}, completed: $isCompleted, '
           'downloading: $isDownloadingActive, prefix: $downloadedPrefixSize, canDownload: $canBeDownloaded',
         );
@@ -1736,7 +1768,7 @@ class LocalStreamingProxy {
             downloadedPrefixSize < minUsableData;
 
         if (isStaleWithLittleData) {
-          debugPrint(
+          _debugLog(
             'Proxy: Detected stale partial download for $fileId (only ${downloadedPrefixSize ~/ 1024}KB), cleaning up...',
           );
 
@@ -1747,9 +1779,9 @@ class LocalStreamingProxy {
           });
 
           if (deleteResult['@type'] == 'ok') {
-            debugPrint('Proxy: Successfully deleted partial file $fileId');
+            _debugLog('Proxy: Successfully deleted partial file $fileId');
           } else {
-            debugPrint('Proxy: Delete file result: ${deleteResult['@type']}');
+            _debugLog('Proxy: Delete file result: ${deleteResult['@type']}');
           }
 
           // Clear our cache
@@ -1803,7 +1835,7 @@ class LocalStreamingProxy {
         final currentInfo = _filePaths[fileId];
         if (currentInfo == null ||
             (currentInfo.path.isEmpty && !currentInfo.isCompleted)) {
-          debugPrint(
+          _debugLog(
             'Proxy: File path empty, triggering initial download for $fileId',
           );
 
@@ -1832,13 +1864,13 @@ class LocalStreamingProxy {
 
           while (attempts < maxAttempts) {
             if (_abortedRequests.contains(fileId)) {
-              debugPrint('Proxy: Fetch aborted for $fileId');
+              _debugLog('Proxy: Fetch aborted for $fileId');
               return;
             }
 
             final cached = _filePaths[fileId];
             if (cached != null && cached.path.isNotEmpty) {
-              debugPrint('Proxy: File path obtained: ${cached.path}');
+              _debugLog('Proxy: File path obtained: ${cached.path}');
               return;
             }
 
@@ -1852,13 +1884,11 @@ class LocalStreamingProxy {
             attempts++;
           }
 
-          debugPrint(
-            'Proxy: Timed out waiting for file allocation for $fileId',
-          );
+          _debugLog('Proxy: Timed out waiting for file allocation for $fileId');
         }
       }
     } catch (e) {
-      debugPrint('Proxy: Error fetching file info: $e');
+      _debugLog('Proxy: Error fetching file info: $e');
     }
   }
 
@@ -1874,7 +1904,7 @@ class LocalStreamingProxy {
     // DISK SAFETY CHECK: Prevent crash if disk is full (<50MB)
     // Uses cached result for 5 seconds to avoid redundant disk queries
     if (!await _checkDiskSafetyCached()) {
-      debugPrint(
+      _debugLog(
         'Proxy: CRITICAL DISK SPACE - Aborting new download request for $fileId',
       );
       return;
@@ -1890,7 +1920,7 @@ class LocalStreamingProxy {
     // This happens if currentReadOffset reaches totalSize in the streaming loop
     final totalSize = cached?.totalSize ?? 0;
     if (totalSize > 0 && requestedOffset >= totalSize) {
-      debugPrint(
+      _debugLog(
         'Proxy: Ignoring request at EOF ($requestedOffset >= $totalSize) for $fileId',
       );
       return;
@@ -1918,14 +1948,14 @@ class LocalStreamingProxy {
       if (availableAtForced >= targetSize) {
         // Got enough moov data - clear MOOV lock AND reset active priority
         // This allows normal priority calculation for subsequent requests
-        debugPrint(
+        _debugLog(
           'Proxy: Forced moov download satisfied ($availableAtForced bytes >= $targetSize), releasing lock for $fileId',
         );
         _getOrCreateState(fileId).forcedMoovOffset = null;
         _getOrCreateState(fileId).activePriority =
             0; // CRITICAL: Reset priority to avoid deadlock
       } else if (requestedOffset != forcedOffset) {
-        debugPrint(
+        _debugLog(
           'Proxy: Ignoring request for $requestedOffset while forcing moov download at $forcedOffset for $fileId (have $availableAtForced/$targetSize)',
         );
         return;
@@ -1956,7 +1986,7 @@ class LocalStreamingProxy {
 
     // If this is a rapid seek (second+ seek within 500ms), use debounce
     if (isRapidSeek) {
-      debugPrint(
+      _debugLog(
         'Proxy: Rapid seek detected for $fileId, debouncing to ${requestedOffset ~/ 1024}KB',
       );
       _handleDebouncedSeek(fileId, requestedOffset);
@@ -1982,7 +2012,7 @@ class LocalStreamingProxy {
     if (gapFromCache > 50 * 1024 * 1024 && cacheEnd > 0 && !isBlocking) {
       // Large gap detected - this is likely a resume scenario
       // Start downloading from cache edge instead of creating a gap
-      debugPrint(
+      _debugLog(
         'Proxy: RESUME GAP DETECTED for $fileId. '
         'Requested: ${requestedOffset ~/ 1024}KB, CacheEnd: ${cacheEnd ~/ 1024}KB, '
         'Gap: ${gapFromCache ~/ 1024}KB. Redirecting to cache edge.',
@@ -2040,7 +2070,7 @@ class LocalStreamingProxy {
         if (mightBeMoovRequest && isConfirmedVideoData) {
           // This looks like moov position but sample table says it's video data
           // This is a legitimate seek to end of video, allow it!
-          debugPrint(
+          _debugLog(
             'Proxy: Offset $requestedOffset is near end but confirmed as video data '
             '(last sample ends at $lastVideoByteOffset)',
           );
@@ -2054,7 +2084,7 @@ class LocalStreamingProxy {
 
       if (isMoovAtomRequest && !_getOrCreateState(fileId).isMoovAtEnd) {
         _getOrCreateState(fileId).isMoovAtEnd = true;
-        debugPrint(
+        _debugLog(
           'Proxy: File $fileId has moov atom at end (not optimized for streaming)',
         );
       }
@@ -2186,25 +2216,25 @@ class LocalStreamingProxy {
             final distToCacheEnd = (requestedOffset - cacheEnd).abs();
             if (distToCacheEnd < 5 * 1024 * 1024) {
               // Request is within 5MB of cache edge - this is buffering continuation
-              debugPrint(
+              _debugLog(
                 'Proxy: CACHE EDGE ALLOWED for $requestedOffset (CacheEnd: $cacheEnd, Dist: ${distToCacheEnd ~/ 1024}KB)',
               );
               shouldForcePriority = true;
             } else if (requestedOffset < 300 * 1024 * 1024) {
               // If request is for early part of file (<300MB), it's likely trying
               // to buffer contiguous data from the start. Allow it.
-              debugPrint(
+              _debugLog(
                 'Proxy: LOW OFFSET ALLOWED for $requestedOffset (early file data)',
               );
               shouldForcePriority = true;
             } else {
-              debugPrint(
+              _debugLog(
                 'Proxy: DENIED Blocking Priority for $requestedOffset (Primary: $primary, Dist: ${dist ~/ 1024}KB). Treated as background.',
               );
               shouldForcePriority = false;
             }
           } else {
-            debugPrint(
+            _debugLog(
               'Proxy: DENIED Blocking Priority for $requestedOffset (Primary: $primary, Dist: ${dist ~/ 1024}KB). Treated as background.',
             );
             shouldForcePriority = false;
@@ -2302,7 +2332,7 @@ class LocalStreamingProxy {
           requestedOffset < activeOffset + 2 * 1024 * 1024) {
         // Sequential: Allowed
       } else {
-        debugPrint(
+        _debugLog(
           'Proxy: DEBOUNCED rapid switch from $activeOffset to $requestedOffset. Ignoring.',
         );
         return;
@@ -2326,15 +2356,21 @@ class LocalStreamingProxy {
         priority < activePriority - DownloadPriority.priorityProtectionGap &&
         (requestedOffset - activeDownloadTarget).abs() >
             DownloadPriority.cacheEdgeDistanceBytes) {
-      _logWarning(
-        'PROTECTED active download from lower-priority request',
-        fileId: fileId,
-        data: {
-          'activePriority': activePriority,
-          'requestPriority': priority,
-          'requestOffset': requestedOffset,
-        },
-      );
+      // Throttled log: only print every 5 seconds per file to reduce CPU overhead
+      final now = DateTime.now();
+      final lastLog = _lastProtectedLogTime[fileId];
+      if (lastLog == null || now.difference(lastLog) >= _protectedLogThrottle) {
+        _lastProtectedLogTime[fileId] = now;
+        _logWarning(
+          'PROTECTED active download from lower-priority request',
+          fileId: fileId,
+          data: {
+            'activePriority': activePriority,
+            'requestPriority': priority,
+            'requestOffset': requestedOffset,
+          },
+        );
+      }
       return;
     }
 
@@ -2346,7 +2382,7 @@ class LocalStreamingProxy {
     int preloadBytes = _calculateSmartPreload(fileId, isRecentSeek, metrics);
 
     // Start download at exactly the offset the player requested
-    debugPrint(
+    _debugLog(
       'Proxy: Downloading from offset $requestedOffset for $fileId '
       '(priority: $priority, preload: ${preloadBytes ~/ 1024}KB)',
     );
@@ -2374,7 +2410,7 @@ class LocalStreamingProxy {
       actualPreload = (preloadBytes < moovPreload) ? moovPreload : preloadBytes;
 
       if (actualPreload != preloadBytes) {
-        debugPrint(
+        _debugLog(
           'Proxy: Using larger preload for moov: ${actualPreload ~/ 1024}KB (actual moov size: ${moovSize ~/ 1024}KB)',
         );
       }
@@ -2439,7 +2475,7 @@ class LocalStreamingProxy {
       final stallMultiplier =
           1.0 + (metrics.recentStallCount * 0.5).clamp(0, 1);
       basePreload = (basePreload * stallMultiplier).round();
-      debugPrint(
+      _debugLog(
         'Proxy: Stall-adjusted buffer for $fileId: ${basePreload ~/ 1024}KB '
         '(${metrics.recentStallCount} stalls)',
       );
@@ -2454,14 +2490,14 @@ class LocalStreamingProxy {
         _fastNetworkPreload,
         basePreload,
       );
-      debugPrint(
+      _debugLog(
         'Proxy: Post-seek adaptive buffer for $fileId: ${seekPreload ~/ 1024}KB '
         '(base: ${basePreload ~/ 1024}KB)',
       );
       return seekPreload;
     }
 
-    debugPrint(
+    _debugLog(
       'Proxy: Adaptive buffer for $fileId: ${basePreload ~/ 1024}KB '
       '(speed: ${metrics?.bytesPerSecond ?? 0 ~/ 1024}KB/s)',
     );
@@ -2505,11 +2541,11 @@ class LocalStreamingProxy {
       _detectMoovPosition(fileId, info.totalSize).then((position) {
         if (position == MoovPosition.start) {
           // Great! Video is optimized for streaming
-          debugPrint('Proxy: EARLY DETECT - File $fileId has MOOV at START');
+          _debugLog('Proxy: EARLY DETECT - File $fileId has MOOV at START');
         } else if (position == MoovPosition.end) {
           // Video not optimized - update state for UI
           _getOrCreateState(fileId).isMoovAtEnd = true;
-          debugPrint('Proxy: EARLY DETECT - File $fileId has MOOV at END');
+          _debugLog('Proxy: EARLY DETECT - File $fileId has MOOV at END');
         }
         // MoovPosition.unknown means we need more data
       });
@@ -2524,7 +2560,7 @@ class LocalStreamingProxy {
       // If we downloaded 5MB+ and async detection never started, infer END
       _getOrCreateState(fileId).moovPosition = MoovPosition.end;
       _getOrCreateState(fileId).isMoovAtEnd = true;
-      debugPrint(
+      _debugLog(
         'Proxy: EARLY DETECT - File $fileId inferred MOOV at END (${prefix ~/ (1024 * 1024)}MB downloaded)',
       );
     }
@@ -2565,7 +2601,7 @@ class LocalStreamingProxy {
 
         if (atomType == 'moov') {
           _getOrCreateState(fileId).moovPosition = MoovPosition.start;
-          debugPrint('Proxy: MOOV PRE-DETECT - File $fileId has MOOV at START');
+          _debugLog('Proxy: MOOV PRE-DETECT - File $fileId has MOOV at START');
           return MoovPosition.start;
         }
 
@@ -2584,7 +2620,7 @@ class LocalStreamingProxy {
               );
               if (nextAtomType == 'moov') {
                 _getOrCreateState(fileId).moovPosition = MoovPosition.start;
-                debugPrint(
+                _debugLog(
                   'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at START (after ftyp)',
                 );
                 return MoovPosition.start;
@@ -2600,7 +2636,7 @@ class LocalStreamingProxy {
           _getOrCreateState(fileId).moovPosition = MoovPosition.end;
           _getOrCreateState(fileId).isMoovAtEnd =
               true; // Sync with existing flag
-          debugPrint(
+          _debugLog(
             'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at END (inferred)',
           );
           return MoovPosition.end;
@@ -2609,7 +2645,7 @@ class LocalStreamingProxy {
         await raf.close();
       }
     } catch (e) {
-      debugPrint('Proxy: MOOV PRE-DETECT error for $fileId: $e');
+      _debugLog('Proxy: MOOV PRE-DETECT error for $fileId: $e');
     }
 
     return MoovPosition.unknown;
@@ -2650,7 +2686,7 @@ class LocalStreamingProxy {
       return;
     }
 
-    debugPrint(
+    _debugLog(
       'Proxy: POST-SEEK PRELOAD for $fileId: ${currentOffset ~/ 1024}KB -> ${targetOffset ~/ 1024}KB',
     );
 
@@ -2698,7 +2734,7 @@ class LocalStreamingProxy {
 
     // Start download with medium priority (16) - not highest to avoid
     // interrupting active playback if video is still playing during drag
-    debugPrint('Proxy: Preview seek preload at $estimatedOffset for $fileId');
+    _debugLog('Proxy: Preview seek preload at $estimatedOffset for $fileId');
 
     _lastPreviewTime[fileId] = now;
 
@@ -2751,7 +2787,7 @@ class LocalStreamingProxy {
       final cached = await Mp4SampleTable.loadFromFile(cachePath);
       if (cached != null) {
         _sampleTableCache[fileId] = cached;
-        debugPrint(
+        _debugLog(
           'Proxy: Loaded sample table from cache for $fileId: '
           '${cached.samples.length} samples, ${cached.keyframeSampleIndices.length} keyframes',
         );
@@ -2775,7 +2811,7 @@ class LocalStreamingProxy {
         );
         final parsed = _sampleTableCache[fileId];
         if (parsed != null) {
-          debugPrint(
+          _debugLog(
             'Proxy: Parsed MP4 sample table for $fileId: '
             '${parsed.samples.length} samples, '
             '${parsed.keyframeSampleIndices.length} keyframes',
@@ -2784,14 +2820,14 @@ class LocalStreamingProxy {
           // Save to disk cache for future use
           if (cachePath != null) {
             await parsed.saveToFile(cachePath);
-            debugPrint('Proxy: Saved sample table to cache for $fileId');
+            _debugLog('Proxy: Saved sample table to cache for $fileId');
           }
         }
       } finally {
         await raf.close();
       }
     } catch (e) {
-      debugPrint('Proxy: Failed to parse sample table for $fileId: $e');
+      _debugLog('Proxy: Failed to parse sample table for $fileId: $e');
       _sampleTableCache[fileId] = null;
     }
   }
@@ -2810,7 +2846,7 @@ class LocalStreamingProxy {
       }
       return '$_sampleTableCacheDir/$cacheKey.json';
     } catch (e) {
-      debugPrint('Proxy: Failed to get cache path: $e');
+      _debugLog('Proxy: Failed to get cache path: $e');
       return null;
     }
   }

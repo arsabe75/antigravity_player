@@ -164,8 +164,8 @@ class ProxyLogger {
       _logBuffer.removeFirst();
     }
 
-    // Print to console if enabled
-    if (_printToConsole) {
+    // Print to console if enabled (only in debug mode)
+    if (_printToConsole && kDebugMode) {
       debugPrint(entry.formatted);
     }
   }
