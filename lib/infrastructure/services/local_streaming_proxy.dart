@@ -168,6 +168,10 @@ class LocalStreamingProxy {
   /// Debug-only print that's completely eliminated in release builds.
   /// The compiler removes this entirely when kDebugMode is false,
   /// so there's zero overhead in production.
+  ///
+  /// Use [_debugLog] for very verbose debug output that should NOT be
+  /// captured in the ring buffer (console-only, frequent messages).
+  /// Use [_log] for structured logging that should be captured for debugging.
   void _debugLog(String message) {
     if (kDebugMode) {
       // ignore: avoid_print
@@ -283,11 +287,6 @@ class LocalStreamingProxy {
   final Map<int, StreamingLRUCache> _streamingCaches = {};
   // Track all active HTTP request offsets per file for cleanup on close
   final Map<int, Set<int>> _activeHttpRequestOffsets = {};
-
-  // Remaining per-file tracking Maps
-  final Map<int, DateTime> _lastPrimaryUpdateTime = {};
-  final Set<int> _userSeekInProgress = {};
-  final Map<int, int> _lastExplicitSeekOffset = {};
 
   // INITIALIZATION GRACE PERIOD: Track when video was first opened
   // Used to prevent false stalls during MOOV-at-end video initialization
@@ -476,6 +475,19 @@ class LocalStreamingProxy {
 
     // Reset consolidated state for this file
     _fileStates[fileId]?.reset();
+
+    // Clean up byte availability waiters to prevent memory leak
+    final waiters = _byteAvailabilityWaiters.remove(fileId);
+    if (waiters != null) {
+      for (final entry in waiters) {
+        if (!entry.value.isCompleted) {
+          entry.value.complete(); // Wake up any waiting futures
+        }
+      }
+      _log(
+        'Cleaned up ${waiters.length} byte availability waiters for $fileId',
+      );
+    }
 
     // Notify any waiting loops to wake up and check abort status
     _fileUpdateNotifiers[fileId]?.add(null);
@@ -981,14 +993,15 @@ class LocalStreamingProxy {
       // PRIMARY PLAYBACK TRACKING (STABILIZED):
       // The player often fires multiple "Seek" requests (video, audio, etc.) to different offsets.
       // We must lock onto the FIRST one (user's intent) and ignore subsequent divergent "seeks".
-      final existingPrimary = _getOrCreateState(fileId).primaryPlaybackOffset;
-      final lastPrimaryUpdate = _lastPrimaryUpdateTime[fileId];
+      final playbackState = _getOrCreateState(fileId);
+      final existingPrimary = playbackState.primaryPlaybackOffset;
+      final lastPrimaryUpdate = playbackState.lastPrimaryUpdateTime;
 
       bool shouldUpdatePrimary = false;
 
       if (existingPrimary == null) {
         shouldUpdatePrimary = true;
-      } else if (_userSeekInProgress.contains(fileId)) {
+      } else if (playbackState.userSeekInProgress) {
         // P1: User explicitly seeked via MediaKit - force Primary update
         // Don't require isSeekRequest because lastServedOffset may not be set yet
         // Accept any offset significantly different from current Primary (>50MB)
@@ -998,10 +1011,10 @@ class LocalStreamingProxy {
             'Proxy: EXPLICIT USER SEEK for $fileId. Primary $existingPrimary -> $start.',
           );
           shouldUpdatePrimary = true;
-          _userSeekInProgress.remove(fileId);
+          playbackState.userSeekInProgress = false;
           // P1 FIX: Track this seek to protect from stagnant adoption
-          _lastExplicitSeekOffset[fileId] = start;
-          _getOrCreateState(fileId).lastExplicitSeekTime = DateTime.now();
+          playbackState.lastExplicitSeekOffset = start;
+          playbackState.lastExplicitSeekTime = DateTime.now();
         } else {
           _debugLog(
             'Proxy: USER SEEK SIGNAL active but offset $start too close to Primary $existingPrimary (${distFromPrimary ~/ 1024}KB)',
@@ -1107,8 +1120,8 @@ class LocalStreamingProxy {
       }
 
       if (shouldUpdatePrimary) {
-        _getOrCreateState(fileId).primaryPlaybackOffset = start;
-        _lastPrimaryUpdateTime[fileId] = DateTime.now();
+        playbackState.primaryPlaybackOffset = start;
+        playbackState.lastPrimaryUpdateTime = DateTime.now();
         if (isSeekRequest) {
           // Only log if it was a seek
           _debugLog('Proxy: Primary Target UPDATED to $start');
@@ -1351,9 +1364,9 @@ class LocalStreamingProxy {
             // 1. Only allow Primary to advance by MAX_SPEED (e.g. 5MB/s) relative to elapsed time.
             // 2. Seeks (handled in _handleRequest) break this limit instantly.
             if (data.isNotEmpty) {
-              final lastPrimary =
-                  _getOrCreateState(fileId).primaryPlaybackOffset ?? 0;
-              final lastUpdateTime = _lastPrimaryUpdateTime[fileId];
+              final streamState = _getOrCreateState(fileId);
+              final lastPrimary = streamState.primaryPlaybackOffset ?? 0;
+              final lastUpdateTime = streamState.lastPrimaryUpdateTime;
 
               // If this is sequential (close to last known primary)
               if (currentReadOffset > lastPrimary &&
@@ -1383,9 +1396,8 @@ class LocalStreamingProxy {
                   // Update at most every 200ms
                   if (lastUpdateTime == null ||
                       now.difference(lastUpdateTime).inMilliseconds > 200) {
-                    _getOrCreateState(fileId).primaryPlaybackOffset =
-                        currentReadOffset;
-                    _lastPrimaryUpdateTime[fileId] = now;
+                    streamState.primaryPlaybackOffset = currentReadOffset;
+                    streamState.lastPrimaryUpdateTime = now;
                   }
                 }
               } else if (currentReadOffset > lastPrimary &&
@@ -1399,7 +1411,7 @@ class LocalStreamingProxy {
                 // If there was an explicit user seek and the proposed adoption offset
                 // is significantly FORWARD of that seek, DON'T adopt.
                 // Protection stays active until Primary moves >100MB from seek position.
-                final lastExplicitSeek = _lastExplicitSeekOffset[fileId];
+                final lastExplicitSeek = streamState.lastExplicitSeekOffset;
 
                 // Block adoption if:
                 // - There was an explicit seek AND
@@ -1420,16 +1432,17 @@ class LocalStreamingProxy {
                     'Proxy: BLOCKED Stagnant Adoption for $fileId. Would override recent backward seek '
                     '(seekTarget: ${lastExplicitSeek ~/ (1024 * 1024)}MB, primary: ${lastPrimary ~/ (1024 * 1024)}MB, proposed: ${currentReadOffset ~/ (1024 * 1024)}MB)',
                   );
-                  // Don't adopt - keep the user's seek position\r\n                  // Reset stagnant timer to prevent repeated adoption attempts\r\n                  _lastPrimaryUpdateTime[fileId] = DateTime.now();
+                  // Don't adopt - keep the user's seek position
+                  // Reset stagnant timer to prevent repeated adoption attempts
+                  streamState.lastPrimaryUpdateTime = DateTime.now();
                 } else if (lastUpdateTime != null &&
                     DateTime.now().difference(lastUpdateTime).inMilliseconds >
                         2000) {
                   _debugLog(
                     'Proxy: Recovering Primary Offset (Stagnant 2s in StreamLoop) -> Adopting $currentReadOffset',
                   );
-                  _getOrCreateState(fileId).primaryPlaybackOffset =
-                      currentReadOffset;
-                  _lastPrimaryUpdateTime[fileId] = DateTime.now();
+                  streamState.primaryPlaybackOffset = currentReadOffset;
+                  streamState.lastPrimaryUpdateTime = DateTime.now();
                 }
               }
             } else {
