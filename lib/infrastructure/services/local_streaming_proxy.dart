@@ -9,6 +9,8 @@ import 'retry_tracker.dart';
 import 'download_priority.dart';
 import 'proxy_logger.dart';
 import 'proxy_file_state.dart';
+import 'download_metrics.dart';
+import 'streaming_lru_cache.dart';
 import '../../domain/value_objects/loading_progress.dart';
 import '../../domain/value_objects/streaming_error.dart';
 
@@ -48,269 +50,8 @@ class ProxyFileInfo {
   }
 }
 
-// LoadingProgress, FileLoadState, and MoovPosition are imported from
-// domain/value_objects/loading_progress.dart
-
-/// Metrics for tracking download speed per file.
-/// Used for adaptive buffer decisions inspired by Telegram Android's approach.
-class _DownloadMetrics {
-  DateTime _lastUpdateTime = DateTime.now();
-  int _bytesInWindow = 0;
-  int _totalBytesDownloaded = 0;
-  double _averageBytesPerSecond = 0;
-
-  /// Total bytes downloaded since tracking started
-  int get totalBytesDownloaded => _totalBytesDownloaded;
-  void recordBytes(int bytes) {
-    final now = DateTime.now();
-    final elapsed = now.difference(_lastUpdateTime).inMilliseconds;
-
-    _bytesInWindow += bytes;
-    _totalBytesDownloaded += bytes;
-
-    // Update average every 500ms
-    if (elapsed >= 500) {
-      final currentSpeed = _bytesInWindow / (elapsed / 1000);
-      // Exponential moving average
-      _averageBytesPerSecond = _averageBytesPerSecond == 0
-          ? currentSpeed
-          : (_averageBytesPerSecond * 0.7 + currentSpeed * 0.3);
-      _bytesInWindow = 0;
-      _lastUpdateTime = now;
-    }
-  }
-
-  /// Current download speed in bytes/second
-  double get bytesPerSecond => _averageBytesPerSecond;
-
-  /// Is the network considered "fast"? (> 2 MB/s)
-  bool get isFastNetwork => _averageBytesPerSecond > 2 * 1024 * 1024;
-
-  /// Is download stalled? (< 50 KB/s for more than 2s)
-  bool get isStalled {
-    final elapsed = DateTime.now().difference(_lastUpdateTime).inMilliseconds;
-    return elapsed > 2000 && _averageBytesPerSecond < 50 * 1024;
-  }
-
-  // ============================================================
-  // STALL TRACKING FOR ADAPTIVE POST-SEEK BUFFER
-  // ============================================================
-
-  int _recentStallCount = 0;
-  DateTime? _lastStallTime;
-
-  /// Record a stall event
-  void recordStall() {
-    _recentStallCount++;
-    _lastStallTime = DateTime.now();
-  }
-
-  /// Returns stall count in last 30 seconds
-  int get recentStallCount {
-    final now = DateTime.now();
-    if (_lastStallTime != null &&
-        now.difference(_lastStallTime!).inSeconds > 30) {
-      _recentStallCount = 0; // Reset after 30s without stalls
-    }
-    return _recentStallCount;
-  }
-
-  /// Reset stall count (e.g., after successful playback)
-  void resetStallCount() {
-    _recentStallCount = 0;
-  }
-}
-
-/// LRU Cache for streaming data.
-/// Caches recently read chunks to enable instant backward seeks.
-class _StreamingLRUCache {
-  static const int maxCacheSize = 32 * 1024 * 1024; // 32MB max per file
-  static const int chunkSize = 512 * 1024; // 512KB chunks
-
-  final Map<int, Uint8List> _chunks = {}; // chunkIndex -> data
-  final Map<int, int> _chunkOffsets =
-      {}; // chunkIndex -> offset within chunk (for partial chunks)
-  final List<int> _lruOrder = []; // Most recently used at end
-  int _currentSize = 0;
-
-  /// Get cached data for the given range.
-  /// Returns null if data is not fully cached.
-  Uint8List? get(int offset, int length) {
-    if (length <= 0) return null;
-
-    final startChunk = offset ~/ chunkSize;
-    final endChunk = (offset + length - 1) ~/ chunkSize;
-
-    // Check if all required chunks are cached AND contain the data we need
-    for (int i = startChunk; i <= endChunk; i++) {
-      if (!_chunks.containsKey(i)) {
-        return null; // Cache miss
-      }
-
-      // Verify the chunk contains the range we need
-      final chunk = _chunks[i]!;
-      final chunkStartOffset = _chunkOffsets[i] ?? 0;
-      final chunkStart = i * chunkSize + chunkStartOffset;
-      final chunkEnd = chunkStart + chunk.length;
-
-      // Calculate the range we need from this chunk
-      final needStart = i == startChunk ? offset : i * chunkSize;
-      final needEnd = i == endChunk ? offset + length : (i + 1) * chunkSize;
-
-      if (needStart < chunkStart || needEnd > chunkEnd) {
-        return null; // Chunk doesn't cover required range
-      }
-    }
-
-    // All chunks are cached - assemble the result
-    final result = Uint8List(length);
-    int resultOffset = 0;
-
-    for (int i = startChunk; i <= endChunk; i++) {
-      final chunk = _chunks[i]!;
-      final chunkStartOffset = _chunkOffsets[i] ?? 0;
-      final chunkAbsoluteStart = i * chunkSize + chunkStartOffset;
-
-      // Calculate which part of this chunk we need
-      final requestStart = i == startChunk ? offset : i * chunkSize;
-      final requestEnd = i == endChunk ? offset + length : (i + 1) * chunkSize;
-
-      // Convert to chunk-local offsets
-      final copyStart = requestStart - chunkAbsoluteStart;
-      // FIX: Ensure copyEnd doesn't exceed actual chunk length
-      final copyEnd = min(requestEnd - chunkAbsoluteStart, chunk.length);
-      final copyLen = min(copyEnd - copyStart, length - resultOffset);
-
-      if (copyStart >= 0 && copyStart < chunk.length && copyLen > 0) {
-        // FIX: Ensure we don't read beyond chunk boundary
-        final safeEnd = min(copyStart + copyLen, chunk.length);
-        result.setRange(
-          resultOffset,
-          resultOffset + (safeEnd - copyStart),
-          chunk.sublist(copyStart, safeEnd),
-        );
-        resultOffset += safeEnd - copyStart;
-      }
-
-      // Update LRU order
-      _lruOrder.remove(i);
-      _lruOrder.add(i);
-    }
-
-    // Verify we got all the data we expected
-    if (resultOffset < length) {
-      return null; // Incomplete data
-    }
-
-    return result;
-  }
-
-  /// Store data in cache, evicting old chunks if necessary.
-  /// Handles non-aligned offsets by storing partial chunks with their offset.
-  void put(int offset, Uint8List data) {
-    if (data.isEmpty) return;
-
-    final startChunk = offset ~/ chunkSize;
-    final startChunkOffset = offset % chunkSize;
-
-    int dataOffset = 0;
-    int chunkIndex = startChunk;
-
-    while (dataOffset < data.length) {
-      final isFirstChunk = chunkIndex == startChunk;
-
-      // For the first chunk, we may start from a non-zero offset within the chunk
-      final offsetInChunk = isFirstChunk ? startChunkOffset : 0;
-
-      // Calculate how much data goes into this chunk
-      final spaceInChunk = chunkSize - offsetInChunk;
-      final remaining = data.length - dataOffset;
-      final chunkLen = min(spaceInChunk, remaining);
-
-      if (chunkLen > 0) {
-        final chunkData = data.sublist(dataOffset, dataOffset + chunkLen);
-
-        // Check if we should merge with existing chunk
-        if (_chunks.containsKey(chunkIndex)) {
-          final existingChunk = _chunks[chunkIndex]!;
-          final existingOffset = _chunkOffsets[chunkIndex] ?? 0;
-
-          // Try to merge if ranges are adjacent or overlapping
-          final existingStart = existingOffset;
-          final existingEnd = existingOffset + existingChunk.length;
-          final newStart = offsetInChunk;
-          final newEnd = offsetInChunk + chunkLen;
-
-          if (newEnd >= existingStart && newStart <= existingEnd) {
-            // Ranges overlap or are adjacent - merge
-            final mergedStart = min(existingStart, newStart);
-            final mergedEnd = max(existingEnd, newEnd);
-            final mergedLen = mergedEnd - mergedStart;
-
-            final merged = Uint8List(mergedLen);
-
-            // Copy existing data
-            merged.setRange(
-              existingStart - mergedStart,
-              existingStart - mergedStart + existingChunk.length,
-              existingChunk,
-            );
-
-            // Copy new data (may overwrite some existing data)
-            merged.setRange(
-              newStart - mergedStart,
-              newStart - mergedStart + chunkLen,
-              chunkData,
-            );
-
-            // Update size tracking
-            _currentSize = _currentSize - existingChunk.length + merged.length;
-            _chunks[chunkIndex] = merged;
-            _chunkOffsets[chunkIndex] = mergedStart;
-          }
-          // If ranges don't overlap/adjacent, keep existing (don't fragment cache)
-        } else {
-          // No existing chunk - store new data
-
-          // Evict if necessary
-          while (_currentSize + chunkLen > maxCacheSize &&
-              _lruOrder.isNotEmpty) {
-            final evictIndex = _lruOrder.removeAt(0);
-            final evicted = _chunks.remove(evictIndex);
-            _chunkOffsets.remove(evictIndex);
-            if (evicted != null) {
-              _currentSize -= evicted.length;
-            }
-          }
-
-          _chunks[chunkIndex] = chunkData;
-          _chunkOffsets[chunkIndex] = offsetInChunk;
-          _currentSize += chunkLen;
-        }
-
-        _lruOrder.remove(chunkIndex);
-        _lruOrder.add(chunkIndex);
-      }
-
-      dataOffset += chunkLen;
-      chunkIndex++;
-    }
-  }
-
-  /// Clear all cached data.
-  void clear() {
-    _chunks.clear();
-    _chunkOffsets.clear();
-    _lruOrder.clear();
-    _currentSize = 0;
-  }
-
-  /// Current cache size in bytes.
-  int get size => _currentSize;
-
-  /// Number of cached chunks.
-  int get chunkCount => _chunks.length;
-}
+// DownloadMetrics and StreamingLRUCache are imported from their own files
+// See: download_metrics.dart and streaming_lru_cache.dart
 
 // =============================================================================
 // LocalStreamingProxy - HTTP Proxy for Telegram Video Streaming
@@ -527,10 +268,10 @@ class LocalStreamingProxy {
       4 * 1024 * 1024; // 4MB for slow network
 
   // MÉTRICAS DE VELOCIDAD: Track download speed for adaptive decisions
-  final Map<int, _DownloadMetrics> _downloadMetrics = {};
+  final Map<int, DownloadMetrics> _downloadMetrics = {};
 
   // IN-MEMORY LRU CACHE: Cache recently read data for instant backward seeks
-  final Map<int, _StreamingLRUCache> _streamingCaches = {};
+  final Map<int, StreamingLRUCache> _streamingCaches = {};
   // Track all active HTTP request offsets per file for cleanup on close
   final Map<int, Set<int>> _activeHttpRequestOffsets = {};
 
@@ -1496,7 +1237,7 @@ class LocalStreamingProxy {
             );
 
             // LRU Cache: Try cache first, fall back to disk read
-            _streamingCaches.putIfAbsent(fileId, () => _StreamingLRUCache());
+            _streamingCaches.putIfAbsent(fileId, () => StreamingLRUCache());
             final cache = _streamingCaches[fileId]!;
             var cachedData = cache.get(currentReadOffset, chunkToRead);
 
@@ -1527,7 +1268,7 @@ class LocalStreamingProxy {
             remainingToSend -= data.length;
 
             // Track download metrics for adaptive decisions
-            _downloadMetrics.putIfAbsent(fileId, () => _DownloadMetrics());
+            _downloadMetrics.putIfAbsent(fileId, () => DownloadMetrics());
             _downloadMetrics[fileId]!.recordBytes(data.length);
 
             // Update last served offset for seek detection
@@ -2674,7 +2415,7 @@ class LocalStreamingProxy {
   int _calculateSmartPreload(
     int fileId,
     bool isRecentSeek,
-    _DownloadMetrics? metrics,
+    DownloadMetrics? metrics,
   ) {
     // Base calculation: 3 seconds of buffer at current network speed
     // with 3x safety margin for variable bitrate videos
