@@ -116,6 +116,11 @@ class PlayerNotifier extends _$PlayerNotifier {
   // Track the position when ANY error occurred (MediaKit or streaming) to detect recovery
   Duration? _errorOccurredAtPosition;
 
+  // THROTTLE: Reduce position UI updates to prevent Windows message queue overflow
+  // Position updates come at ~10/sec from mpv, but UI only needs 4/sec
+  DateTime _lastPositionUpdate = DateTime.now();
+  static const Duration _positionUpdateThrottle = Duration(milliseconds: 250);
+
   // Note: isInitialLoading is now exposed in PlayerState for UI visibility
 
   // Stable Telegram identifiers for progress persistence
@@ -170,10 +175,23 @@ class PlayerNotifier extends _$PlayerNotifier {
     _positionSub = _repository.positionStream.listen((pos) {
       // Guard against disposed provider
       if (!ref.mounted) return;
-      // Riverpod 3: 'state' es la propiedad que mantiene el estado actual.
-      // Es inmutable (en este caso), por lo que usamos copyWith para actualizarlo.
-      // Al asignar un nuevo valor a 'state', se notifica a los listeners.
-      state = state.copyWith(position: pos);
+
+      // THROTTLE: Only update UI position every 250ms to reduce Windows message queue load
+      // This prevents "Failed to post message to main thread" errors
+      final now = DateTime.now();
+      final shouldUpdateState =
+          now.difference(_lastPositionUpdate) >= _positionUpdateThrottle;
+
+      if (shouldUpdateState) {
+        _lastPositionUpdate = now;
+        // Riverpod 3: 'state' es la propiedad que mantiene el estado actual.
+        // Es inmutable (en este caso), por lo que usamos copyWith para actualizarlo.
+        // Al asignar un nuevo valor a 'state', se notifica a los listeners.
+        state = state.copyWith(position: pos);
+      }
+
+      // NOTE: Detection logic below runs on EVERY position event (not throttled)
+      // This ensures accurate playback detection and error recovery
 
       // UX FIX: Only clear initial loading when position has ACTUALLY ADVANCED.
       // Compare against the starting position to detect real playback progress.
