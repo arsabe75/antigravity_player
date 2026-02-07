@@ -338,23 +338,42 @@ class LocalStreamingProxy {
     }
   }
 
-  /// Internal method to notify error and update state
-  void _notifyError(int fileId, StreamingError error) {
-    _getOrCreateState(fileId).lastError = error;
+  /// Reset retry counter only (e.g., when playback recovers successfully).
+  /// This prevents cascading MAX_RETRIES_EXCEEDED errors after recovery.
+  void resetRetryCount(int fileId) {
+    _retryTracker.reset(fileId);
+    // Also reset stall count in metrics to prevent accumulated stall counts
+    // from affecting buffer sizing after recovery
+    _downloadMetrics[fileId]?.resetStallCount();
+    debugPrint('Proxy: Retry count reset for $fileId (playback recovered)');
+  }
+
+  /// Internal method to notify error and update state.
+  /// Returns true if error was notified (new), false if it was a duplicate.
+  bool _notifyErrorIfNew(int fileId, StreamingError error) {
+    final state = _getOrCreateState(fileId);
+
+    // Guard: Prevent duplicate error notifications for the same error type
+    // This prevents multiple concurrent stall timers from spamming MAX_RETRIES_EXCEEDED
+    if (state.lastError != null && state.lastError!.type == error.type) {
+      return false; // Already notified for this error type
+    }
+
+    state.lastError = error;
 
     // Transition to appropriate error state
     if (error.isRecoverable) {
-      _getOrCreateState(fileId).loadState = FileLoadState.error;
+      state.loadState = FileLoadState.error;
     } else {
       switch (error.type) {
         case StreamingErrorType.timeout:
-          _getOrCreateState(fileId).loadState = FileLoadState.timeout;
+          state.loadState = FileLoadState.timeout;
           break;
         case StreamingErrorType.unsupportedCodec:
-          _getOrCreateState(fileId).loadState = FileLoadState.unsupported;
+          state.loadState = FileLoadState.unsupported;
           break;
         default:
-          _getOrCreateState(fileId).loadState = FileLoadState.error;
+          state.loadState = FileLoadState.error;
       }
     }
 
@@ -364,6 +383,7 @@ class LocalStreamingProxy {
       'ERROR for file - ${error.type}: ${error.message}',
       fileId: fileId,
     );
+    return true;
   }
 
   /// Get the current load state for a file
@@ -1568,11 +1588,17 @@ class LocalStreamingProxy {
                       capturedFileId,
                       attempts,
                     );
-                    _notifyError(capturedFileId, error);
-                    stallTimer?.cancel();
-                    debugPrint(
-                      'Proxy: MAX RETRIES EXCEEDED for $capturedFileId after $attempts attempts',
+                    // Only print if this is a NEW error (not duplicate)
+                    final wasNotified = _notifyErrorIfNew(
+                      capturedFileId,
+                      error,
                     );
+                    stallTimer?.cancel();
+                    if (wasNotified) {
+                      debugPrint(
+                        'Proxy: MAX RETRIES EXCEEDED for $capturedFileId after $attempts attempts',
+                      );
+                    }
                     return;
                   }
 

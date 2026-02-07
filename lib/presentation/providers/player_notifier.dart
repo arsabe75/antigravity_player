@@ -208,6 +208,12 @@ class PlayerNotifier extends _$PlayerNotifier {
           );
           _errorOccurredAtPosition = null;
           state = state.copyWith(error: null, streamingError: null);
+
+          // FIX: Reset proxy retry counter so future stalls don't immediately hit MAX_RETRIES
+          // This prevents cascading MAX_RETRIES_EXCEEDED errors after recovery
+          if (_currentProxyFileId != null) {
+            _streamingRepository.resetRetryCount(_currentProxyFileId!);
+          }
         }
       }
     });

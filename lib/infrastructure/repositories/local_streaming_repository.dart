@@ -66,6 +66,11 @@ class LocalStreamingRepository implements StreamingRepository {
   }
 
   @override
+  void resetRetryCount(int fileId) {
+    _proxy.resetRetryCount(fileId);
+  }
+
+  @override
   set onStreamingError(void Function(StreamingError error)? callback) {
     _proxy.onStreamingError = callback;
   }

@@ -42,6 +42,11 @@ abstract class StreamingRepository {
   /// Call this when user wants to manually retry a failed video.
   void clearError(int fileId);
 
+  /// Reset retry counter without clearing error state.
+  /// Call this when playback recovers successfully to prevent
+  /// cascading MAX_RETRIES_EXCEEDED errors.
+  void resetRetryCount(int fileId);
+
   /// Register a callback for streaming errors.
   /// This callback is invoked when an unrecoverable error occurs.
   set onStreamingError(void Function(StreamingError error)? callback);
