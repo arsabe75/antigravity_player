@@ -230,8 +230,7 @@ class LocalStreamingProxy {
   // Cache of file_id -> ProxyFileInfo
   final Map<int, ProxyFileInfo> _filePaths = {};
 
-  // PHASE1 REFACTOR: Consolidated per-file state
-  // Replaces scattered Maps for better maintainability
+  // Consolidated per-file state for better maintainability
   final Map<int, ProxyFileState> _fileStates = {};
 
   /// Get or create consolidated state for a file.
@@ -275,10 +274,8 @@ class LocalStreamingProxy {
   // Track all active HTTP request offsets per file for cleanup on close
   final Map<int, Set<int>> _activeHttpRequestOffsets = {};
 
-  // PHASE4: Partially consolidated state - keeping Maps still in use
+  // Remaining per-file tracking Maps
   final Map<int, DateTime> _lastPrimaryUpdateTime = {};
-  final Map<int, DateTime> _lastActiveDownloadEndTime = {};
-  final Map<int, int> _lastActiveDownloadOffset = {};
   final Set<int> _userSeekInProgress = {};
   final Map<int, int> _lastExplicitSeekOffset = {};
 
@@ -286,14 +283,8 @@ class LocalStreamingProxy {
   // Used to prevent false stalls during MOOV-at-end video initialization
   static const Duration _initializationGracePeriod = Duration(seconds: 30);
 
-  // PHASE2: MOOV state tracking simplified - only track moov-at-end detection
-  // Removed: _moovUnblockTime, _moovStabilizeCompleted, _moovDownloadStart
-
-  // PHASE3: HIGH-PRIORITY DOWNLOAD LOCK REMOVED
-  // TDLib's native priority system is sufficient without our additional locking.
-
   // ============================================================
-  // PHASE 1: DRKLO-INSPIRED OPTIMIZATIONS
+  // SEEK OPTIMIZATION (Telegram/drklo-inspired)
   // ============================================================
 
   // SEEK DEBOUNCE: Prevent flooding TDLib with rapid seek cancellations
@@ -2266,31 +2257,9 @@ class LocalStreamingProxy {
     final isHighPriorityActive = activePriority >= DownloadPriority.highFloor;
 
     // PHASE3: Removed STICKY PRIORITY PROTECTION - was too conservative\n    // The simplified distance-based protection below is sufficient
-
-    // VIRTUAL ACTIVE STATE:
-    // Even if isHighPriorityActive is false (TDLib says inactive), we might be
-    // in a tiny gap between chunks (e.g. 50ms). We must simulate "Active" status
-    // during this gap to keep shielding against zombies.
-    // If we were active recently (<500ms ago) near Primary, treat as Active.
-    bool isVirtualActive = isHighPriorityActive;
-    if (!isVirtualActive) {
-      final lastActiveTime = _lastActiveDownloadEndTime[fileId];
-      if (lastActiveTime != null &&
-          now.difference(lastActiveTime).inMilliseconds < 500) {
-        // Check if the LAST known active offset was close to primary
-        final lastActiveOffset = _lastActiveDownloadOffset[fileId] ?? -1;
-        // reuse primaryOffset from scope
-        if ((lastActiveOffset - primaryOffset).abs() <
-            DownloadPriority.cacheEdgeDistanceBytes) {
-          isVirtualActive = true;
-          // Inherit priority from previous active state (assume high)
-          // This effectively extends the shield
-        }
-      }
-    }
-
-    // PHASE1: ZOMBIE BLACKLIST DISABLED
-    // This was blocking legitimate seek positions and causing stalls.
+    // VIRTUAL ACTIVE STATE LOGIC REMOVED:
+    // Previously tracked _lastActiveDownloadEndTime and _lastActiveDownloadOffset
+    // but those maps were never written to, making this dead code.
     // The simplified cooldown system provides sufficient protection.
     // Original zombie blacklist code and related variables removed.
 
