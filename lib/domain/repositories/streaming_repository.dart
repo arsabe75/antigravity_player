@@ -53,4 +53,8 @@ abstract class StreamingRepository {
   /// Register a callback for streaming errors.
   /// This callback is invoked when an unrecoverable error occurs.
   set onStreamingError(void Function(StreamingError error)? callback);
+
+  /// Report a player-detected error (e.g. unsupported codec, corrupt file).
+  /// Marks the file as unrecoverable in the proxy and invokes [onStreamingError].
+  void reportPlayerError(StreamingError error);
 }

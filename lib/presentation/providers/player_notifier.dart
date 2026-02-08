@@ -293,7 +293,45 @@ class PlayerNotifier extends _$PlayerNotifier {
       _errorOccurredAtPosition = state.position;
       // Stop forced loading on error
       state = state.copyWith(error: error, isBuffering: false);
+
+      // Classify player errors for proxy/streaming videos (codec, corrupt file)
+      if (_currentProxyFileId != null) {
+        final streamingError = _classifyPlayerError(
+          error,
+          _currentProxyFileId!,
+        );
+        if (streamingError != null) {
+          _streamingRepository.reportPlayerError(streamingError);
+        }
+      }
     });
+  }
+
+  /// Classifies MediaKit/player error strings into StreamingError (codec/corrupt).
+  /// Returns null if the error cannot be classified.
+  StreamingError? _classifyPlayerError(String errorMessage, int fileId) {
+    final lower = errorMessage.toLowerCase();
+    // Unsupported codec / format patterns (mpv, libmpv, MediaKit)
+    if (lower.contains('unsupported codec') ||
+        lower.contains('codec not found') ||
+        lower.contains('no decoder') ||
+        lower.contains('decoder not found') ||
+        lower.contains('format not supported') ||
+        lower.contains('unknown format') ||
+        lower.contains('no suitable stream')) {
+      return StreamingError.unsupportedCodec(fileId);
+    }
+    // Corrupt / invalid data patterns
+    if (lower.contains('invalid data') ||
+        lower.contains('corrupt') ||
+        lower.contains('damaged') ||
+        lower.contains('failed to open') ||
+        lower.contains('could not open') ||
+        lower.contains('error reading') ||
+        lower.contains('invalid stream')) {
+      return StreamingError.corruptFile(fileId);
+    }
+    return null;
   }
 
   /// Handle streaming proxy errors (max retries, timeout, etc.)

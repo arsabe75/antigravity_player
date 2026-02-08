@@ -77,4 +77,9 @@ class LocalStreamingRepository implements StreamingRepository {
   set onStreamingError(void Function(StreamingError error)? callback) {
     _proxy.onStreamingError = callback;
   }
+
+  @override
+  void reportPlayerError(StreamingError error) {
+    _proxy.reportPlayerError(error);
+  }
 }

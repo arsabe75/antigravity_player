@@ -372,6 +372,20 @@ class LocalStreamingProxy {
     _debugLog('Proxy: Retry count reset for $fileId (playback recovered)');
   }
 
+  /// Report a player-detected error (e.g. unsupported codec, corrupt file).
+  /// Marks the file as unrecoverable so the proxy stops retrying for this fileId.
+  void reportPlayerError(StreamingError error) {
+    final fileId = error.fileId;
+    final state = _getOrCreateState(fileId);
+    state.lastError = error;
+    state.loadState = FileLoadState.unsupported;
+    onStreamingError?.call(error);
+    _logError(
+      'Player reported error for file - ${error.type}: ${error.message}',
+      fileId: fileId,
+    );
+  }
+
   /// Internal method to notify error and update state.
   /// Returns true if error was notified (new), false if it was a duplicate.
   bool _notifyErrorIfNew(int fileId, StreamingError error) {
@@ -394,6 +408,7 @@ class LocalStreamingProxy {
           state.loadState = FileLoadState.timeout;
           break;
         case StreamingErrorType.unsupportedCodec:
+        case StreamingErrorType.corruptFile:
           state.loadState = FileLoadState.unsupported;
           break;
         default:
@@ -483,9 +498,6 @@ class LocalStreamingProxy {
     // Clean up early MOOV detection tracking
     _earlyMoovDetectionTriggered.remove(fileId);
 
-    // Reset consolidated state for this file
-    _fileStates[fileId]?.reset();
-
     // Clean up byte availability waiters to prevent memory leak
     final waiters = _byteAvailabilityWaiters.remove(fileId);
     if (waiters != null) {
@@ -499,8 +511,31 @@ class LocalStreamingProxy {
       );
     }
 
-    // Notify any waiting loops to wake up and check abort status
-    _fileUpdateNotifiers[fileId]?.add(null);
+    // Notify any waiting loops to wake up and check abort status, then close notifier
+    final notifier = _fileUpdateNotifiers.remove(fileId);
+    if (notifier != null) {
+      notifier.add(null);
+      notifier.close();
+    }
+
+    // Cancel seek debounce timer
+    _seekDebounceTimers[fileId]?.cancel();
+    _seekDebounceTimers.remove(fileId);
+    _pendingSeekOffsets.remove(fileId);
+
+    // Clear LRU streaming cache for this file (releases up to 32MB)
+    _streamingCaches[fileId]?.clear();
+    _streamingCaches.remove(fileId);
+
+    // Remove all per-file state to prevent memory growth
+    _filePaths.remove(fileId);
+    _fileStates.remove(fileId);
+    _downloadMetrics.remove(fileId);
+    _activeHttpRequestOffsets.remove(fileId);
+    _lastDownloadProgress.remove(fileId);
+    _lastWaitingLogTime.remove(fileId);
+    _lastProtectedLogTime.remove(fileId);
+    _pendingFileUpdates.remove(fileId);
   }
 
   /// Invalidates all cached file information.
@@ -832,6 +867,14 @@ class LocalStreamingProxy {
       // Track when video was first opened for initialization grace period
       final state = _getOrCreateState(fileId);
       state.openTime ??= DateTime.now();
+
+      // Reject requests for files marked unsupported (codec/corrupt) - stop retrying
+      if (state.loadState == FileLoadState.unsupported) {
+        _debugLog('Proxy: Rejecting request for unsupported file $fileId');
+        request.response.statusCode = HttpStatus.serviceUnavailable;
+        await request.response.close();
+        return;
+      }
 
       // Wait for TDLib client to be ready (max 10 seconds)
       // This is crucial on app start when TDLib might still be initializing

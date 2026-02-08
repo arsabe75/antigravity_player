@@ -93,6 +93,26 @@ class StreamingError {
     );
   }
 
+  /// Create an unsupported codec error (video format not supported by player)
+  factory StreamingError.unsupportedCodec(int fileId) {
+    return StreamingError(
+      type: StreamingErrorType.unsupportedCodec,
+      message: 'El formato de video no es compatible con el reproductor',
+      fileId: fileId,
+      isRecoverable: false,
+    );
+  }
+
+  /// Create a corrupt file error (invalid or damaged data)
+  factory StreamingError.corruptFile(int fileId) {
+    return StreamingError(
+      type: StreamingErrorType.corruptFile,
+      message: 'El archivo de video parece estar dañado o es inválido',
+      fileId: fileId,
+      isRecoverable: false,
+    );
+  }
+
   /// Create from an exception
   factory StreamingError.fromException(int fileId, Object exception) {
     return StreamingError(
