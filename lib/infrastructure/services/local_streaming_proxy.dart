@@ -9,6 +9,7 @@ import 'retry_tracker.dart';
 import 'download_priority.dart';
 import 'proxy_logger.dart';
 import 'proxy_file_state.dart';
+import 'proxy_config.dart';
 import 'download_metrics.dart';
 import 'streaming_lru_cache.dart';
 import '../../domain/value_objects/loading_progress.dart';
@@ -193,7 +194,8 @@ class LocalStreamingProxy {
   // OPTIMIZATION: Update Throttling
   // ============================================================
   // Process TDLib updateFile events at most every 50ms to reduce main thread load
-  static const int _updateThrottleMs = 50;
+  // See ProxyConfig.updateThrottleMs for configuration
+  static int get _updateThrottleMs => ProxyConfig.updateThrottleMs;
   DateTime? _lastUpdateProcessedTime;
   final Map<int, ProxyFileInfo> _pendingFileUpdates = {};
   Timer? _throttleTimer;
@@ -204,9 +206,10 @@ class LocalStreamingProxy {
   // Trigger cache limit enforcement based on downloaded bytes (streaming mode)
   // Since videos stream partially and never "complete", we trigger enforcement
   // every _enforcementThresholdBytes of downloaded data.
-  static const int _enforcementThresholdBytes = 500 * 1024 * 1024; // 500 MB
-  static const int _enforcementDebounceMs =
-      10000; // 10 seconds minimum between enforcements
+  // See ProxyConfig for configuration
+  static int get _enforcementThresholdBytes =>
+      ProxyConfig.enforcementThresholdBytes;
+  static int get _enforcementDebounceMs => ProxyConfig.enforcementDebounceMs;
   Timer? _enforcementTimer;
   DateTime? _lastEnforcementTime;
   int _totalBytesDownloadedSinceEnforcement = 0;
@@ -215,7 +218,8 @@ class LocalStreamingProxy {
   // OPTIMIZATION: Disk Safety Check Caching
   // ============================================================
   // Cache disk safety check result for 5 seconds to avoid redundant disk queries
-  static const int _diskCheckCacheMs = 5000;
+  // See ProxyConfig.diskCheckCacheMs for configuration
+  static int get _diskCheckCacheMs => ProxyConfig.diskCheckCacheMs;
   DateTime? _lastDiskCheckTime;
   bool? _lastDiskCheckResult;
 
@@ -274,11 +278,10 @@ class LocalStreamingProxy {
 
   // PRELOAD ADAPTATIVO: Bytes mínimos antes de servir datos al player
   // Inspired by ExoPlayer's bufferForPlaybackMs
-  static const int _minPreloadBytes = 2 * 1024 * 1024; // 2MB default preload
-  static const int _fastNetworkPreload =
-      1024 * 1024; // 1MB for fast network (increased from 512KB)
-  static const int _slowNetworkPreload =
-      4 * 1024 * 1024; // 4MB for slow network
+  // See ProxyConfig for configuration
+  static int get _minPreloadBytes => ProxyConfig.minPreloadBytes;
+  static int get _fastNetworkPreload => ProxyConfig.fastNetworkPreload;
+  static int get _slowNetworkPreload => ProxyConfig.slowNetworkPreload;
 
   // MÉTRICAS DE VELOCIDAD: Track download speed for adaptive decisions
   final Map<int, DownloadMetrics> _downloadMetrics = {};
@@ -290,7 +293,9 @@ class LocalStreamingProxy {
 
   // INITIALIZATION GRACE PERIOD: Track when video was first opened
   // Used to prevent false stalls during MOOV-at-end video initialization
-  static const Duration _initializationGracePeriod = Duration(seconds: 30);
+  // See ProxyConfig.initializationGracePeriod for configuration
+  static Duration get _initializationGracePeriod =>
+      ProxyConfig.initializationGracePeriod;
 
   // ============================================================
   // SEEK OPTIMIZATION (Telegram/drklo-inspired)
@@ -299,7 +304,8 @@ class LocalStreamingProxy {
   // SEEK DEBOUNCE: Prevent flooding TDLib with rapid seek cancellations
   final Map<int, Timer?> _seekDebounceTimers = {};
   final Map<int, int> _pendingSeekOffsets = {};
-  static const int _seekDebounceMs = 50;
+  // See ProxyConfig.seekDebounceMs for configuration
+  static int get _seekDebounceMs => ProxyConfig.seekDebounceMs;
 
   // STALL DETECTION: Track last download progress
   final Map<int, int> _lastDownloadProgress = {};
@@ -309,8 +315,9 @@ class LocalStreamingProxy {
   final Map<int, DateTime> _lastWaitingLogTime = {};
   // Maps fileId -> last time "PROTECTED" was logged
   final Map<int, DateTime> _lastProtectedLogTime = {};
-  static const Duration _waitingLogThrottle = Duration(seconds: 2);
-  static const Duration _protectedLogThrottle = Duration(seconds: 5);
+  // See ProxyConfig for throttle durations
+  static Duration get _waitingLogThrottle => ProxyConfig.waitingLogThrottle;
+  static Duration get _protectedLogThrottle => ProxyConfig.protectedLogThrottle;
 
   /// Check if a file has moov atom at the end (not optimized for streaming)
   bool isVideoNotOptimizedForStreaming(int fileId) =>
@@ -453,6 +460,9 @@ class LocalStreamingProxy {
 
   /// Preload video start - no-op stub maintained for API compatibility.
   /// Actual preloading was disabled as it interfered with TDLib download management.
+  @Deprecated(
+    'Preloading disabled due to TDLib limitations. Remove calls to this method.',
+  )
   void preloadVideoStart(int fileId, int? totalSize, {bool isVisible = false}) {
     // No-op: preloading disabled
   }
@@ -540,7 +550,7 @@ class LocalStreamingProxy {
   /// Call this from MediaKitVideoRepository.seekTo() BEFORE the player seeks.
   void signalUserSeek(int fileId, int targetTimeMs) {
     _log('USER SEEK SIGNALED for $fileId to ${targetTimeMs}ms');
-    // PHASE4: Simplified - just update primary offset tracking
+    // Simplified - just update primary offset tracking
     // The actual seek handling is done when the new offset request arrives
   }
 
@@ -1514,7 +1524,7 @@ class LocalStreamingProxy {
               }
             }
 
-            // PHASE 5: Read-ahead DISABLED due to TDLib limitation
+            // Read-ahead DISABLED due to TDLib limitation
             // TDLib cancels any ongoing download when a new downloadFile is called
             // for the same file_id with a different offset. This causes more harm
             // than benefit, so read-ahead is disabled until TDLib supports parallel
@@ -2052,7 +2062,7 @@ class LocalStreamingProxy {
       return;
     }
 
-    // PHASE 4: SMART MOOV ATOM DETECTION
+    // SMART MOOV ATOM DETECTION
     // Instead of blocking all requests near end of file, distinguish:
     // 1. Actual moov atom requests (metadata, no sample table entry)
     // 2. Legitimate seeks to end of video (has sample table entry)
@@ -2061,7 +2071,7 @@ class LocalStreamingProxy {
     if (fileSize > 0) {
       final distanceFromEnd = fileSize - requestedOffset;
 
-      // PHASE 4: Use percentage-based threshold for large files
+      // Use percentage-based threshold for large files
       // For 2GB file: 0.5% = 10MB, for 500MB file: 0.5% = 2.5MB
       final moovThresholdBytes = fileSize > 500 * 1024 * 1024
           ? (fileSize * 0.005)
@@ -2332,7 +2342,7 @@ class LocalStreamingProxy {
     // The simplified cooldown system provides sufficient protection.
     // Original zombie blacklist code and related variables removed.
 
-    // PHASE1: SIMPLIFIED SEEK DEBOUNCE
+    // SIMPLIFIED SEEK DEBOUNCE
     // Always allow seek requests through immediately - the player knows best where it needs data
     final lastStart = _getOrCreateState(fileId).lastOffsetChangeTime;
     if (lastStart != null &&
@@ -2451,7 +2461,7 @@ class LocalStreamingProxy {
     return DownloadPriority.fromDistance(distanceBytes);
   }
 
-  /// PHASE 1: Smart adaptive preload calculation
+  /// Smart adaptive preload calculation
   /// Calculates buffer size based on:
   /// - Network speed (with 3x safety margin)
   /// - Recent stall history (increases buffer if stalls detected)

@@ -5,7 +5,6 @@ import 'package:window_manager/window_manager.dart';
 import '../widgets/window_controls.dart';
 import '../providers/telegram_chat_notifier.dart';
 import '../providers/telegram_content_notifier.dart'; // For getStreamUrl helper if needed
-import '../../infrastructure/services/local_streaming_proxy.dart';
 import '../../config/router/routes.dart';
 import '../../domain/entities/playlist_entity.dart';
 import '../providers/playlist_notifier.dart';
@@ -178,22 +177,8 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                           return const SizedBox.shrink();
                         }
 
-                        // P1: Two-tier preloading
-                        // Visible items (first 10) get higher priority preload
-                        final isVisible = index < 10;
-                        LocalStreamingProxy().preloadVideoStart(
-                          fileId,
-                          size,
-                          isVisible: isVisible,
-                        );
-                        // Also preload next 10 items at lower priority
-                        if (index >= 10 && index < 20) {
-                          LocalStreamingProxy().preloadVideoStart(
-                            fileId,
-                            size,
-                            isVisible: false,
-                          );
-                        }
+                        // Note: preloadVideoStart was removed - it was a no-op
+                        // TDLib handles download on-demand when video is played
 
                         // Get video title with multiple fallbacks:
                         // 1. caption text from message (priority)

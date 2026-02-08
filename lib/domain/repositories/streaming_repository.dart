@@ -27,6 +27,9 @@ abstract class StreamingRepository {
 
   /// P1: Two-tier preloading when videos appear in list view
   /// isVisible=true: Priority 5, 2MB + MOOV | isVisible=false: Priority 1, 512KB only
+  @Deprecated(
+    'Preloading disabled due to TDLib limitations. Remove calls to this method.',
+  )
   void preloadVideoStart(int fileId, int? totalSize, {bool isVisible = false});
 
   /// Get current loading progress for a file.
