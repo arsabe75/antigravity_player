@@ -1,0 +1,36 @@
+# --- Flutter & Dart Internals ---
+.dart_tool/          # Carpeta crítica: contiene caché de compilación masiva
+.packages            # Obsoleto pero suele pesar
+.pub-cache/
+.flutter-plugins
+.flutter-plugins-dependencies
+
+# --- Lockfiles (Ahorro masivo de tokens) ---
+pubspec.lock         # Claude rara vez necesita ver todas las versiones exactas
+ios/Podfile.lock
+macos/Podfile.lock
+
+# --- Plataformas Nativas (Solo actívalos si vas a editar código nativo) ---
+android/             # Ignora si solo haces cambios en Dart/UI
+ios/
+linux/
+macos/
+windows/
+web/
+
+# --- Código Generado (JSON Serializable, Freezed, etc.) ---
+*.g.dart             # Archivos de lógica generada
+*.freezed.dart       # Si usas Freezed, esto ahorra miles de tokens
+*.mocks.dart         # Mocks de tests
+
+# --- Build Outputs ---
+build/               # ¡OBLIGATORIO! Nunca dejes que Claude lea esta carpeta
+*.apk
+*.aab
+*.ipa
+
+# --- IDEs y Logs ---
+.vscode/
+.idea/
+*.log
+doc/                 # Documentación generada por dartdoc

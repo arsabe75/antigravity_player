@@ -80,4 +80,10 @@ class SecureStorageService {
 
   /// Check if the service is initialized.
   static bool get isInitialized => _instance != null;
+
+  @visibleForTesting
+  static void reset() {
+    _instance = null;
+    _legacyCleanupDone = false;
+  }
 }

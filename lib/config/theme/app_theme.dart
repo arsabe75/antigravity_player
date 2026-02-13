@@ -16,6 +16,26 @@ class AppTheme {
       foregroundColor: Colors.black,
       elevation: 0,
     ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: ButtonStyle(
+        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+      ),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ButtonStyle(
+        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: ButtonStyle(
+        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+      ),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: ButtonStyle(
+        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+      ),
+    ),
   );
 
   static final darkTheme = ThemeData(
@@ -31,6 +51,26 @@ class AppTheme {
       backgroundColor: Color(0xFF121212),
       foregroundColor: Colors.white,
       elevation: 0,
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: ButtonStyle(
+        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+      ),
+    ),
+    elevatedButtonTheme: ElevatedButtonThemeData(
+      style: ButtonStyle(
+        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: ButtonStyle(
+        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+      ),
+    ),
+    iconButtonTheme: IconButtonThemeData(
+      style: ButtonStyle(
+        mouseCursor: WidgetStateProperty.all(SystemMouseCursors.click),
+      ),
     ),
   );
 }

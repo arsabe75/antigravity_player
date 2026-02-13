@@ -88,6 +88,7 @@ class ChatIcon extends ConsumerWidget {
             child: Stack(
               fit: StackFit.expand,
               children: [
+                // ignore: use_null_aware_elements
                 if (placeholder != null) placeholder,
                 if (hasHighRes)
                   Image.file(

@@ -232,6 +232,7 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
       color: isDark ? Colors.grey[850] : Colors.grey[100],
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
+        mouseCursor: SystemMouseCursors.click,
         onTap: () => widget.onVideoSelected(video),
         borderRadius: BorderRadius.circular(8),
         child: Padding(
@@ -331,9 +332,16 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
               // Delete button
               Tooltip(
                 message: 'Remove video',
-                child: GestureDetector(
-                  onTap: () => _removeVideo(video),
-                  child: Icon(LucideIcons.x, size: 14, color: Colors.grey[500]),
+                child: MouseRegion(
+                  cursor: SystemMouseCursors.click,
+                  child: GestureDetector(
+                    onTap: () => _removeVideo(video),
+                    child: Icon(
+                      LucideIcons.x,
+                      size: 14,
+                      color: Colors.grey[500],
+                    ),
+                  ),
                 ),
               ),
             ],

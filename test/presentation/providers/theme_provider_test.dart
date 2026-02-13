@@ -3,11 +3,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player_app/presentation/providers/theme_provider.dart';
 import 'package:riverpod/riverpod.dart';
+import 'package:video_player_app/infrastructure/services/secure_storage_service.dart';
 
 void main() {
   group('ThemeNotifier', () {
     setUp(() async {
       SharedPreferences.setMockInitialValues({});
+      SecureStorageService.reset();
+      await SecureStorageService.initialize();
       // Wait for any async initialization if needed, though for individual tests we might need to handle it per test
       // or just ensure we wait after creating the container/notifier
     });
@@ -19,7 +22,7 @@ void main() {
       expect(container.read(themeProvider), ThemeMode.system);
 
       // Allow async load to complete
-      await Future.delayed(const Duration(milliseconds: 50));
+      await Future.delayed(const Duration(milliseconds: 500));
 
       // Should be dark (default)
       expect(container.read(themeProvider), ThemeMode.dark);
@@ -32,7 +35,7 @@ void main() {
       final notifier = container.read(themeProvider.notifier);
 
       // Wait for init
-      await Future.delayed(const Duration(milliseconds: 50));
+      await Future.delayed(const Duration(milliseconds: 500));
 
       // Ensure we start at dark
       expect(container.read(themeProvider), ThemeMode.dark);
@@ -49,7 +52,7 @@ void main() {
       final notifier = container.read(themeProvider.notifier);
 
       // Wait for init
-      await Future.delayed(const Duration(milliseconds: 50));
+      await Future.delayed(const Duration(milliseconds: 500));
 
       await notifier.toggleTheme(); // dark -> light
       await notifier.toggleTheme(); // light -> dark
@@ -64,7 +67,7 @@ void main() {
       final notifier = container.read(themeProvider.notifier);
 
       // Wait for init
-      await Future.delayed(const Duration(milliseconds: 50));
+      await Future.delayed(const Duration(milliseconds: 500));
 
       await notifier.setTheme(ThemeMode.light);
       expect(container.read(themeProvider), ThemeMode.light);
@@ -80,7 +83,7 @@ void main() {
       final notifier = container.read(themeProvider.notifier);
 
       // Wait for init
-      await Future.delayed(const Duration(milliseconds: 50));
+      await Future.delayed(const Duration(milliseconds: 500));
 
       expect(container.read(themeProvider) == ThemeMode.dark, true);
 
