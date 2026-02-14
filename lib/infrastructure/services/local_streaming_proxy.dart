@@ -2882,8 +2882,9 @@ class LocalStreamingProxy {
   void _triggerEarlyMoovDetection(int fileId, ProxyFileInfo info) {
     // Skip if already detected or triggered
     if (_getOrCreateState(fileId).moovPosition != null) return;
-    if (info.totalSize < ProxyConfig.moovDetectionMinFileSize)
+    if (info.totalSize < ProxyConfig.moovDetectionMinFileSize) {
       return; // Skip small files
+    }
 
     final prefix = info.downloadedPrefixSize;
 
