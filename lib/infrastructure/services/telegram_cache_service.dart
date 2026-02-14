@@ -172,7 +172,7 @@ class TelegramCacheService {
         'size': effectiveLimitBytes, // Target size for video cache
         'ttl': -1, // Use default TTL
         'count': -1, // No file count limit
-        'immunity_delay': 0, // Allow deletion of all files (oldest first)
+        'immunity_delay': 300, // Protect files accessed in last 5 minutes
         'file_types': [
           {'@type': 'fileTypeVideo'},
           {'@type': 'fileTypeVideoNote'},

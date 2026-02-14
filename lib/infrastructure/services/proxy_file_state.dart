@@ -1,7 +1,8 @@
 import 'dart:async';
 
+// ignore: unused_import
 import '../../domain/value_objects/loading_progress.dart';
-import '../../domain/value_objects/streaming_error.dart';
+import '../../domain/value_objects/streaming_error.dart'; // Used in StreamingError
 
 /// Consolidated state for a single file being proxied.
 ///
@@ -43,6 +44,10 @@ class ProxyFileState {
   // DOWNLOAD TRACKING
   // ============================================================
 
+  /// Last time downloadFile was called for this file (rate limiting).
+  /// Prevents flooding TDLib with calls that generate event cascades.
+  DateTime? lastDownloadFileCallTime;
+
   /// Current active download offset
   int? activeDownloadOffset;
 
@@ -78,6 +83,7 @@ class ProxyFileState {
   bool isMoovAtEnd = false;
 
   /// Detected MOOV position
+  // ignore: unused_field
   MoovPosition? moovPosition;
 
   /// Forced MOOV download offset (while downloading MOOV)
@@ -102,6 +108,10 @@ class ProxyFileState {
   /// Whether user seek is currently in progress
   bool userSeekInProgress = false;
 
+  /// The offset currently being waited for by the primary HTTP connection.
+  /// Used by the per-file stall timer to know which offset to restart.
+  int? waitingForOffset;
+
   // ============================================================
   // CONSTRUCTOR AND METHODS
   // ============================================================
@@ -120,6 +130,7 @@ class ProxyFileState {
     lastSeekTime = null;
 
     // Download tracking
+    lastDownloadFileCallTime = null;
     activeDownloadOffset = null;
     primaryPlaybackOffset = null;
     lastServedOffset = null;
@@ -142,6 +153,26 @@ class ProxyFileState {
     lastError = null;
     hasStalePlaybackPosition = false;
     userSeekInProgress = false;
+    waitingForOffset = null;
+  }
+
+  /// Reset only the active download state.
+  /// Use this when the underlying file is deleted/re-created but the session continues.
+  void resetDownloadState() {
+    activeDownloadOffset = null;
+    activePriority = 0;
+    lastDownloadProgress = 0;
+    waitingForOffset = null;
+
+    // Also reset timing for download flow
+    downloadStartTime = null;
+    lastOffsetChangeTime = null;
+    lastDownloadFileCallTime = null;
+
+    // We assume the new file might need new MOOV detection
+    // but keep isMoovAtEnd flag if we already knew it to avoid re-work?
+    // Safer to reset if the file was fully deleted.
+    // earlyMoovDetectionTriggered = false; // Keep this true to avoid spamming?
   }
 
   /// Check if this file is within the initialization grace period.

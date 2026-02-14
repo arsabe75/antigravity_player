@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter analyze:*)",
+      "Bash(flutter test:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:core.telegram.org)",
+      "Bash(powershell -Command:*)"
+    ]
+  }
+}

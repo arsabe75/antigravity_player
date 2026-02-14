@@ -349,6 +349,18 @@ class PlayerNotifier extends _$PlayerNotifier {
         isBuffering: false,
         isInitialLoading: false,
       );
+
+      // AUTO-PAUSE: For unrecoverable errors (max retries, timeout, corrupt),
+      // pause the player to stop it from requesting more data via HTTP.
+      // This breaks the feedback loop: player requests → proxy 503 → player
+      // retries → more events → overflow. The user can still manually retry
+      // or navigate away.
+      if (!error.isRecoverable && state.isPlaying) {
+        debugPrint(
+          'PlayerNotifier: Auto-pausing due to unrecoverable error: ${error.type}',
+        );
+        _repository.pause();
+      }
     }
   }
 

@@ -437,9 +437,6 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                       } catch (e) {
                         debugPrint('TelegramScreen: Chat hydration error: $e');
                       }
-
-                      // Small delay to let TDLib process the loaded messages
-                      await Future.delayed(const Duration(milliseconds: 500));
                     } else {
                       debugPrint(
                         'TelegramScreen: No chatId available, using 2s delay fallback...',
@@ -459,43 +456,65 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                         debugPrint(
                           'TelegramScreen: Getting fresh file info from message ${video.telegramMessageId}',
                         );
-                        final messageResult = await TelegramService()
-                            .sendWithResult({
-                              '@type': 'getMessage',
-                              'chat_id': video.telegramChatId,
-                              'message_id': video.telegramMessageId,
-                            });
 
-                        // Extract video file from message content
-                        final content =
-                            messageResult['content'] as Map<String, dynamic>?;
-                        if (content != null) {
-                          // Try getting from messageVideo
-                          var videoFile = content['video'] != null
-                              ? content['video']['video']
-                                    as Map<String, dynamic>?
-                              : null;
+                        // Event-driven: try getMessage immediately after hydration,
+                        // retry with short polling if file info not yet available.
+                        // Best case: ~0ms delay. Worst case: 500ms (same as before).
+                        const maxAttempts = 10; // 10 × 50ms = 500ms max
+                        for (
+                          var attempt = 0;
+                          attempt < maxAttempts;
+                          attempt++
+                        ) {
+                          final messageResult = await TelegramService()
+                              .sendWithResult({
+                                '@type': 'getMessage',
+                                'chat_id': video.telegramChatId,
+                                'message_id': video.telegramMessageId,
+                              });
 
-                          // Fallback: Try getting from messageDocument (MKV)
-                          if (videoFile == null &&
-                              content['document'] != null) {
-                            videoFile =
-                                content['document']['document']
-                                    as Map<String, dynamic>?;
+                          // Extract video file from message content
+                          final content =
+                              messageResult['content'] as Map<String, dynamic>?;
+                          if (content != null) {
+                            // Try getting from messageVideo
+                            var videoFile = content['video'] != null
+                                ? content['video']['video']
+                                      as Map<String, dynamic>?
+                                : null;
+
+                            // Fallback: Try getting from messageDocument (MKV)
+                            if (videoFile == null &&
+                                content['document'] != null) {
+                              videoFile =
+                                  content['document']['document']
+                                      as Map<String, dynamic>?;
+                            }
+
+                            if (videoFile != null) {
+                              final freshFileId = videoFile['id'] as int?;
+                              final size =
+                                  videoFile['size'] as int? ??
+                                  video.telegramFileSize ??
+                                  0;
+                              if (freshFileId != null) {
+                                url = proxy.getUrl(freshFileId, size);
+                                debugPrint(
+                                  'TelegramScreen: Got fresh file_id: $freshFileId, size: $size (attempt ${attempt + 1})',
+                                );
+                                break;
+                              }
+                            }
                           }
 
-                          if (videoFile != null) {
-                            final freshFileId = videoFile['id'] as int?;
-                            final size =
-                                videoFile['size'] as int? ??
-                                video.telegramFileSize ??
-                                0;
-                            if (freshFileId != null) {
-                              url = proxy.getUrl(freshFileId, size);
-                              debugPrint(
-                                'TelegramScreen: Got fresh file_id: $freshFileId, size: $size',
-                              );
-                            }
+                          // File info not ready yet, wait briefly before retrying
+                          if (attempt < maxAttempts - 1) {
+                            debugPrint(
+                              'TelegramScreen: File info not ready, retrying... (attempt ${attempt + 1}/$maxAttempts)',
+                            );
+                            await Future.delayed(
+                              const Duration(milliseconds: 50),
+                            );
                           }
                         }
                       } catch (e) {

@@ -23,6 +23,7 @@ import '../providers/video_repository_provider.dart';
 import '../providers/telegram_cache_notifier.dart';
 import '../widgets/player/player_widgets.dart';
 import '../widgets/player/track_selection_sheet.dart';
+import '../widgets/player/streaming_error_overlay.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
 import '../../infrastructure/services/media_control_service.dart';
 
@@ -561,8 +562,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 if (state.currentVideoPath == null && state.error == null)
                   _buildNoVideoPlaceholder(notifier),
 
-                // Error Overlay
-                if (state.error != null)
+                // Error Overlay (player/file errors)
+                if (state.error != null && state.streamingError == null)
                   ErrorOverlay(
                     error: PlayerErrorFactory.fromException(state.error),
                     onRetry: () {
@@ -581,6 +582,32 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         await _handleBack();
                       }
                     },
+                  ),
+
+                // Streaming Error Overlay (proxy/network/codec/corrupt errors)
+                if (state.streamingError != null)
+                  StreamingErrorOverlay(
+                    error: state.streamingError!,
+                    onRetry: state.streamingError!.isRecoverable
+                        ? () {
+                            notifier.clearStreamingError();
+                            if (state.currentVideoPath != null) {
+                              notifier.loadVideo(
+                                state.currentVideoPath!,
+                                isNetwork: state.currentVideoPath!.startsWith(
+                                  'http',
+                                ),
+                                title: state.currentVideoTitle,
+                                telegramChatId: widget.telegramChatId,
+                                telegramMessageId: widget.telegramMessageId,
+                                telegramFileSize: widget.telegramFileSize,
+                                telegramTopicId: widget.telegramTopicId,
+                                telegramTopicName: widget.telegramTopicName,
+                              );
+                            }
+                          }
+                        : null,
+                    onGoBack: _handleBack,
                   ),
 
                 // Playlist Sidebar
