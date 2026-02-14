@@ -275,6 +275,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
 
                           return Card(
                             child: ListTile(
+                              mouseCursor: SystemMouseCursors.click,
                               leading: CircleAvatar(
                                 backgroundColor:
                                     ChatIcon.getAccentColor(chat) ??

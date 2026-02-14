@@ -223,6 +223,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                 : BorderSide.none,
                           ),
                           child: InkWell(
+                            mouseCursor: SystemMouseCursors.click,
                             onTap: () async {
                               if (_selectedMessages.isNotEmpty) {
                                 _toggleSelection(messageId);

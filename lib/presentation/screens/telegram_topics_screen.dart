@@ -168,6 +168,7 @@ class TelegramTopicsScreen extends ConsumerWidget {
                       vertical: 4,
                     ),
                     child: ListTile(
+                      mouseCursor: SystemMouseCursors.click,
                       leading: SizedBox(
                         width: 40,
                         height: 40,
