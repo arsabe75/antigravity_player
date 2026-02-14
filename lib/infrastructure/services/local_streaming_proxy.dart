@@ -768,21 +768,23 @@ class LocalStreamingProxy {
     // Notify anyone waiting for updates on this file
     _fileUpdateNotifiers[id]?.add(null);
 
-    // EVENT-DRIVEN: Wake up byte availability waiters whose offsets are now satisfied
-    // UNIGRAM PATTERN: Always wake ALL waiters on any file update.
-    // This is safer than checking offsets because "available" logic is complex (sparse parts).
-    // The waiter will wake up, re-check availableBytesFrom(), and if still not enough, go back to sleep.
-    final byteWaiters = _byteAvailabilityWaiters[id];
-    if (byteWaiters != null) {
-      if (byteWaiters.isNotEmpty) {
-        // Complete all of them. They will re-check availability.
-        for (final entry in List.of(byteWaiters)) {
-          if (!entry.value.isCompleted) {
-            entry.value.complete();
+    // EVENT-DRIVEN: Wake up only byte waiters whose offsets are now satisfied.
+    // Selective wakeup avoids thundering herd when multiple connections wait
+    // on different offsets (e.g., MOOV-at-end initialization).
+    if (_byteAvailabilityWaiters.containsKey(id)) {
+      final waiters = _byteAvailabilityWaiters[id]!;
+      waiters.removeWhere((entry) {
+        final requiredOffset = entry.key;
+        final completer = entry.value;
+        if (info.availableBytesFrom(requiredOffset) > 0) {
+          if (!completer.isCompleted) {
+            completer.complete();
           }
+          return true;
         }
-        // We don't clear the list here; the waiters verify data and remove themselves if satisfied
-        // or re-register if not.
+        return false;
+      });
+      if (waiters.isEmpty) {
         _byteAvailabilityWaiters.remove(id);
       }
     }
@@ -2658,23 +2660,11 @@ class LocalStreamingProxy {
     // PARTSMANAGER FIX: Use synchronous mode for moov atom downloads
     // This prevents parallel range conflicts that cause PartsManager crashes
 
-    // UNIGRAM PATTERN: Use limit=0 (unlimited) for normal playback downloads.
-    // This tells TDLib to download continuously from offset to end-of-file,
-    // eliminating the download-stop-restart cycle that occurs with small limits.
-    // TDLib will keep downloading until the file is complete or a new
-    // downloadFile call interrupts it (e.g., seek to different offset).
-    // MOOV downloads use a specific limit to avoid downloading unnecessary data.
-    int downloadLimit = 0; // Unlimited - download from offset to EOF
-    if (isMoovDownload && totalSize > 0) {
-      // For MOOV, we still use 0 (unlimited) for robust EOF handling.
-      // Previously used (totalSize - requestedOffset) which caused "Stream ends prematurely"
-      // errors due to off-by-one or size mismatches.
-      // TDLib will naturally stop at the end of the file.
-      downloadLimit = 0;
-      _debugLog(
-        'Proxy: MOOV download for $fileId: Unlimited from offset ${requestedOffset ~/ 1024}KB',
-      );
-    }
+    // Use limit=0 (unlimited) so TDLib downloads continuously from offset
+    // to EOF. A finite limit causes stop-start patterns (TDLib stops every
+    // N bytes, proxy must re-request) and premature cancellation of MOOV
+    // downloads when new requests arrive for other offsets.
+    const int downloadLimit = 0;
 
     // Record call time for rate limiter before sending
     _getOrCreateState(fileId).lastDownloadFileCallTime = DateTime.now();

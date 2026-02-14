@@ -39,10 +39,10 @@ void main() {
         );
       });
 
-      test('moovDataTimeout is 30 seconds', () {
+      test('moovDataTimeout is 15 seconds', () {
         expect(
           ProxyConfig.moovDataTimeout,
-          equals(const Duration(seconds: 30)),
+          equals(const Duration(seconds: 15)),
         );
       });
 
@@ -107,10 +107,10 @@ void main() {
         expect(ProxyConfig.moovDetectionMinPrefix, equals(1024));
       });
 
-      test('moovAtEndInferenceThreshold is 1MB', () {
+      test('moovAtEndInferenceThreshold is 5MB', () {
         expect(
           ProxyConfig.moovAtEndInferenceThreshold,
-          equals(1 * 1024 * 1024),
+          equals(5 * 1024 * 1024),
         );
       });
     });

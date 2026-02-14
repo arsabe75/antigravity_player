@@ -28,8 +28,7 @@ class ProxyConfig {
   static const Duration normalDataTimeout = Duration(seconds: 5);
 
   /// Extended timeout for MOOV atom requests (near end of file).
-  /// INCREASED from 15s to 30s to handle large MOOV atoms on slow connections.
-  static const Duration moovDataTimeout = Duration(seconds: 30);
+  static const Duration moovDataTimeout = Duration(seconds: 15);
 
   /// Interval for stall detection checks.
   static const Duration stallCheckInterval = Duration(seconds: 2);
@@ -45,7 +44,7 @@ class ProxyConfig {
   static const int seekDebounceMs = 500;
 
   /// Minimum interval between downloadFile TDLib calls for the same file (ms).
-  static const int minDownloadCallIntervalMs = 1000;
+  static const int minDownloadCallIntervalMs = 300;
 
   /// Maximum concurrent HTTP connections per file.
   static const int maxConnectionsPerFile = 6;
@@ -77,11 +76,10 @@ class ProxyConfig {
   static const int moovDetectionMinPrefix = 1024; // 1KB
 
   /// Prefix threshold to infer MOOV-at-end when moov not found at start.
-  /// Set to 1MB so smaller files trigger inference earlier.
-  static const int moovAtEndInferenceThreshold = 1 * 1024 * 1024; // 1MB
+  static const int moovAtEndInferenceThreshold = 5 * 1024 * 1024; // 5MB
 
   /// Minimum file size to attempt early MOOV detection.
-  static const int moovDetectionMinFileSize = 1 * 1024 * 1024; // 1MB
+  static const int moovDetectionMinFileSize = 10 * 1024 * 1024; // 10MB
 
   /// Maximum cap for MOOV atom download size.
   static const int moovDownloadMaxBytes = 20 * 1024 * 1024; // 20MB
@@ -99,8 +97,8 @@ class ProxyConfig {
   // SCALED THRESHOLDS (file-size-proportional)
   // ============================================================
 
-  /// Minimum bytes for MOOV region detection (small files).
-  static const int moovRegionMinBytes = 512 * 1024; // 512KB
+  /// Minimum bytes for MOOV region detection.
+  static const int moovRegionMinBytes = 5 * 1024 * 1024; // 5MB
 
   /// Minimum bytes served to consider active playback (small files).
   static const int activePlaybackMinBytes = 1 * 1024 * 1024; // 1MB
