@@ -704,7 +704,7 @@ class LocalStreamingProxy {
     // OPTIMIZATION: Buffer non-critical updates and process with throttling
     _pendingFileUpdates[id] = info;
 
-    // Throttle: process at most every 50ms
+    // Throttle: process at most every 100ms
     final now = DateTime.now();
     if (_lastUpdateProcessedTime != null &&
         now.difference(_lastUpdateProcessedTime!).inMilliseconds <

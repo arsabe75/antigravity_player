@@ -66,7 +66,8 @@ class ProxyConfig {
   // ============================================================
 
   /// Throttle TDLib updateFile events processing (milliseconds).
-  static const int updateThrottleMs = 500;
+  /// Active waiters bypass this entirely; this only affects background updates.
+  static const int updateThrottleMs = 100;
 
   /// Debounce rapid seeks to prevent TDLib flooding (milliseconds).
   static const int seekDebounceMs = 500;

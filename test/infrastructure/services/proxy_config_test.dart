@@ -75,8 +75,8 @@ void main() {
     });
 
     group('throttling', () {
-      test('updateThrottleMs is 500', () {
-        expect(ProxyConfig.updateThrottleMs, equals(500));
+      test('updateThrottleMs is 100', () {
+        expect(ProxyConfig.updateThrottleMs, equals(100));
       });
 
       test('seekDebounceMs is 500', () {
