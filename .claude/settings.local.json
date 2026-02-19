@@ -5,7 +5,11 @@
       "Bash(flutter test:*)",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:core.telegram.org)",
-      "Bash(powershell -Command:*)"
+      "Bash(powershell -Command:*)",
+      "Bash(gh search code:*)",
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:fossies.org)",
+      "WebFetch(domain:raw.githubusercontent.com)"
     ]
   }
 }

@@ -24,11 +24,39 @@ class ProxyConfig {
   /// Prevents false stalls during MOOV-at-end video loading.
   static const Duration initializationGracePeriod = Duration(seconds: 30);
 
-  /// Timeout for normal data requests.
-  static const Duration normalDataTimeout = Duration(seconds: 5);
+  /// Initial timeout for normal data requests (grows with backoff on retries).
+  static const Duration normalDataTimeoutInitial = Duration(seconds: 8);
+
+  /// Maximum timeout for normal data requests after exponential backoff.
+  static const Duration normalDataTimeoutMax = Duration(seconds: 30);
+
+  /// Backoff multiplier for timeout growth per retry attempt.
+  static const double timeoutBackoffMultiplier = 1.5;
 
   /// Extended timeout for MOOV atom requests (near end of file).
-  static const Duration moovDataTimeout = Duration(seconds: 15);
+  static const Duration moovDataTimeout = Duration(seconds: 20);
+
+  // ============================================================
+  // ADAPTIVE RETRY
+  // ============================================================
+
+  /// Max retries for fast networks (>2MB/s): fail fast, likely a real problem.
+  static const int retryMinCount = 3;
+
+  /// Max retries for normal network speed.
+  static const int retryDefaultCount = 5;
+
+  /// Max retries for slow networks (<500KB/s): be patient.
+  static const int retryMaxCount = 10;
+
+  /// Base delay for exponential backoff between retries (ms).
+  static const int retryBackoffBaseMs = 1000;
+
+  /// Maximum delay between retries (ms).
+  static const int retryBackoffMaxMs = 15000;
+
+  /// Multiplier for exponential backoff between retries.
+  static const double retryBackoffMultiplier = 2.0;
 
   /// Interval for stall detection checks.
   static const Duration stallCheckInterval = Duration(seconds: 2);

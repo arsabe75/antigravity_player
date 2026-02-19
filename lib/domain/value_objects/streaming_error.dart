@@ -62,13 +62,15 @@ class StreamingError {
     );
   }
 
-  /// Create a max retries exceeded error
+  /// Create a max retries exceeded error.
+  /// Marked as recoverable so the proxy uses FileLoadState.error (not unsupported).
+  /// This allows the user to retry manually instead of permanently blocking the file.
   factory StreamingError.maxRetries(int fileId, int attempts) {
     return StreamingError(
       type: StreamingErrorType.maxRetriesExceeded,
       message: 'No se pudo cargar el video después de $attempts intentos',
       fileId: fileId,
-      isRecoverable: false,
+      isRecoverable: true,
       retryAttempts: attempts,
     );
   }

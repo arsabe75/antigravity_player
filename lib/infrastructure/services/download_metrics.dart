@@ -34,6 +34,11 @@ class DownloadMetrics {
   /// Is the network considered "fast"? (> 2 MB/s)
   bool get isFastNetwork => _averageBytesPerSecond > 2 * 1024 * 1024;
 
+  /// Is the network considered "slow"? (< 500 KB/s, but has recorded data)
+  /// Returns false if no data has been recorded yet (speed == 0).
+  bool get isSlowNetwork =>
+      _averageBytesPerSecond > 0 && _averageBytesPerSecond < 500 * 1024;
+
   /// Is download stalled? (< 50 KB/s for more than 2s)
   bool get isStalled {
     final elapsed = DateTime.now().difference(_lastUpdateTime).inMilliseconds;

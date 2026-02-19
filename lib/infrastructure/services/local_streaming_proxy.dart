@@ -1678,10 +1678,8 @@ class LocalStreamingProxy {
               final isMoovRequest =
                   distanceFromEnd > 0 && distanceFromEnd < moovWaitThreshold;
 
-              // Use 15 seconds for moov requests, 5 seconds for normal data
-              final timeout = isMoovRequest
-                  ? ProxyConfig.moovDataTimeout
-                  : ProxyConfig.normalDataTimeout;
+              // ADAPTIVE TIMEOUT: grows with retry count via exponential backoff
+              final timeout = _getAdaptiveTimeout(fileId, isMoovRequest);
 
               // EVENT-DRIVEN WAIT: Register a Completer and wait for _onUpdate to wake us
               final completer = Completer<void>();
@@ -1762,10 +1760,8 @@ class LocalStreamingProxy {
             final isMoovRequest =
                 distanceFromEnd > 0 && distanceFromEnd < moovWaitThreshold;
 
-            // Use 15 seconds for moov requests, 5 seconds for normal data
-            final timeout = isMoovRequest
-                ? ProxyConfig.moovDataTimeout
-                : ProxyConfig.normalDataTimeout;
+            // ADAPTIVE TIMEOUT: grows with retry count via exponential backoff
+            final timeout = _getAdaptiveTimeout(fileId, isMoovRequest);
 
             // EVENT-DRIVEN WAIT: Register a Completer and wait for _onUpdate to wake us
             final completer = Completer<void>();
@@ -2703,6 +2699,24 @@ class LocalStreamingProxy {
   final Set<int> _earlyMoovDetectionTriggered = {};
 
   // ============================================================
+  // ADAPTIVE TIMEOUT
+  // ============================================================
+
+  /// Calculates an adaptive timeout that grows with retry count.
+  /// MOOV requests always use the fixed moovDataTimeout.
+  /// Normal requests start at 8s and grow up to 30s via exponential backoff.
+  Duration _getAdaptiveTimeout(int fileId, bool isMoovRequest) {
+    if (isMoovRequest) return ProxyConfig.moovDataTimeout;
+    final attempts = _retryTracker.totalAttempts(fileId);
+    final baseMs = ProxyConfig.normalDataTimeoutInitial.inMilliseconds;
+    final maxMs = ProxyConfig.normalDataTimeoutMax.inMilliseconds;
+    final backoffMs = (baseMs * pow(ProxyConfig.timeoutBackoffMultiplier, attempts))
+        .round()
+        .clamp(baseMs, maxMs);
+    return Duration(milliseconds: backoffMs);
+  }
+
+  // ============================================================
   // PER-FILE STALL TIMER
   // ============================================================
 
@@ -2834,15 +2848,28 @@ class LocalStreamingProxy {
 
     _lastStallRecordedTime[fileId] = now;
 
+    // ADAPTIVE RETRY COUNT: Adjust max retries based on network speed.
+    // Fast networks get fewer retries (fail fast), slow networks get more (be patient).
+    final metrics = _downloadMetrics[fileId];
+    final adaptiveMaxRetries = metrics != null
+        ? (metrics.isFastNetwork
+            ? ProxyConfig.retryMinCount
+            : metrics.isSlowNetwork
+                ? ProxyConfig.retryMaxCount
+                : ProxyConfig.retryDefaultCount)
+        : ProxyConfig.retryDefaultCount;
+    _retryTracker.setMaxRetries(fileId, adaptiveMaxRetries);
+
     if (!_retryTracker.canRetry(fileId)) {
-      // Max retries exceeded - transition to error state
+      // Max retries exceeded - transition to recoverable error state
       final attempts = _retryTracker.totalAttempts(fileId);
       final error = StreamingError.maxRetries(fileId, attempts);
       final wasNotified = _notifyErrorIfNew(fileId, error);
       _cancelStallTimer(fileId);
       if (wasNotified) {
         _debugLog(
-          'Proxy: MAX RETRIES EXCEEDED for $fileId after $attempts attempts',
+          'Proxy: MAX RETRIES EXCEEDED for $fileId after $attempts attempts '
+          '(max: $adaptiveMaxRetries)',
         );
       }
       return;
@@ -2852,16 +2879,42 @@ class LocalStreamingProxy {
     _retryTracker.recordRetry(fileId);
     final remaining = _retryTracker.remainingRetries(fileId);
 
-    final metrics = _downloadMetrics[fileId];
     if (metrics != null) {
       metrics.recordStall();
       _debugLog(
         'Proxy: P2 STALL RECORDED for $fileId '
         '(stalls: ${metrics.recentStallCount}, retries remaining: $remaining, '
-        'frontier: ${newHighWater ~/ 1024}KB)',
+        'max: $adaptiveMaxRetries, frontier: ${newHighWater ~/ 1024}KB)',
       );
     }
-    _startDownloadAtOffset(fileId, waitingOffset);
+
+    // BACKOFF DELAY: Wait before retrying to avoid hammering TDLib.
+    // Uses exponential backoff: 1s, 2s, 4s, 8s... capped at 15s.
+    final backoff = _retryTracker.getBackoffDelay(
+      fileId,
+      baseMs: ProxyConfig.retryBackoffBaseMs,
+      maxMs: ProxyConfig.retryBackoffMaxMs,
+      multiplier: ProxyConfig.retryBackoffMultiplier,
+    );
+    if (backoff.inMilliseconds > 0) {
+      _debugLog(
+        'Proxy: Backoff ${backoff.inMilliseconds}ms before retry for $fileId',
+      );
+      Timer(backoff, () {
+        // Re-check state after backoff - file may have been aborted or recovered
+        final currentState = _fileStates[fileId];
+        if (currentState == null) return;
+        if (currentState.loadState == FileLoadState.error ||
+            currentState.loadState == FileLoadState.timeout ||
+            currentState.loadState == FileLoadState.unsupported) {
+          return;
+        }
+        if (_abortedRequests.contains(fileId)) return;
+        _startDownloadAtOffset(fileId, waitingOffset);
+      });
+    } else {
+      _startDownloadAtOffset(fileId, waitingOffset);
+    }
     _lastDownloadProgress[fileId] = currentPrefix;
   }
 

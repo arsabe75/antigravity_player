@@ -32,25 +32,38 @@ void main() {
         );
       });
 
-      test('normalDataTimeout is 5 seconds', () {
+      test('normalDataTimeoutInitial is 8 seconds', () {
         expect(
-          ProxyConfig.normalDataTimeout,
-          equals(const Duration(seconds: 5)),
+          ProxyConfig.normalDataTimeoutInitial,
+          equals(const Duration(seconds: 8)),
         );
       });
 
-      test('moovDataTimeout is 15 seconds', () {
+      test('normalDataTimeoutMax is 30 seconds', () {
         expect(
-          ProxyConfig.moovDataTimeout,
-          equals(const Duration(seconds: 15)),
+          ProxyConfig.normalDataTimeoutMax,
+          equals(const Duration(seconds: 30)),
         );
       });
 
-      test('moov timeout is longer than normal', () {
+      test('moovDataTimeout is 20 seconds', () {
         expect(
           ProxyConfig.moovDataTimeout,
-          greaterThan(ProxyConfig.normalDataTimeout),
+          equals(const Duration(seconds: 20)),
         );
+      });
+
+      test('moov timeout is longer than initial normal timeout', () {
+        expect(
+          ProxyConfig.moovDataTimeout,
+          greaterThan(ProxyConfig.normalDataTimeoutInitial),
+        );
+      });
+
+      test('adaptive retry constants are consistent', () {
+        expect(ProxyConfig.retryMinCount, lessThan(ProxyConfig.retryDefaultCount));
+        expect(ProxyConfig.retryDefaultCount, lessThan(ProxyConfig.retryMaxCount));
+        expect(ProxyConfig.retryBackoffBaseMs, lessThan(ProxyConfig.retryBackoffMaxMs));
       });
 
       test('stallCheckInterval is 2 seconds', () {

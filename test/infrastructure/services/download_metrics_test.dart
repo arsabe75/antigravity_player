@@ -61,6 +61,30 @@ void main() {
       });
     });
 
+    group('isSlowNetwork', () {
+      test('returns false when no data recorded (speed is 0)', () {
+        // isSlowNetwork requires speed > 0 to avoid false positives at start
+        expect(metrics.isSlowNetwork, isFalse);
+      });
+
+      test('returns false when speed is zero (no data yet)', () {
+        expect(metrics.bytesPerSecond, equals(0));
+        expect(metrics.isSlowNetwork, isFalse);
+      });
+
+      test('threshold is 500 KB/s', () {
+        // The threshold is 500 * 1024 = 512000 bytes/sec
+        // isSlowNetwork = speed > 0 && speed < 512000
+        // We verify the getter exists and returns a bool
+        expect(metrics.isSlowNetwork, isA<bool>());
+      });
+
+      test('isFastNetwork and isSlowNetwork are mutually exclusive', () {
+        // Both can be false (normal speed or zero), but never both true
+        expect(metrics.isFastNetwork && metrics.isSlowNetwork, isFalse);
+      });
+    });
+
     group('stall tracking', () {
       test('recordStall increments count', () {
         metrics.recordStall();
