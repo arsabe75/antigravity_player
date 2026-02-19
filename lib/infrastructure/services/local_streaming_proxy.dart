@@ -1410,30 +1410,9 @@ class LocalStreamingProxy {
       try {
         // FILE LOCKING FIX (Windows): TDLib may have the file locked while writing.
         // Retry with exponential backoff to handle temporary file access issues.
-        const maxRetries = ProxyConfig.fileOpenMaxRetries;
-        FileSystemException? lastError;
-        for (var attempt = 0; attempt < maxRetries; attempt++) {
-          try {
-            raf = await file.open(mode: FileMode.read);
-            break; // Success
-          } on FileSystemException catch (e) {
-            lastError = e;
-            if (attempt < maxRetries - 1) {
-              final delayMs =
-                  ProxyConfig.fileOpenRetryBaseMs *
-                  (1 << attempt); // exponential backoff
-              _debugLog(
-                'Proxy: File locked, retrying in ${delayMs}ms (attempt ${attempt + 1}/$maxRetries): ${e.message}',
-              );
-              await Future.delayed(Duration(milliseconds: delayMs));
-            }
-          }
-        }
-
-        // If still null after retries, throw the last error
+        raf = await _openFileWithRetry(file, fileId);
         if (raf == null) {
-          _debugLog('Proxy: Failed to open file after $maxRetries attempts');
-          throw lastError ?? FileSystemException('Failed to open file');
+          throw FileSystemException('Failed to open file after retries');
         }
 
         int currentReadOffset = start;
@@ -2699,6 +2678,44 @@ class LocalStreamingProxy {
   final Set<int> _earlyMoovDetectionTriggered = {};
 
   // ============================================================
+  // FILE OPEN WITH RETRY (Windows file locking protection)
+  // ============================================================
+
+  /// Opens a file for reading with exponential backoff retry.
+  /// TDLib may hold a write lock on the file while downloading on Windows,
+  /// causing sporadic FileSystemException. This helper retries with backoff
+  /// (50ms, 100ms, 200ms, 400ms, 800ms) before giving up.
+  /// Returns null if the file cannot be opened after all attempts.
+  Future<RandomAccessFile?> _openFileWithRetry(File file, [int? fileId]) async {
+    const maxRetries = ProxyConfig.fileOpenMaxRetries;
+    FileSystemException? lastError;
+
+    for (var attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        return await file.open(mode: FileMode.read);
+      } on FileSystemException catch (e) {
+        lastError = e;
+        if (attempt < maxRetries - 1) {
+          final delayMs =
+              ProxyConfig.fileOpenRetryBaseMs * (1 << attempt);
+          _debugLog(
+            'Proxy: File locked${fileId != null ? ' ($fileId)' : ''}, '
+            'retrying in ${delayMs}ms '
+            '(attempt ${attempt + 1}/$maxRetries): ${e.message}',
+          );
+          await Future.delayed(Duration(milliseconds: delayMs));
+        }
+      }
+    }
+
+    _debugLog(
+      'Proxy: Failed to open file${fileId != null ? ' ($fileId)' : ''} '
+      'after $maxRetries attempts: ${lastError?.message}',
+    );
+    return null;
+  }
+
+  // ============================================================
   // ADAPTIVE TIMEOUT
   // ============================================================
 
@@ -2986,7 +3003,8 @@ class LocalStreamingProxy {
         return MoovPosition.unknown;
       }
 
-      final raf = await file.open(mode: FileMode.read);
+      final raf = await _openFileWithRetry(file, fileId);
+      if (raf == null) return MoovPosition.unknown;
       try {
         // MP4 files start with ftyp or moov atom
         // Read first 32 bytes to check atom header
@@ -3213,7 +3231,11 @@ class LocalStreamingProxy {
         return;
       }
 
-      final raf = await file.open(mode: FileMode.read);
+      final raf = await _openFileWithRetry(file, fileId);
+      if (raf == null) {
+        _sampleTableCache[fileId] = null;
+        return;
+      }
       try {
         _sampleTableCache[fileId] = await Mp4SampleTable.parse(
           raf,
