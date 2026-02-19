@@ -32,10 +32,10 @@ void main() {
         );
       });
 
-      test('normalDataTimeoutInitial is 8 seconds', () {
+      test('normalDataTimeoutInitial is 5 seconds', () {
         expect(
           ProxyConfig.normalDataTimeoutInitial,
-          equals(const Duration(seconds: 8)),
+          equals(const Duration(seconds: 5)),
         );
       });
 

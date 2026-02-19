@@ -514,6 +514,15 @@ class LocalStreamingProxy {
     _log('===== ABORTING REQUEST for fileId $fileId =====');
     _abortedRequests.add(fileId);
 
+    // Cancel TDLib download to free bandwidth for the next video.
+    // Without this, TDLib continues downloading the aborted file in background,
+    // competing for bandwidth with the new file's download.
+    TelegramService().send({
+      '@type': 'cancelDownloadFile',
+      'file_id': fileId,
+      'only_if_pending': false,
+    });
+
     // Clean up retry and error tracking
     _retryTracker.reset(fileId);
 
@@ -2226,7 +2235,6 @@ class LocalStreamingProxy {
 
     // Check if current download will soon provide the data we need
     // Scaled: 70MB→3.5MB, 500MB+→5MB
-    // CRITICAL: Only wait if download is ACTUALLY ACTIVE, otherwise we'd wait forever!
     final downloadFrontier = currentDownloadOffset + currentPrefix;
     final distanceFromFrontier = requestedOffset - downloadFrontier;
     final isDownloading = cached?.isDownloadingActive ?? false;
@@ -2236,9 +2244,20 @@ class LocalStreamingProxy {
       ProxyConfig.frontierProximityMinBytes,
       ProxyConfig.frontierProximityMaxBytes,
     );
-    if (isDownloading &&
-        distanceFromFrontier >= 0 &&
-        distanceFromFrontier < frontierProximity) {
+
+    // CRITICAL: Don't cancel a download that's at or near the frontier.
+    // TDLib may briefly report isDownloadingActive=false between chunks,
+    // causing a spurious downloadFile that cancels the ongoing sequential
+    // download. Use a time-based guard: if download started recently (<10s),
+    // trust that TDLib is still producing data even if isDownloadingActive
+    // is momentarily false.
+    final recentDownload = _getOrCreateState(fileId).isRecentDownload(
+      const Duration(seconds: 10),
+    );
+    final atFrontier = distanceFromFrontier >= 0 &&
+        distanceFromFrontier < frontierProximity;
+
+    if (atFrontier && (isDownloading || recentDownload)) {
       // Current download will reach our offset soon, don't restart
       return;
     }
@@ -2985,6 +3004,9 @@ class LocalStreamingProxy {
   /// Pre-detects the position of the MOOV atom by analyzing the first bytes of the file.
   /// Returns immediately if already cached.
   /// This detection does NOT start downloads - only analyzes already available data.
+  /// Atoms that are known non-media containers; we walk past them looking for moov.
+  static const _skipAtomTypes = {'ftyp', 'free', 'skip', 'wide', 'pdin', 'uuid'};
+
   Future<MoovPosition> _detectMoovPosition(int fileId, int totalSize) async {
     // Check cache first
     final cachedPosition = _getOrCreateState(fileId).moovPosition;
@@ -3006,54 +3028,57 @@ class LocalStreamingProxy {
       final raf = await _openFileWithRetry(file, fileId);
       if (raf == null) return MoovPosition.unknown;
       try {
-        // MP4 files start with ftyp or moov atom
-        // Read first 32 bytes to check atom header
-        final header = await raf.read(32);
-        if (header.length < 8) {
-          return MoovPosition.unknown;
-        }
+        // Read first 4KB — enough to walk past ftyp + free/skip/wide atoms
+        const headerSize = 4096;
+        final availableBytes = cached.downloadedPrefixSize.clamp(0, totalSize);
+        final readSize = availableBytes < headerSize ? availableBytes : headerSize;
+        if (readSize < 8) return MoovPosition.unknown;
 
-        // Check for 'ftyp' or 'moov' in first atom
-        final atomType = String.fromCharCodes(header.sublist(4, 8));
+        final header = await raf.read(readSize);
+        if (header.length < 8) return MoovPosition.unknown;
 
-        if (atomType == 'moov') {
-          _getOrCreateState(fileId).moovPosition = MoovPosition.start;
-          _debugLog('Proxy: MOOV PRE-DETECT - File $fileId has MOOV at START');
-          return MoovPosition.start;
-        }
+        // Walk top-level atoms within the buffer
+        var offset = 0;
+        while (offset + 8 <= header.length) {
+          final atomSize = _readMoovUint32BE(header, offset);
+          final atomType = String.fromCharCodes(header.sublist(offset + 4, offset + 8));
 
-        // If ftyp, check next atom (usually within first 100 bytes)
-        if (atomType == 'ftyp') {
-          // Parse ftyp size to find next atom
-          final ftypSize = _readMoovUint32BE(header, 0);
-          if (ftypSize > 0 &&
-              ftypSize < 1000 &&
-              cached.downloadedPrefixSize > ftypSize + 8) {
-            await raf.setPosition(ftypSize);
-            final nextHeader = await raf.read(8);
-            if (nextHeader.length >= 8) {
-              final nextAtomType = String.fromCharCodes(
-                nextHeader.sublist(4, 8),
-              );
-              if (nextAtomType == 'moov') {
-                _getOrCreateState(fileId).moovPosition = MoovPosition.start;
-                _debugLog(
-                  'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at START (after ftyp)',
-                );
-                return MoovPosition.start;
-              }
-            }
+          // moov found near start → streaming-optimized
+          if (atomType == 'moov') {
+            _getOrCreateState(fileId).moovPosition = MoovPosition.start;
+            _debugLog(
+              'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at START (offset $offset)',
+            );
+            return MoovPosition.start;
           }
+
+          // mdat before moov → moov is at end
+          if (atomType == 'mdat') {
+            _getOrCreateState(fileId).moovPosition = MoovPosition.end;
+            _getOrCreateState(fileId).isMoovAtEnd = true;
+            _debugLog(
+              'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at END (mdat found at offset $offset)',
+            );
+            return MoovPosition.end;
+          }
+
+          // Skip known non-media atoms and keep walking
+          if (_skipAtomTypes.contains(atomType)) {
+            if (atomSize < 8) break; // Malformed atom, stop
+            offset += atomSize;
+            continue;
+          }
+
+          // Unknown atom type — stop walking to avoid misinterpreting data
+          break;
         }
 
-        // If we have enough prefix but no moov found near start, assume end
-        // GUARD: Only infer if not already detected to prevent race condition
+        // Fallback: if we have enough downloaded data but no moov near start, infer end
         if (cached.downloadedPrefixSize >
                 ProxyConfig.moovAtEndInferenceThreshold &&
             _getOrCreateState(fileId).moovPosition == null) {
           _getOrCreateState(fileId).moovPosition = MoovPosition.end;
-          _getOrCreateState(fileId).isMoovAtEnd =
-              true; // Sync with existing flag
+          _getOrCreateState(fileId).isMoovAtEnd = true;
           _debugLog(
             'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at END (inferred)',
           );

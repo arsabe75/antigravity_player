@@ -25,7 +25,7 @@ class ProxyConfig {
   static const Duration initializationGracePeriod = Duration(seconds: 30);
 
   /// Initial timeout for normal data requests (grows with backoff on retries).
-  static const Duration normalDataTimeoutInitial = Duration(seconds: 8);
+  static const Duration normalDataTimeoutInitial = Duration(seconds: 5);
 
   /// Maximum timeout for normal data requests after exponential backoff.
   static const Duration normalDataTimeoutMax = Duration(seconds: 30);
