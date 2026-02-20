@@ -2020,7 +2020,13 @@ class LocalStreamingProxy {
             const Duration(milliseconds: ProxyConfig.moovDetectScheduleDelayMs),
             () {
               if (!_abortedRequests.contains(fileId)) {
-                _detectMoovPosition(fileId, totalSize);
+                _detectMoovPosition(fileId, totalSize).then((position) {
+                  // P1: Descarga proactiva si se detecta MOOV al final
+                  if (position == MoovPosition.end &&
+                      !_abortedRequests.contains(fileId)) {
+                    _startProactiveMoovDownload(fileId, totalSize);
+                  }
+                });
               }
             },
           );
@@ -2999,6 +3005,44 @@ class LocalStreamingProxy {
     _lastDownloadProgress[fileId] = currentPrefix;
   }
 
+  /// P1: Inicia descarga proactiva del MOOV atom desde el final del archivo.
+  /// Se activa tan pronto como se detecta MOOV-at-end, sin esperar a que el
+  /// player lo descubra. Usa forcedMoovOffset para bloquear otras descargas
+  /// hasta que MOOV termine. Los bytes ya descargados desde offset 0 se
+  /// preservan vía DownloadedRanges (P2).
+  void _startProactiveMoovDownload(int fileId, int totalSize) {
+    // Evitar descarga duplicada (forcedMoovOffset activo o ya completada)
+    final state = _getOrCreateState(fileId);
+    if (state.forcedMoovOffset != null) return;
+    if (state.loadState == FileLoadState.moovReady ||
+        state.loadState == FileLoadState.playing) {
+      return;
+    }
+    if (totalSize <= 0) return;
+    if (_abortedRequests.contains(fileId)) return;
+
+    // Calcular offset estimado del MOOV usando constantes existentes
+    final moovPreloadBytes = ProxyConfig.scaled(
+      totalSize,
+      ProxyConfig.moovPreloadThresholdPercent,
+      ProxyConfig.moovPreloadMinBytes,
+      ProxyConfig.moovPreloadMaxBytes,
+    );
+    final moovOffset = totalSize - moovPreloadBytes;
+
+    // Activar lock: bloquea otras descargas hasta que MOOV termine
+    _getOrCreateState(fileId).forcedMoovOffset = moovOffset;
+    _getOrCreateState(fileId).loadState = FileLoadState.loadingMoov;
+
+    _debugLog(
+      'Proxy: P1 PROACTIVE MOOV - Starting download at offset $moovOffset '
+      '(last ${moovPreloadBytes ~/ 1024}KB) for file $fileId',
+    );
+
+    // Iniciar descarga - cancela la descarga secuencial desde 0
+    _startDownloadAtOffset(fileId, moovOffset);
+  }
+
   /// Triggers early MOOV detection when sufficient bytes arrive.
   /// This is called from _onUpdate to detect moov position as early as possible.
   /// - For moov-at-start: Detection happens as soon as 1KB is downloaded
@@ -3026,6 +3070,8 @@ class LocalStreamingProxy {
           // Video not optimized - update state for UI
           _getOrCreateState(fileId).isMoovAtEnd = true;
           _debugLog('Proxy: EARLY DETECT - File $fileId has MOOV at END');
+          // P1: Descarga proactiva del MOOV atom
+          _startProactiveMoovDownload(fileId, info.totalSize);
         }
         // MoovPosition.unknown means we need more data
       });
@@ -3043,6 +3089,8 @@ class LocalStreamingProxy {
       _debugLog(
         'Proxy: EARLY DETECT - File $fileId inferred MOOV at END (${prefix ~/ (1024 * 1024)}MB downloaded)',
       );
+      // P1: Descarga proactiva por inferencia
+      _startProactiveMoovDownload(fileId, info.totalSize);
     }
   }
 
