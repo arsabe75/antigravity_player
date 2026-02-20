@@ -12,6 +12,7 @@ import 'proxy_file_state.dart';
 import 'proxy_config.dart';
 import 'download_metrics.dart';
 import 'streaming_lru_cache.dart';
+import 'downloaded_ranges.dart';
 import '../../domain/value_objects/loading_progress.dart';
 import '../../domain/value_objects/streaming_error.dart';
 
@@ -22,6 +23,9 @@ class ProxyFileInfo {
   final int downloadedPrefixSize;
   final bool isDownloadingActive;
   final bool isCompleted;
+
+  /// Rangos descargados multi-rango (compartida, no copiada por ProxyFileInfo).
+  DownloadedRanges? ranges;
 
   ProxyFileInfo({
     required this.path,
@@ -39,10 +43,16 @@ class ProxyFileInfo {
       return totalSize > offset ? totalSize - offset : 0;
     }
 
+    // 1. Consultar rangos multi-rango si disponibles
+    if (ranges != null) {
+      final available = ranges!.availableBytesFrom(offset);
+      if (available > 0) return available;
+    }
+
+    // 2. Fallback: rango único TDLib (compatibilidad)
     final begin = downloadOffset;
     final end = downloadOffset + downloadedPrefixSize;
 
-    // Check if offset is within the downloaded range
     if (offset >= begin && offset < end) {
       return end - offset;
     }
@@ -247,6 +257,10 @@ class LocalStreamingProxy {
 
   // Cache of file_id -> ProxyFileInfo
   final Map<int, ProxyFileInfo> _filePaths = {};
+
+  /// Rangos descargados conocidos por archivo (sliding window multi-rango).
+  /// Se actualiza con cada updateFile de TDLib y persiste entre cambios de offset.
+  final Map<int, DownloadedRanges> _downloadedRanges = {};
 
   // Consolidated per-file state for better maintainability
   final Map<int, ProxyFileState> _fileStates = {};
@@ -563,6 +577,7 @@ class LocalStreamingProxy {
 
     // Remove all per-file state to prevent memory growth
     _filePaths.remove(fileId);
+    _downloadedRanges.remove(fileId);
     _fileStates.remove(fileId);
     _downloadMetrics.remove(fileId);
     _activeHttpRequestOffsets.remove(fileId);
@@ -582,6 +597,7 @@ class LocalStreamingProxy {
   void invalidateAllFiles() {
     _log('Invalidating all cached file info');
     _filePaths.clear();
+    _downloadedRanges.clear();
     _activeHttpRequestOffsets.clear();
     _activeConnectionCount.clear();
 
@@ -620,6 +636,7 @@ class LocalStreamingProxy {
   void invalidateFile(int fileId) {
     _log('Invalidating cached info for file $fileId');
     _filePaths.remove(fileId);
+    _downloadedRanges.remove(fileId);
     _activeHttpRequestOffsets.remove(fileId);
 
     // Clear LRU streaming cache for this file
@@ -774,6 +791,23 @@ class LocalStreamingProxy {
 
     _filePaths[id] = info;
 
+    // Actualizar rangos descargados multi-rango (sliding window)
+    final ranges = _downloadedRanges.putIfAbsent(id, () => DownloadedRanges());
+    if (info.isCompleted) {
+      ranges.markComplete(info.totalSize);
+    } else if (info.downloadedPrefixSize > 0) {
+      ranges.addRange(
+        info.downloadOffset,
+        info.downloadOffset + info.downloadedPrefixSize,
+      );
+    } else if (info.downloadedPrefixSize == 0 &&
+        info.downloadOffset == 0 &&
+        !info.isCompleted) {
+      // TDLib reinició la descarga, limpiar rangos previos
+      ranges.clear();
+    }
+    info.ranges = ranges;
+
     // Notify anyone waiting for updates on this file
     _fileUpdateNotifiers[id]?.add(null);
 
@@ -841,6 +875,7 @@ class LocalStreamingProxy {
     _fileUpdateNotifiers.clear();
     _activeDownloadRequests.clear();
     _filePaths.clear();
+    _downloadedRanges.clear();
     _abortedRequests.clear();
   }
 
@@ -851,13 +886,20 @@ class LocalStreamingProxy {
   // Helper to get available bytes from the given offset
   // Uses local cache first (like Unigram), then queries TDLib if needed
   Future<int> _getDownloadedPrefixSize(int fileId, int offset) async {
-    // 1. Check local cache first (Unigram pattern)
+    // 1. Check local cache first (Unigram pattern, ahora con multi-rango)
     final cached = _filePaths[fileId];
     if (cached != null && cached.path.isNotEmpty) {
       final available = cached.availableBytesFrom(offset);
       if (available > 0) {
         return available;
       }
+    }
+
+    // 1b. Verificar rangos directamente (si ProxyFileInfo no tiene referencia)
+    final ranges = _downloadedRanges[fileId];
+    if (ranges != null) {
+      final available = ranges.availableBytesFrom(offset);
+      if (available > 0) return available;
     }
 
     // 2. If no cached data available, query TDLib
@@ -1045,6 +1087,7 @@ class LocalStreamingProxy {
         // clear it to get fresh state
         if (cached.isDownloadingActive) {
           _filePaths.remove(fileId);
+          _downloadedRanges.remove(fileId);
         }
       }
 
@@ -1334,6 +1377,7 @@ class LocalStreamingProxy {
 
         // Clear stale cache entry
         _filePaths.remove(fileId);
+        _downloadedRanges.remove(fileId);
 
         // CRITICAL FIX: Explicitly tell TDLib to delete the file logic.
         // Even if the file is gone from disk, TDLib might still have the path in its database.
@@ -1931,6 +1975,7 @@ class LocalStreamingProxy {
 
           // Clear our cache
           _filePaths.remove(fileId);
+          _downloadedRanges.remove(fileId);
 
           // Wait a bit for TDLib to process
           await Future.delayed(

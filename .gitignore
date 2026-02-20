@@ -59,6 +59,7 @@ linux/tdlib_libs/
 *.exe
 
 analyze_output*.txt
+flutter_log.txt
 
 # scripts
 scripts/encode_credentials.dart 
