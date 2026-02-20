@@ -332,6 +332,12 @@ class LocalStreamingProxy {
   // TDLib with downloadFile calls.
   final Map<int, Timer> _perFileStallTimers = {};
 
+  // PREFETCH BUFFER: Proactive downloading ahead of playback position.
+  // Detects when TDLib goes idle and fills gaps ahead of playback.
+  final Map<int, Timer?> _prefetchDebounceTimers = {};
+  final Map<int, Timer?> _prefetchPeriodicTimers = {};
+  final Map<int, bool> _wasDownloadingActive = {};
+
   // LOG THROTTLING: Prevent excessive debug logs from consuming CPU
   // Maps fileId -> last time "Waiting for data" was logged
   final Map<int, DateTime> _lastWaitingLogTime = {};
@@ -566,6 +572,10 @@ class LocalStreamingProxy {
     // Cancel per-file stall timer
     _cancelStallTimer(fileId);
 
+    // Cancel prefetch timers
+    _cancelPrefetchTimer(fileId);
+    _wasDownloadingActive.remove(fileId);
+
     // Cancel seek debounce timer
     _seekDebounceTimers[fileId]?.cancel();
     _seekDebounceTimers.remove(fileId);
@@ -622,6 +632,17 @@ class LocalStreamingProxy {
       timer.cancel();
     }
     _perFileStallTimers.clear();
+
+    // Cancel all prefetch timers
+    for (final timer in _prefetchPeriodicTimers.values) {
+      timer?.cancel();
+    }
+    _prefetchPeriodicTimers.clear();
+    for (final timer in _prefetchDebounceTimers.values) {
+      timer?.cancel();
+    }
+    _prefetchDebounceTimers.clear();
+    _wasDownloadingActive.clear();
 
     // Clear retry tracking and error state
     _retryTracker.resetAll();
@@ -831,6 +852,15 @@ class LocalStreamingProxy {
         _byteAvailabilityWaiters.remove(id);
       }
     }
+
+    // PREFETCH: Detectar transición idle de TDLib y programar prefetch
+    final wasActive = _wasDownloadingActive[id] ?? false;
+    final isNowActive = info.isDownloadingActive;
+    _wasDownloadingActive[id] = isNowActive;
+
+    if (wasActive && !isNowActive && !info.isCompleted) {
+      _schedulePrefetchEval(id);
+    }
   }
 
   /// Schedule cache limit enforcement with debounce.
@@ -877,6 +907,17 @@ class LocalStreamingProxy {
     _filePaths.clear();
     _downloadedRanges.clear();
     _abortedRequests.clear();
+
+    // Cancel all prefetch timers
+    for (final timer in _prefetchPeriodicTimers.values) {
+      timer?.cancel();
+    }
+    _prefetchPeriodicTimers.clear();
+    for (final timer in _prefetchDebounceTimers.values) {
+      timer?.cancel();
+    }
+    _prefetchDebounceTimers.clear();
+    _wasDownloadingActive.clear();
   }
 
   String getUrl(int fileId, int size) {
@@ -1808,6 +1849,7 @@ class LocalStreamingProxy {
             // creating N timers that all restart downloads simultaneously.
             _getOrCreateState(fileId).waitingForOffset = currentReadOffset;
             _ensureStallTimer(fileId);
+            _ensurePrefetchTimer(fileId);
 
             try {
               // Wait for data to become available (or timeout)
@@ -3246,6 +3288,134 @@ class LocalStreamingProxy {
       'limit': postSeekPreload,
       'synchronous': false,
     });
+  }
+
+  // ============================================================
+  // PREFETCH BUFFER AHEAD OF PLAYBACK
+  // ============================================================
+
+  /// Evaluates whether prefetch downloading should be triggered for [fileId].
+  ///
+  /// Called when TDLib transitions to idle for this file, or periodically.
+  /// Only acts if the file is in active playback, TDLib is idle, and
+  /// the buffer ahead of playback is below the adaptive threshold.
+  void _evaluatePrefetch(int fileId) {
+    final state = _getOrCreateState(fileId);
+    final cached = _filePaths[fileId];
+    if (cached == null || cached.isCompleted) return;
+
+    // Solo prefetch durante reproducción activa
+    if (state.loadState != FileLoadState.playing &&
+        state.loadState != FileLoadState.moovReady) {
+      return;
+    }
+
+    // No prefetch si TDLib está descargando activamente
+    if (cached.isDownloadingActive) return;
+
+    // No prefetch durante descarga forzada de MOOV
+    if (state.forcedMoovOffset != null) return;
+
+    // Necesitamos posición de reproducción
+    final playbackOffset = state.primaryPlaybackOffset;
+    if (playbackOffset == null) return;
+
+    final totalSize = cached.totalSize;
+    if (totalSize <= 0) return;
+
+    // No prefetch cerca del final del archivo
+    if (playbackOffset >= totalSize - ProxyConfig.prefetchMinBytes) return;
+
+    // Calcular target adaptativo basado en velocidad de red
+    final bufferTarget = _calculatePrefetchTarget(fileId);
+
+    // Verificar cuánto buffer hay adelante
+    final ranges = _downloadedRanges[fileId];
+    if (ranges == null) return;
+
+    final availableAhead = ranges.availableBytesFrom(playbackOffset);
+
+    // Si hay suficiente buffer, no hacer nada
+    final triggerThreshold =
+        (bufferTarget * ProxyConfig.prefetchTriggerRatio).round();
+    if (availableAhead >= triggerThreshold) {
+      state.prefetchActive = false;
+      return;
+    }
+
+    // Buscar gaps en la ventana de buffer target
+    final lookAheadEnd = min(playbackOffset + bufferTarget, totalSize);
+    final gaps = ranges.gaps(playbackOffset, lookAheadEnd);
+    if (gaps.isEmpty) {
+      state.prefetchActive = false;
+      return;
+    }
+
+    // Buscar primer gap que valga la pena llenar
+    for (final gap in gaps) {
+      final gapSize = gap.end - gap.start;
+      if (gapSize < ProxyConfig.prefetchMinGapBytes) continue;
+
+      _debugLog(
+        'Proxy: PREFETCH file $fileId: gap ${gap.start ~/ 1024}KB-${gap.end ~/ 1024}KB '
+        '(buffer: ${availableAhead ~/ 1024}KB/${bufferTarget ~/ 1024}KB, '
+        'playback: ${playbackOffset ~/ 1024}KB)',
+      );
+
+      state.prefetchActive = true;
+      state.lastPrefetchEvalTime = DateTime.now();
+      _startDownloadAtOffset(fileId, gap.start);
+      return;
+    }
+  }
+
+  /// Calcula target de prefetch adaptativo basado en velocidad de red.
+  int _calculatePrefetchTarget(int fileId) {
+    final metrics = _downloadMetrics[fileId];
+    final speed = metrics?.bytesPerSecond ?? 0;
+
+    if (speed <= 0) return ProxyConfig.prefetchDefaultBytes;
+
+    final targetSeconds = (metrics!.isFastNetwork)
+        ? ProxyConfig.prefetchSecondsFast
+        : (metrics.isSlowNetwork)
+            ? ProxyConfig.prefetchSecondsSlow
+            : ProxyConfig.prefetchSecondsNormal;
+
+    final speedBasedTarget = (speed * targetSeconds).round();
+    return speedBasedTarget.clamp(
+      ProxyConfig.prefetchMinBytes,
+      ProxyConfig.prefetchMaxBytes,
+    );
+  }
+
+  /// Programa evaluación de prefetch con debounce tras idle de TDLib.
+  void _schedulePrefetchEval(int fileId) {
+    _prefetchDebounceTimers[fileId]?.cancel();
+    _prefetchDebounceTimers[fileId] = Timer(
+      const Duration(milliseconds: ProxyConfig.prefetchDebounceMs),
+      () {
+        _prefetchDebounceTimers.remove(fileId);
+        _evaluatePrefetch(fileId);
+      },
+    );
+  }
+
+  /// Asegura que existe un timer periódico de prefetch para [fileId].
+  void _ensurePrefetchTimer(int fileId) {
+    if (_prefetchPeriodicTimers.containsKey(fileId)) return;
+    _prefetchPeriodicTimers[fileId] = Timer.periodic(
+      const Duration(milliseconds: ProxyConfig.prefetchPeriodicCheckMs),
+      (_) => _evaluatePrefetch(fileId),
+    );
+  }
+
+  /// Cancela timers de prefetch para [fileId].
+  void _cancelPrefetchTimer(int fileId) {
+    _prefetchPeriodicTimers[fileId]?.cancel();
+    _prefetchPeriodicTimers.remove(fileId);
+    _prefetchDebounceTimers[fileId]?.cancel();
+    _prefetchDebounceTimers.remove(fileId);
   }
 
   // ============================================================

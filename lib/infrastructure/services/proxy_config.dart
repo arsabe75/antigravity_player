@@ -188,6 +188,40 @@ class ProxyConfig {
   static const int cacheEdgeProximityMaxBytes = 5 * 1024 * 1024; // 5MB
 
   // ============================================================
+  // PREFETCH BUFFER
+  // ============================================================
+
+  /// Minimum prefetch buffer target (bytes).
+  static const int prefetchMinBytes = 2 * 1024 * 1024; // 2MB
+
+  /// Maximum prefetch buffer target (bytes).
+  static const int prefetchMaxBytes = 50 * 1024 * 1024; // 50MB
+
+  /// Default prefetch buffer when no speed data available (bytes).
+  static const int prefetchDefaultBytes = 5 * 1024 * 1024; // 5MB
+
+  /// Seconds of video to buffer ahead on fast networks (>2MB/s).
+  static const double prefetchSecondsFast = 5.0;
+
+  /// Seconds of video to buffer ahead on normal networks.
+  static const double prefetchSecondsNormal = 10.0;
+
+  /// Seconds of video to buffer ahead on slow networks (<500KB/s).
+  static const double prefetchSecondsSlow = 15.0;
+
+  /// Prefetch triggers when buffer ahead < this fraction of target.
+  static const double prefetchTriggerRatio = 0.5;
+
+  /// Debounce after TDLib goes idle before evaluating prefetch (ms).
+  static const int prefetchDebounceMs = 500;
+
+  /// Periodic fallback timer for prefetch evaluation (ms).
+  static const int prefetchPeriodicCheckMs = 3000;
+
+  /// Minimum gap size worth prefetching (skip tiny gaps).
+  static const int prefetchMinGapBytes = 256 * 1024; // 256KB
+
+  // ============================================================
   // SEEK & PLAYBACK TRACKING (scaled for small files)
   // ============================================================
 

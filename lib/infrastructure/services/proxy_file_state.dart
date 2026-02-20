@@ -113,6 +113,17 @@ class ProxyFileState {
   int? waitingForOffset;
 
   // ============================================================
+  // PREFETCH BUFFER
+  // ============================================================
+
+  /// Whether a prefetch download is currently in progress
+  /// (as opposed to a player-demanded download).
+  bool prefetchActive = false;
+
+  /// Last time prefetch was evaluated (for debounce).
+  DateTime? lastPrefetchEvalTime;
+
+  // ============================================================
   // CONSTRUCTOR AND METHODS
   // ============================================================
 
@@ -154,6 +165,10 @@ class ProxyFileState {
     hasStalePlaybackPosition = false;
     userSeekInProgress = false;
     waitingForOffset = null;
+
+    // Prefetch
+    prefetchActive = false;
+    lastPrefetchEvalTime = null;
   }
 
   /// Reset only the active download state.
@@ -173,6 +188,10 @@ class ProxyFileState {
     // but keep isMoovAtEnd flag if we already knew it to avoid re-work?
     // Safer to reset if the file was fully deleted.
     // earlyMoovDetectionTriggered = false; // Keep this true to avoid spamming?
+
+    // Prefetch
+    prefetchActive = false;
+    lastPrefetchEvalTime = null;
   }
 
   /// Check if this file is within the initialization grace period.

@@ -115,6 +115,48 @@ void main() {
       });
     });
 
+    group('prefetch buffer', () {
+      test('prefetchMinBytes is 2MB', () {
+        expect(ProxyConfig.prefetchMinBytes, equals(2 * 1024 * 1024));
+      });
+
+      test('prefetchMaxBytes is 50MB', () {
+        expect(ProxyConfig.prefetchMaxBytes, equals(50 * 1024 * 1024));
+      });
+
+      test('prefetchDefaultBytes is 5MB', () {
+        expect(ProxyConfig.prefetchDefaultBytes, equals(5 * 1024 * 1024));
+      });
+
+      test('prefetch seconds: slow > normal > fast', () {
+        expect(
+          ProxyConfig.prefetchSecondsSlow,
+          greaterThan(ProxyConfig.prefetchSecondsNormal),
+        );
+        expect(
+          ProxyConfig.prefetchSecondsNormal,
+          greaterThan(ProxyConfig.prefetchSecondsFast),
+        );
+      });
+
+      test('prefetchTriggerRatio is between 0 and 1', () {
+        expect(ProxyConfig.prefetchTriggerRatio, greaterThan(0));
+        expect(ProxyConfig.prefetchTriggerRatio, lessThanOrEqualTo(1.0));
+      });
+
+      test('prefetchDebounceMs is 500', () {
+        expect(ProxyConfig.prefetchDebounceMs, equals(500));
+      });
+
+      test('prefetchPeriodicCheckMs is 3000', () {
+        expect(ProxyConfig.prefetchPeriodicCheckMs, equals(3000));
+      });
+
+      test('prefetchMinGapBytes is 256KB', () {
+        expect(ProxyConfig.prefetchMinGapBytes, equals(256 * 1024));
+      });
+    });
+
     group('MOOV detection', () {
       test('moovDetectionMinPrefix is 1KB', () {
         expect(ProxyConfig.moovDetectionMinPrefix, equals(1024));
