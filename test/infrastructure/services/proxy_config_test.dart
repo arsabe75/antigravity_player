@@ -113,6 +113,13 @@ void main() {
       test('diskCheckCacheMs is 5 seconds', () {
         expect(ProxyConfig.diskCheckCacheMs, equals(5000));
       });
+
+      test('globalCacheBudgetBytes is 128MB', () {
+        expect(
+          ProxyConfig.globalCacheBudgetBytes,
+          equals(128 * 1024 * 1024),
+        );
+      });
     });
 
     group('prefetch buffer', () {

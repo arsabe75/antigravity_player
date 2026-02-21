@@ -295,6 +295,9 @@ class LocalStreamingProxy {
 
   // IN-MEMORY LRU CACHE: Cache recently read data for instant backward seeks
   final Map<int, StreamingLRUCache> _streamingCaches = {};
+  // GLOBAL RAM LIMIT: LRU order of file IDs by cache access (most recent at end).
+  // Used to evict oldest file's cache when global budget is exceeded.
+  final List<int> _cacheLruOrder = [];
   // Track all active HTTP request offsets per file for cleanup on close
   final Map<int, Set<int>> _activeHttpRequestOffsets = {};
   // CONNECTION LIMITER: Count active HTTP connections per file.
@@ -584,6 +587,7 @@ class LocalStreamingProxy {
     // Clear LRU streaming cache for this file (releases up to 32MB)
     _streamingCaches[fileId]?.clear();
     _streamingCaches.remove(fileId);
+    _cacheLruOrder.remove(fileId);
 
     // Remove all per-file state to prevent memory growth
     _filePaths.remove(fileId);
@@ -622,6 +626,7 @@ class LocalStreamingProxy {
       cache.clear();
     }
     _streamingCaches.clear();
+    _cacheLruOrder.clear();
 
     // Clear file load states (handled by _fileStates.clear())
     _pendingSeekAfterMoov.clear();
@@ -895,6 +900,46 @@ class LocalStreamingProxy {
     await TelegramCacheService().enforceVideoSizeLimit();
   }
 
+  /// Enforce global RAM budget for LRU caches + sample tables.
+  /// Evicts least recently used file caches when total exceeds budget.
+  /// [activeFileId] is never evicted (currently being accessed).
+  void _enforceGlobalCacheBudget(int activeFileId) {
+    // Update LRU order: move active file to end (most recent)
+    _cacheLruOrder.remove(activeFileId);
+    _cacheLruOrder.add(activeFileId);
+
+    // Calculate total cache RAM
+    int totalCacheBytes = 0;
+    for (final cache in _streamingCaches.values) {
+      totalCacheBytes += cache.size;
+    }
+
+    // Evict oldest files until within budget
+    while (totalCacheBytes > ProxyConfig.globalCacheBudgetBytes &&
+        _cacheLruOrder.length > 1) {
+      final oldestFileId = _cacheLruOrder.first;
+      if (oldestFileId == activeFileId) break;
+
+      final evictedCache = _streamingCaches[oldestFileId];
+      final evictedSize = evictedCache?.size ?? 0;
+
+      // Evict LRU cache
+      evictedCache?.clear();
+      _streamingCaches.remove(oldestFileId);
+
+      // Also evict sample table (secondary RAM consumer)
+      _sampleTableCache.remove(oldestFileId);
+
+      _cacheLruOrder.removeAt(0);
+      totalCacheBytes -= evictedSize;
+
+      _debugLog(
+        'Proxy: GLOBAL RAM LIMIT - Evicted cache for file $oldestFileId '
+        '(${evictedSize ~/ 1024}KB freed, total: ${totalCacheBytes ~/ (1024 * 1024)}MB)',
+      );
+    }
+  }
+
   Future<void> stop() async {
     await _server?.close();
     _server = null;
@@ -907,6 +952,7 @@ class LocalStreamingProxy {
     _filePaths.clear();
     _downloadedRanges.clear();
     _abortedRequests.clear();
+    _cacheLruOrder.clear();
 
     // Cancel all prefetch timers
     for (final timer in _prefetchPeriodicTimers.values) {
@@ -1543,7 +1589,9 @@ class LocalStreamingProxy {
 
             Uint8List data;
             if (cachedData != null) {
-              // Cache hit!
+              // Cache hit - update global LRU order
+              _cacheLruOrder.remove(fileId);
+              _cacheLruOrder.add(fileId);
               data = cachedData;
             } else {
               // Cache miss - read from disk
@@ -1552,6 +1600,7 @@ class LocalStreamingProxy {
 
               // Store in cache for future use
               if (data.isNotEmpty) {
+                _enforceGlobalCacheBudget(fileId);
                 cache.put(currentReadOffset, data);
               }
             }

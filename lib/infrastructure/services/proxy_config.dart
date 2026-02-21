@@ -97,6 +97,10 @@ class ProxyConfig {
   /// Cache disk safety check validity (milliseconds).
   static const int diskCheckCacheMs = 5000; // 5 seconds
 
+  /// Global RAM budget for all per-file LRU caches + sample tables.
+  /// When total exceeds this, the least recently used file's cache is evicted.
+  static const int globalCacheBudgetBytes = 128 * 1024 * 1024; // 128MB
+
   // ============================================================
   // MOOV DETECTION & DOWNLOAD
   // ============================================================
