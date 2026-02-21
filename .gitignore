@@ -1,69 +1,62 @@
-# Archivos de configuración y secretos
+# --- Configuración Personal y Secretos ---
 .env
+scripts/encode_credentials.dart
 
-# Miscellaneous
-*.class
-*.log
-*.pyc
-*.swp
+# --- Archivos de Sistema (Kubuntu/Windows/macOS) ---
 .DS_Store
-.atom/
-.build/
-.buildlog/
+.directory
+*.log
+*.swp
+*.class
+*.pyc
 .history
-.svn/
-.swiftpm/
-migrate_working_dir/
+.anchor
+.atom/
 
-# IntelliJ related
+# --- IDEs: IntelliJ / Android Studio / VS Code ---
 *.iml
 *.ipr
 *.iws
 .idea/
+.vscode/
+.vs/
 
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
-
-# Flutter/Dart/Pub related
-**/doc/api/
-**/ios/Flutter/.last_build_id
+# --- Flutter / Dart ---
 .dart_tool/
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
 /build/
 /coverage/
+**/doc/api/
+analyze_output*.txt
+flutter_log.txt
 
-# Symbolication related
-app.*.symbols
+# --- Generadores de Código (Riverpod / Freezed) ---
+*.g.dart
+*.freezed.dart
 
-# Obfuscation related
-app.*.map.json
-
-# Android Studio will place build artifacts here
+# --- Android / iOS Specific ---
 /android/app/debug
 /android/app/profile
 /android/app/release
+app.*.symbols
+app.*.map.json
+**/ios/Flutter/.last_build_id
 
-# --- TDLib Binaries ---
-# Ignoramos las carpetas completas
+# --- C++ / TDLib / Binarios ---
 windows/tdlib_libs/
 linux/tdlib_libs/
-
-# Por seguridad, ignorar cualquier binario que se cuele
 *.dll
 *.so
 *.lib
 *.exe
+*.pdb
+*.obj
+.build/
+.buildlog/
 
-analyze_output*.txt
-flutter_log.txt
-
-# scripts
-scripts/encode_credentials.dart
-
-# Generadores de código
-*.g.dart
-*.freezed.dart
+# --- Otros ---
+.svn/
+.swiftpm/
+migrate_working_dir/
