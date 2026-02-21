@@ -1,7 +1,9 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
+import '../../presentation/providers/telegram_auth_notifier.dart';
 import '../../presentation/screens/error_screen.dart';
 import 'routes.dart';
 
@@ -52,6 +54,14 @@ class _ExtraDecoder extends Converter<Object?, Object?> {
 // Type-Safe Router with Riverpod Integration
 // ============================================================================
 
+class _RouterNotifier extends ChangeNotifier {
+  final Ref _ref;
+
+  _RouterNotifier(this._ref) {
+    _ref.listen(telegramAuthProvider, (previous, next) => notifyListeners());
+  }
+}
+
 /// Provides the GoRouter instance with type-safe routes.
 ///
 /// Usage:
@@ -64,11 +74,33 @@ class _ExtraDecoder extends Converter<Object?, Object?> {
 /// ```
 @Riverpod(keepAlive: true)
 GoRouter appRouter(Ref ref) {
+  final notifier = _RouterNotifier(ref);
+
   return GoRouter(
     initialLocation: '/',
     debugLogDiagnostics: true,
     routes: $appRoutes, // Generated from routes.g.dart
     extraCodec: const _ExtraCodec(),
+    refreshListenable: notifier,
+    redirect: (context, state) {
+      final authState = ref.read(telegramAuthProvider);
+      final isAuthReady = authState.list == AuthState.ready;
+      final isAuthLoading = authState.list == AuthState.initial;
+
+      final location = state.matchedLocation;
+
+      // If trying to access a sub-route of telegram and not ready, redirect to /telegram
+      // (which handles the login / loading state).
+      // Note: we only protect the subroutes like /telegram/selection, /telegram/topics/:id, etc.
+      // because /telegram itself shows the TelegramLoginScreen if not authenticated.
+      final isGoingToTelegramSubRoute = location.startsWith('/telegram/');
+
+      if (isGoingToTelegramSubRoute && !isAuthReady && !isAuthLoading) {
+        return '/telegram';
+      }
+
+      return null;
+    },
     errorBuilder: (context, state) => ErrorScreen(error: state.error),
   );
 }
