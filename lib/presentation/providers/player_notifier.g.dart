@@ -157,7 +157,7 @@ final class PlayerNotifierProvider
   }
 }
 
-String _$playerNotifierHash() => r'c20ee0cf4619a405b699bc5b2f3209621e3df873';
+String _$playerNotifierHash() => r'21753aed82161bfacf47f3fbeb880669a31e816d';
 
 /// Manages video playback state and coordinates between UI and video backends.
 ///

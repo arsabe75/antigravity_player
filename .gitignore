@@ -62,4 +62,8 @@ analyze_output*.txt
 flutter_log.txt
 
 # scripts
-scripts/encode_credentials.dart 
+scripts/encode_credentials.dart
+
+# Generadores de código
+*.g.dart
+*.freezed.dart

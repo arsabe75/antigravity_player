@@ -10,11 +10,8 @@ import 'package:path/path.dart' as p;
 
 import 'state/telegram_auth_state.dart';
 export 'state/telegram_auth_state.dart';
-import '../../infrastructure/services/secure_storage_service.dart';
-import '../../infrastructure/services/recent_videos_service.dart';
-import '../../infrastructure/services/playback_storage_service.dart';
-import '../../infrastructure/services/telegram_cache_service.dart';
 import '../../infrastructure/services/tdlib_encryption_service.dart';
+import '../../application/use_cases/telegram_logout_use_case.dart';
 
 part 'telegram_auth_notifier.g.dart';
 
@@ -186,26 +183,7 @@ class TelegramAuth extends _$TelegramAuth {
 
   Future<void> logout() async {
     debugPrint('TelegramAuthNotifier: Logging out and clearing data...');
-
-    try {
-      // 1. Clear Favorites and Settings
-      final prefs = SecureStorageService.instance;
-      await prefs.remove('telegram_favorites');
-
-      // 2. Clear Recent Videos (Telegram only)
-      await RecentVideosService().clearTelegramVideos();
-
-      // 3. Clear Playback Progress
-      await PlaybackStorageService().clearAllPositions();
-
-      // 4. Clear Cache (Force all, including avatars/headers)
-      // Note: This uses optimizeStorage which deletes files.
-      await TelegramCacheService().clearCache(forceAll: true);
-    } catch (e) {
-      debugPrint('TelegramAuthNotifier: Error during cleanup: $e');
-    }
-
-    // 5. Send logout command to TDLib
-    _service.send({'@type': 'logOut'});
+    // Delegate to application use case
+    await ref.read(telegramLogoutUseCaseProvider).call();
   }
 }

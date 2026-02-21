@@ -41,7 +41,7 @@ final class TelegramAuthProvider
   }
 }
 
-String _$telegramAuthHash() => r'8b1d3bcf77e7726a03ec2e0265efb6bd051e37c6';
+String _$telegramAuthHash() => r'56d74236ae06a05ee99bd3765e2555169b6c1ae0';
 
 abstract class _$TelegramAuth extends $Notifier<TelegramAuthState> {
   TelegramAuthState build();

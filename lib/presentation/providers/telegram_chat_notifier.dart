@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../infrastructure/services/telegram_service.dart';
+import '../../application/use_cases/load_chat_messages_use_case.dart';
 
 import 'state/telegram_chat_state.dart';
 export 'state/telegram_chat_state.dart';
@@ -115,41 +116,6 @@ class TelegramChat extends _$TelegramChat {
     return false;
   }
 
-  /// Helper to fetch a batch of messages using specific filter
-  Future<List<Map<String, dynamic>>> _fetchBatch({
-    required int fromMessageId,
-    required Map<String, dynamic>? filter,
-  }) async {
-    try {
-      final result = await _service.sendWithResult({
-        '@type': 'searchChatMessages',
-        'chat_id': chatId,
-        // For forum topics, we rely on topic_id, NOT message_thread_id for scope
-        'topic_id': messageThreadId != null
-            ? {'@type': 'messageTopicForum', 'forum_topic_id': messageThreadId}
-            : null,
-        'query': '',
-        'sender_id': null,
-        'from_message_id': fromMessageId,
-        'offset': 0,
-        'limit': 20,
-        'filter': filter,
-      });
-
-      if (result['@type'] == 'error') {
-        debugPrint('TelegramChat: Fetch Batch Error: ${result['message']}');
-        return [];
-      }
-
-      final msgsList = result['messages'] as List?;
-      if (msgsList == null) return [];
-      return msgsList.cast<Map<String, dynamic>>();
-    } catch (e) {
-      debugPrint('TelegramChat: Fetch Batch Exception: $e');
-      return [];
-    }
-  }
-
   Future<void> loadMessages({bool forceRefresh = false}) async {
     try {
       if (forceRefresh) {
@@ -170,44 +136,22 @@ class TelegramChat extends _$TelegramChat {
       _hasMoreVideos = true;
       _hasMoreDocs = true;
 
-      // Parallel Fetch: Videos AND Documents (for MKV support)
-      final results = await Future.wait([
-        _fetchBatch(
-          fromMessageId: _nextVideoFromId,
-          filter: {'@type': 'searchMessagesFilterVideo'},
-        ).then((batch) {
-          if (batch.length < 20) _hasMoreVideos = false;
-          if (batch.isNotEmpty) _nextVideoFromId = batch.last['id'];
-          return batch;
-        }),
-        _fetchBatch(
-          fromMessageId: _nextDocFromId,
-          filter: {'@type': 'searchMessagesFilterDocument'},
-        ).then((batch) {
-          if (batch.length < 20) _hasMoreDocs = false;
-          if (batch.isNotEmpty) _nextDocFromId = batch.last['id'];
-          return batch;
-        }),
-      ]);
+      final loadUseCase = ref.read(loadChatMessagesUseCaseProvider);
+      final result = await loadUseCase(
+        LoadChatMessagesParams(
+          chatId: chatId,
+          messageThreadId: messageThreadId,
+          nextVideoFromId: _nextVideoFromId,
+          nextDocFromId: _nextDocFromId,
+        ),
+      );
 
-      final allMsgs = <Map<String, dynamic>>[];
-      for (final batch in results) {
-        allMsgs.addAll(batch);
-      }
+      _nextVideoFromId = result.nextVideoFromId;
+      _nextDocFromId = result.nextDocFromId;
+      _hasMoreVideos = result.hasMoreVideos;
+      _hasMoreDocs = result.hasMoreDocs;
 
-      // Filter: Keep only actual videos (Documents that are MKV/etc)
-      // And strict topic check
-      final validMsgs = allMsgs.where((msg) {
-        // Topic Check
-        if (messageThreadId != null) {
-          final msgThreadId = msg['message_thread_id'] as int?;
-          if (msgThreadId != null && msgThreadId != messageThreadId) {
-            return false;
-          }
-        }
-        // Video Check (Documents provided by filter might be PDFs, etc)
-        return _isVideoMessage(msg);
-      }).toList();
+      final validMsgs = result.messages;
 
       debugPrint('TelegramChat: Loaded ${validMsgs.length} valid video items');
 
@@ -256,56 +200,36 @@ class TelegramChat extends _$TelegramChat {
     state = state.copyWith(isLoadingMore: true);
 
     try {
-      final futures = <Future<List<Map<String, dynamic>>>>[];
+      final loadUseCase = ref.read(loadChatMessagesUseCaseProvider);
 
-      // Fetch Videos if available
+      // If we don't need to load more of anything, return early
+      if (!_hasMoreVideos && !_hasMoreDocs) {
+        state = state.copyWith(isLoadingMore: false, hasMore: false);
+        return;
+      }
+
+      final result = await loadUseCase(
+        LoadChatMessagesParams(
+          chatId: chatId,
+          messageThreadId: messageThreadId,
+          // If a stream is exhausted, pass 0 but the usecase handles fetching from new IDs
+          nextVideoFromId: _hasMoreVideos ? _nextVideoFromId : 0,
+          nextDocFromId: _hasMoreDocs ? _nextDocFromId : 0,
+        ),
+      );
+
+      // Only update cursors if we requested them
       if (_hasMoreVideos) {
-        futures.add(
-          _fetchBatch(
-            fromMessageId: _nextVideoFromId,
-            filter: {'@type': 'searchMessagesFilterVideo'},
-          ).then((batch) {
-            if (batch.length < 20) _hasMoreVideos = false;
-            if (batch.isNotEmpty) _nextVideoFromId = batch.last['id'];
-            return batch;
-          }),
-        );
-      } else {
-        futures.add(Future.value([]));
+        _nextVideoFromId = result.nextVideoFromId;
+        _hasMoreVideos = result.hasMoreVideos;
       }
 
-      // Fetch Docs if available
       if (_hasMoreDocs) {
-        futures.add(
-          _fetchBatch(
-            fromMessageId: _nextDocFromId,
-            filter: {'@type': 'searchMessagesFilterDocument'},
-          ).then((batch) {
-            if (batch.length < 20) _hasMoreDocs = false;
-            if (batch.isNotEmpty) _nextDocFromId = batch.last['id'];
-            return batch;
-          }),
-        );
-      } else {
-        futures.add(Future.value([]));
+        _nextDocFromId = result.nextDocFromId;
+        _hasMoreDocs = result.hasMoreDocs;
       }
 
-      final results = await Future.wait(futures);
-
-      final allMsgs = <Map<String, dynamic>>[];
-      for (final batch in results) {
-        allMsgs.addAll(batch);
-      }
-
-      final validMsgs = allMsgs.where((msg) {
-        if (messageThreadId != null) {
-          final msgThreadId = msg['message_thread_id'] as int?;
-          if (msgThreadId != null && msgThreadId != messageThreadId) {
-            return false;
-          }
-        }
-        return _isVideoMessage(msg);
-      }).toList();
+      final validMsgs = result.messages;
 
       debugPrint('TelegramChat: Loaded ${validMsgs.length} more valid items');
 
