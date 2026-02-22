@@ -826,11 +826,6 @@ class LocalStreamingProxy {
         info.downloadOffset,
         info.downloadOffset + info.downloadedPrefixSize,
       );
-    } else if (info.downloadedPrefixSize == 0 &&
-        info.downloadOffset == 0 &&
-        !info.isCompleted) {
-      // TDLib reinició la descarga, limpiar rangos previos
-      ranges.clear();
     }
     info.ranges = ranges;
 
@@ -1116,652 +1111,775 @@ class LocalStreamingProxy {
       }
       _activeConnectionCount[fileId] = currentConnections + 1;
 
-      // Wait for TDLib client to be ready (max 10 seconds)
-      // This is crucial on app start when TDLib might still be initializing
-      if (!TelegramService().isClientReady) {
-        _debugLog('Proxy: Waiting for TDLib client to initialize...');
-        int attempts = 0;
-        while (!TelegramService().isClientReady &&
-            attempts < ProxyConfig.tdlibInitMaxAttempts) {
-          await Future.delayed(
-            const Duration(milliseconds: ProxyConfig.tdlibInitWaitMs),
-          );
-          attempts++;
-        }
-        if (!TelegramService().isClientReady) {
-          _debugLog(
-            'Proxy: TDLib client failed to initialize after 10 seconds',
-          );
-          _activeConnectionCount[fileId] =
-              (_activeConnectionCount[fileId] ?? 1) - 1;
-          if ((_activeConnectionCount[fileId] ?? 0) <= 0) {
-            _activeConnectionCount.remove(fileId);
-          }
-          request.response.statusCode = HttpStatus.serviceUnavailable;
-          await request.response.close();
-          return;
-        }
-        _debugLog(
-          'Proxy: TDLib client ready after ${attempts * ProxyConfig.tdlibInitWaitMs}ms',
-        );
-      }
-
-      // If ANY files were recently aborted, give TDLib time to clean up
-      // This is crucial - TDLib can crash if we start new downloads while
-      // it's still processing cancellations internally
-      if (_abortedRequests.isNotEmpty) {
-        // Check if THIS file was aborted - needs longer wait
-        final thisFileWasAborted = _abortedRequests.contains(fileId);
-
-        _debugLog(
-          'Proxy: Waiting for TDLib to stabilize (${_abortedRequests.length} aborted files, current file aborted: $thisFileWasAborted)...',
-        );
-        // Clear our abort tracking - we're about to start fresh
-        _abortedRequests.clear();
-
-        // Use shorter wait for unrelated files, longer if this file was aborted
-        final waitMs = thisFileWasAborted
-            ? ProxyConfig.abortStabilizationAbortedMs
-            : ProxyConfig.abortStabilizationOtherMs;
-        await Future.delayed(Duration(milliseconds: waitMs));
-        _debugLog('Proxy: TDLib stabilization wait complete (${waitMs}ms)');
-      }
-
-      // Also clear stale cache for this specific file if it exists
-      if (_filePaths.containsKey(fileId)) {
-        final cached = _filePaths[fileId]!;
-        // If the cached file was actively downloading but we're re-requesting,
-        // clear it to get fresh state
-        if (cached.isDownloadingActive) {
-          _filePaths.remove(fileId);
-          _downloadedRanges.remove(fileId);
-        }
-      }
-
-      // 1. Parse Range Header
-      final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
-      int? end;
-
-      if (rangeHeader != null) {
-        final parts = rangeHeader.replaceFirst('bytes=', '').split('-');
-        start = int.parse(parts[0]);
-        if (parts.length > 1 && parts[1].isNotEmpty) {
-          end = int.parse(parts[1]);
-        }
-      }
-
-      // Register this HTTP request offset for cleanup on close
-      _activeHttpRequestOffsets.putIfAbsent(fileId, () => {});
-      _activeHttpRequestOffsets[fileId]!.add(start);
-
-      // ============================================================
-      // P0/P1 FIX: MOOV-FIRST STATE MACHINE LOGIC
-      // ============================================================
-      // After cache clear, saved playback positions are stale.
-      // If player requests a seek position > 1MB, we MUST load MOOV first.
-      // This prevents TDLib crashes when jumping to far offsets without metadata.
-      //
-      // P1 FIX: Handle both MOOV-at-start AND MOOV-at-end files correctly.
-      // For MOOV-at-end, we let the moov detection logic handle it normally.
-      bool moovFirstRedirect = false;
-
-      if (_stalePlaybackPositions.contains(fileId) && start > seekThreshold) {
-        // File has stale position from cache clear, and player wants to seek far
-        // Check current load state
-        final currentState = _getOrCreateState(fileId).loadState;
-
-        if (currentState == FileLoadState.idle ||
-            currentState == FileLoadState.loadingMoov) {
-          // Store the desired seek position for after MOOV loads
-          _pendingSeekAfterMoov[fileId] = start;
-          _getOrCreateState(fileId).loadState = FileLoadState.loadingMoov;
-
-          // P1: Check if we know MOOV location for this file
-          final isMoovAtEnd = _getOrCreateState(fileId).isMoovAtEnd;
-
-          if (isMoovAtEnd) {
-            // MOOV is at end - don't redirect to 0, let the existing
-            // moov-at-end handling logic fetch from the correct offset.
-            // We just mark the state and store pending seek.
-            _debugLog(
-              'Proxy: P1 FIX - Stale position for $fileId (MOOV at END). '
-              'Requested: ${start ~/ 1024}KB. Pending seek stored. '
-              'Letting moov-at-end logic handle MOOV fetch.',
-            );
-            // Don't redirect - moov will be fetched when player requests end of file
-          } else {
-            // MOOV is at start (or unknown) - redirect to 0
-            _debugLog(
-              'Proxy: P1 FIX - Stale position for $fileId (MOOV at START). '
-              'Requested: ${start ~/ 1024}KB, forcing start from 0.',
-            );
-            moovFirstRedirect = true;
-            start = 0;
-          }
-        } else if (currentState == FileLoadState.moovReady) {
-          // MOOV is loaded, we can now process the stale seek
-          _debugLog(
-            'Proxy: P1 FIX - MOOV ready for $fileId. Processing pending seek to ${start ~/ 1024}KB',
-          );
-          _getOrCreateState(fileId).loadState = FileLoadState.seeking;
-          _stalePlaybackPositions.remove(fileId);
-          _pendingSeekAfterMoov.remove(fileId);
-        }
-      } else if (_stalePlaybackPositions.contains(fileId) &&
-          start <= seekThreshold) {
-        // Stale file but requesting near start - this is fine, likely loading MOOV
-        // Mark as loading MOOV and clear stale status once we get some data
-        _getOrCreateState(fileId).loadState = FileLoadState.loadingMoov;
-      }
-
-      // SEEK DETECTION: Mark if this is a seek (jump > 1MB from last served offset)
-      // IMPORTANT: Do this BEFORE primary tracking so we can reset primary on seek
-      // Skip seek detection if we did MOOV-first redirect (start was changed to 0)
-      bool isSeekRequest = false;
-      final lastOffset = moovFirstRedirect
-          ? null
-          : _getOrCreateState(fileId).lastServedOffset;
-      if (lastOffset != null) {
-        final jump = (start - lastOffset).abs();
-        if (jump > seekThreshold) {
-          isSeekRequest = true;
-
-          // Don't set _lastSeekTime for moov requests (near end of file) OR
-          // for seeks TO the beginning (initial playback).
-          // _lastSeekTime should only be set for TRUE SCRUBBING: user dragging
-          // the seek bar while video is playing (both positions > 10MB).
-          final isMoovRequest =
-              totalSize > 0 &&
-              (totalSize - start) <
-                  (totalSize * ProxyConfig.scrubMoovDetectionThresholdPercent)
-                      .round()
-                      .clamp(
-                        scrubThreshold,
-                        ProxyConfig.moovRegionClampMaxBytes,
-                      );
-          final isSeekToBeginning = start < scrubThreshold;
-          final isTrueScrubbing =
-              !isMoovRequest &&
-              !isSeekToBeginning &&
-              lastOffset > scrubThreshold;
-
-          if (isTrueScrubbing) {
-            _getOrCreateState(fileId).lastSeekTime = DateTime.now();
-          }
-
-          // CRITICAL FIX: When a seek is detected, reset the primary offset to the seek target
-          // This prevents the primary from getting stuck at 0 when seeking forward
-          // _primaryPlaybackOffset[fileId] = start; // MOVED BELOW for centralized logic
-          _logTrace(
-            'Detected seek for $fileId: $lastOffset -> $start (jump: ${jump ~/ 1024}KB)',
-            fileId: fileId,
-          );
-        }
-      }
-
-      // PRIMARY PLAYBACK TRACKING (STABILIZED):
-      // The player often fires multiple "Seek" requests (video, audio, etc.) to different offsets.
-      // We must lock onto the FIRST one (user's intent) and ignore subsequent divergent "seeks".
-      final playbackState = _getOrCreateState(fileId);
-      final existingPrimary = playbackState.primaryPlaybackOffset;
-      final lastPrimaryUpdate = playbackState.lastPrimaryUpdateTime;
-
-      bool shouldUpdatePrimary = false;
-
-      if (existingPrimary == null) {
-        shouldUpdatePrimary = true;
-      } else if (playbackState.userSeekInProgress) {
-        // P1: User explicitly seeked via MediaKit - force Primary update
-        // Don't require isSeekRequest because lastServedOffset may not be set yet
-        // Accept any offset significantly different from current Primary (>50MB)
-        final distFromPrimary = (start - existingPrimary).abs();
-        if (distFromPrimary > significantJump) {
-          _debugLog(
-            'Proxy: EXPLICIT USER SEEK for $fileId. Primary $existingPrimary -> $start.',
-          );
-          shouldUpdatePrimary = true;
-          playbackState.userSeekInProgress = false;
-          // P1 FIX: Track this seek to protect from stagnant adoption
-          playbackState.lastExplicitSeekOffset = start;
-          playbackState.lastExplicitSeekTime = DateTime.now();
-        } else {
-          _debugLog(
-            'Proxy: USER SEEK SIGNAL active but offset $start too close to Primary $existingPrimary (${distFromPrimary ~/ 1024}KB)',
-          );
-        }
-      } else if (isSeekRequest) {
-        // Check for Rapid Divergence
-        if (lastPrimaryUpdate != null &&
-            DateTime.now().difference(lastPrimaryUpdate).inMilliseconds <
-                ProxyConfig.rapidDivergenceWindowMs) {
-          // Rapid update! distinct from previous primary?
-          if ((start - existingPrimary).abs() > scrubThreshold) {
-            // RECOVERY ADOPTION (Seek variant):
-            // If the player is "Thrashing" between two streams (e.g. 80MB and 180MB), both appear as
-            // "Seeks" because lastServedOffset jumps. This blocks Sequential Recovery.
-            // Force adoption if Primary has been stagnant for > 2000ms.
-            //
-            // RESUME-FROM-START FIX:
-            // If the existing Primary is currently near the start (< 50MB) and the new seek is
-            // significantly further (> 50MB), it's almost certainly a "Resume" or "User Seek".
-            // The initial "Primary at 0" was just the player probing metadata/start.
-            // We should ALWAYS adopt this new seek.
-            //
-            // MOOV FIX: Ensure we don't accidentally adopt the "Moov Atom" request (End of File)
-            // as the Primary, because that will block the actual playback request at the middle.
-            final isMoovRequestForCheck =
-                totalSize > 0 && (totalSize - start) < significantJump * 2;
-
-            final isResumeFromStart =
-                !isMoovRequestForCheck &&
-                existingPrimary < significantJump &&
-                start > significantJump;
-
-            if (isResumeFromStart) {
-              _debugLog(
-                'Proxy: RESUME DETECTED ($existingPrimary -> $start). Forcing Primary update.',
-              );
-              shouldUpdatePrimary = true;
-            } else if (DateTime.now()
-                    .difference(lastPrimaryUpdate)
-                    .inMilliseconds >
-                2000) {
-              _logTrace(
-                'Recovering Primary Offset (Stagnant 2s in Seek) -> Adopting $start',
-                fileId: fileId,
-              );
-              shouldUpdatePrimary = true;
-            } else {
-              _logTrace(
-                'IGNORING rapid divergent seek to $start (kept primary at $existingPrimary)',
-                fileId: fileId,
-              );
-              shouldUpdatePrimary = false;
-              // Reset isSeekRequest to false so this request doesn't bypass debounce!
-              isSeekRequest = false;
+      // TRACK CLIENT DISCONNECTS TO PREVENT CONNECTION LEAKS DURING STALLS
+      bool isClientDisconnected = false;
+      final disconnectCompleter = Completer<bool>();
+      request.response.done
+          .then((_) {
+            isClientDisconnected = true;
+            if (!disconnectCompleter.isCompleted) {
+              disconnectCompleter.complete(true);
             }
-          } else {
-            shouldUpdatePrimary = true; // Close enough, update it
+          })
+          .catchError((_) {
+            isClientDisconnected = true;
+            if (!disconnectCompleter.isCompleted) {
+              disconnectCompleter.complete(true);
+            }
+          });
+
+      try {
+        // Wait for TDLib client to be ready (max 10 seconds)
+        // This is crucial on app start when TDLib might still be initializing
+        if (!TelegramService().isClientReady) {
+          _debugLog('Proxy: Waiting for TDLib client to initialize...');
+          int attempts = 0;
+          while (!TelegramService().isClientReady &&
+              attempts < ProxyConfig.tdlibInitMaxAttempts) {
+            await Future.delayed(
+              const Duration(milliseconds: ProxyConfig.tdlibInitWaitMs),
+            );
+            attempts++;
           }
-        } else {
-          shouldUpdatePrimary = true; // Stable seek
-        }
-      } else if (start < existingPrimary) {
-        // Only track lower offsets if they are reasonable (not huge jumps back which are likely zombie streams)
-        final jumpBack = existingPrimary - start;
-        if (jumpBack < significantJump) {
-          shouldUpdatePrimary = true;
-        } else {
-          _logTrace(
-            'Ignoring primary offset reset $existingPrimary -> $start (diff: ${jumpBack ~/ (1024 * 1024)}MB) - likely zombie stream',
-            fileId: fileId,
+          if (!TelegramService().isClientReady) {
+            _debugLog(
+              'Proxy: TDLib client failed to initialize after 10 seconds',
+            );
+            request.response.statusCode = HttpStatus.serviceUnavailable;
+            await request.response.close();
+            return;
+          }
+          _debugLog(
+            'Proxy: TDLib client ready after ${attempts * ProxyConfig.tdlibInitWaitMs}ms',
           );
         }
-      } else {
-        // SEQUENTIAL TRACKING:
-        // If legitimate playback progresses forward, we must advance the Primary Offset so the
-        // "Blocking Guard" (50MB radius) moves with the user.
-        final jumpForward = start - existingPrimary;
-        if (jumpForward > 0) {
-          // 1. Standard Sequential: within 50MB
-          if (jumpForward < significantJump) {
-            shouldUpdatePrimary = true;
+
+        // If ANY files were recently aborted, give TDLib time to clean up
+        // This is crucial - TDLib can crash if we start new downloads while
+        // it's still processing cancellations internally
+        if (_abortedRequests.isNotEmpty) {
+          // Check if THIS file was aborted - needs longer wait
+          final thisFileWasAborted = _abortedRequests.contains(fileId);
+
+          _debugLog(
+            'Proxy: Waiting for TDLib to stabilize (${_abortedRequests.length} aborted files, current file aborted: $thisFileWasAborted)...',
+          );
+          // Clear our abort tracking - we're about to start fresh
+          _abortedRequests.clear();
+
+          // Use shorter wait for unrelated files, longer if this file was aborted
+          final waitMs = thisFileWasAborted
+              ? ProxyConfig.abortStabilizationAbortedMs
+              : ProxyConfig.abortStabilizationOtherMs;
+          await Future.delayed(Duration(milliseconds: waitMs));
+          _debugLog('Proxy: TDLib stabilization wait complete (${waitMs}ms)');
+        }
+
+        // Also clear stale cache for this specific file if it exists
+        if (_filePaths.containsKey(fileId)) {
+          final cached = _filePaths[fileId]!;
+          // If the cached file was actively downloading but we're re-requesting,
+          // clear it to get fresh state
+          if (cached.isDownloadingActive) {
+            _filePaths.remove(fileId);
+            _downloadedRanges.remove(fileId);
           }
-          // 2. READ-AHEAD DETECTION:
-          // If jump is > significantJump, it might be a Buffer Request (Parallel Read-Ahead).
-          // We should NOT update Primary immediately, because the player is likely still
-          // playing at 'existingPrimary'.
-          // However, if Primary is STAGNANT ( hasn't moved for > 2000ms),
-          // it might be a legitimate Seek that we misidentified.
-          else if (lastPrimaryUpdate != null &&
-              DateTime.now().difference(lastPrimaryUpdate).inMilliseconds >
-                  ProxyConfig.stagnantPrimaryMs) {
+        }
+
+        // 1. Parse Range Header
+        final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
+        int? end;
+
+        if (rangeHeader != null) {
+          final parts = rangeHeader.replaceFirst('bytes=', '').split('-');
+          start = int.parse(parts[0]);
+          if (parts.length > 1 && parts[1].isNotEmpty) {
+            end = int.parse(parts[1]);
+          }
+        }
+
+        // Register this HTTP request offset for cleanup on close
+        _activeHttpRequestOffsets.putIfAbsent(fileId, () => {});
+        _activeHttpRequestOffsets[fileId]!.add(start);
+
+        // ============================================================
+        // P0/P1 FIX: MOOV-FIRST STATE MACHINE LOGIC
+        // ============================================================
+        // After cache clear, saved playback positions are stale.
+        // If player requests a seek position > 1MB, we MUST load MOOV first.
+        // This prevents TDLib crashes when jumping to far offsets without metadata.
+        //
+        // P1 FIX: Handle both MOOV-at-start AND MOOV-at-end files correctly.
+        // For MOOV-at-end, we let the moov detection logic handle it normally.
+        bool moovFirstRedirect = false;
+
+        if (_stalePlaybackPositions.contains(fileId) && start > seekThreshold) {
+          // File has stale position from cache clear, and player wants to seek far
+          // Check current load state
+          final currentState = _getOrCreateState(fileId).loadState;
+
+          if (currentState == FileLoadState.idle ||
+              currentState == FileLoadState.loadingMoov) {
+            // Store the desired seek position for after MOOV loads
+            _pendingSeekAfterMoov[fileId] = start;
+            _getOrCreateState(fileId).loadState = FileLoadState.loadingMoov;
+
+            // P1: Check if we know MOOV location for this file
+            final isMoovAtEnd = _getOrCreateState(fileId).isMoovAtEnd;
+
+            if (isMoovAtEnd) {
+              // MOOV is at end - don't redirect to 0, let the existing
+              // moov-at-end handling logic fetch from the correct offset.
+              // We just mark the state and store pending seek.
+              _debugLog(
+                'Proxy: P1 FIX - Stale position for $fileId (MOOV at END). '
+                'Requested: ${start ~/ 1024}KB. Pending seek stored. '
+                'Letting moov-at-end logic handle MOOV fetch.',
+              );
+              // Don't redirect - moov will be fetched when player requests end of file
+            } else {
+              // MOOV is at start (or unknown) - redirect to 0
+              _debugLog(
+                'Proxy: P1 FIX - Stale position for $fileId (MOOV at START). '
+                'Requested: ${start ~/ 1024}KB, forcing start from 0.',
+              );
+              moovFirstRedirect = true;
+              start = 0;
+            }
+          } else if (currentState == FileLoadState.moovReady) {
+            // MOOV is loaded, we can now process the stale seek
+            _debugLog(
+              'Proxy: P1 FIX - MOOV ready for $fileId. Processing pending seek to ${start ~/ 1024}KB',
+            );
+            _getOrCreateState(fileId).loadState = FileLoadState.seeking;
+            _stalePlaybackPositions.remove(fileId);
+            _pendingSeekAfterMoov.remove(fileId);
+          }
+        } else if (_stalePlaybackPositions.contains(fileId) &&
+            start <= seekThreshold) {
+          // Stale file but requesting near start - this is fine, likely loading MOOV
+          // Mark as loading MOOV and clear stale status once we get some data
+          _getOrCreateState(fileId).loadState = FileLoadState.loadingMoov;
+        }
+
+        // SEEK DETECTION: Mark if this is a seek (jump > 1MB from last served offset)
+        // IMPORTANT: Do this BEFORE primary tracking so we can reset primary on seek
+        // Skip seek detection if we did MOOV-first redirect (start was changed to 0)
+        bool isSeekRequest = false;
+        final lastOffset = moovFirstRedirect
+            ? null
+            : _getOrCreateState(fileId).lastServedOffset;
+        if (lastOffset != null) {
+          final jump = (start - lastOffset).abs();
+          if (jump > seekThreshold) {
+            isSeekRequest = true;
+
+            // Don't set _lastSeekTime for moov requests (near end of file) OR
+            // for seeks TO the beginning (initial playback).
+            // _lastSeekTime should only be set for TRUE SCRUBBING: user dragging
+            // the seek bar while video is playing (both positions > 10MB).
+            final isMoovRequest =
+                totalSize > 0 &&
+                (totalSize - start) <
+                    (totalSize * ProxyConfig.scrubMoovDetectionThresholdPercent)
+                        .round()
+                        .clamp(
+                          scrubThreshold,
+                          ProxyConfig.moovRegionClampMaxBytes,
+                        );
+            final isSeekToBeginning = start < scrubThreshold;
+            final isTrueScrubbing =
+                !isMoovRequest &&
+                !isSeekToBeginning &&
+                lastOffset > scrubThreshold;
+
+            if (isTrueScrubbing) {
+              _getOrCreateState(fileId).lastSeekTime = DateTime.now();
+            }
+
+            // CRITICAL FIX: When a seek is detected, reset the primary offset to the seek target
+            // This prevents the primary from getting stuck at 0 when seeking forward
+            // _primaryPlaybackOffset[fileId] = start; // MOVED BELOW for centralized logic
             _logTrace(
-              'Recovering Primary Offset (Stagnant 2s on Forward Jump) -> Adopting $start',
+              'Detected seek for $fileId: $lastOffset -> $start (jump: ${jump ~/ 1024}KB)',
               fileId: fileId,
             );
+          }
+        }
+
+        // PRIMARY PLAYBACK TRACKING (STABILIZED):
+        // The player often fires multiple "Seek" requests (video, audio, etc.) to different offsets.
+        // We must lock onto the FIRST one (user's intent) and ignore subsequent divergent "seeks".
+        final playbackState = _getOrCreateState(fileId);
+        final existingPrimary = playbackState.primaryPlaybackOffset;
+        final lastPrimaryUpdate = playbackState.lastPrimaryUpdateTime;
+
+        bool shouldUpdatePrimary = false;
+
+        if (existingPrimary == null) {
+          shouldUpdatePrimary = true;
+        } else if (playbackState.userSeekInProgress) {
+          // P1: User explicitly seeked via MediaKit - force Primary update
+          // Don't require isSeekRequest because lastServedOffset may not be set yet
+          // Accept any offset significantly different from current Primary (>50MB)
+          final distFromPrimary = (start - existingPrimary).abs();
+          if (distFromPrimary > significantJump) {
+            _debugLog(
+              'Proxy: EXPLICIT USER SEEK for $fileId. Primary $existingPrimary -> $start.',
+            );
             shouldUpdatePrimary = true;
+            playbackState.userSeekInProgress = false;
+            // P1 FIX: Track this seek to protect from stagnant adoption
+            playbackState.lastExplicitSeekOffset = start;
+            playbackState.lastExplicitSeekTime = DateTime.now();
           } else {
             _debugLog(
-              'Proxy: Ignoring likely Read-Ahead Buffer Request at $start (Primary at $existingPrimary)',
+              'Proxy: USER SEEK SIGNAL active but offset $start too close to Primary $existingPrimary (${distFromPrimary ~/ 1024}KB)',
             );
-            shouldUpdatePrimary = false;
-            // Treat as background/buffer request, don't debounce as seek
-            isSeekRequest = false;
+          }
+        } else if (isSeekRequest) {
+          // Check for Rapid Divergence
+          if (lastPrimaryUpdate != null &&
+              DateTime.now().difference(lastPrimaryUpdate).inMilliseconds <
+                  ProxyConfig.rapidDivergenceWindowMs) {
+            // Rapid update! distinct from previous primary?
+            if ((start - existingPrimary).abs() > scrubThreshold) {
+              // RECOVERY ADOPTION (Seek variant):
+              // If the player is "Thrashing" between two streams (e.g. 80MB and 180MB), both appear as
+              // "Seeks" because lastServedOffset jumps. This blocks Sequential Recovery.
+              // Force adoption if Primary has been stagnant for > 2000ms.
+              //
+              // RESUME-FROM-START FIX:
+              // If the existing Primary is currently near the start (< 50MB) and the new seek is
+              // significantly further (> 50MB), it's almost certainly a "Resume" or "User Seek".
+              // The initial "Primary at 0" was just the player probing metadata/start.
+              // We should ALWAYS adopt this new seek.
+              //
+              // MOOV FIX: Ensure we don't accidentally adopt the "Moov Atom" request (End of File)
+              // as the Primary, because that will block the actual playback request at the middle.
+              final isMoovRequestForCheck =
+                  totalSize > 0 && (totalSize - start) < significantJump * 2;
+
+              final isResumeFromStart =
+                  !isMoovRequestForCheck &&
+                  existingPrimary < significantJump &&
+                  start > significantJump;
+
+              if (isResumeFromStart) {
+                _debugLog(
+                  'Proxy: RESUME DETECTED ($existingPrimary -> $start). Forcing Primary update.',
+                );
+                shouldUpdatePrimary = true;
+              } else if (DateTime.now()
+                      .difference(lastPrimaryUpdate)
+                      .inMilliseconds >
+                  2000) {
+                _logTrace(
+                  'Recovering Primary Offset (Stagnant 2s in Seek) -> Adopting $start',
+                  fileId: fileId,
+                );
+                shouldUpdatePrimary = true;
+              } else {
+                _logTrace(
+                  'IGNORING rapid divergent seek to $start (kept primary at $existingPrimary)',
+                  fileId: fileId,
+                );
+                shouldUpdatePrimary = false;
+                // Reset isSeekRequest to false so this request doesn't bypass debounce!
+                isSeekRequest = false;
+              }
+            } else {
+              shouldUpdatePrimary = true; // Close enough, update it
+            }
+          } else {
+            shouldUpdatePrimary = true; // Stable seek
+          }
+        } else if (start < existingPrimary) {
+          // Only track lower offsets if they are reasonable (not huge jumps back which are likely zombie streams)
+          final jumpBack = existingPrimary - start;
+          if (jumpBack < significantJump) {
+            shouldUpdatePrimary = true;
+          } else {
+            _logTrace(
+              'Ignoring primary offset reset $existingPrimary -> $start (diff: ${jumpBack ~/ (1024 * 1024)}MB) - likely zombie stream',
+              fileId: fileId,
+            );
+          }
+        } else {
+          // SEQUENTIAL TRACKING:
+          // If legitimate playback progresses forward, we must advance the Primary Offset so the
+          // "Blocking Guard" (50MB radius) moves with the user.
+          final jumpForward = start - existingPrimary;
+          if (jumpForward > 0) {
+            // 1. Standard Sequential: within 50MB
+            if (jumpForward < significantJump) {
+              shouldUpdatePrimary = true;
+            }
+            // 2. READ-AHEAD DETECTION:
+            // If jump is > significantJump, it might be a Buffer Request (Parallel Read-Ahead).
+            // We should NOT update Primary immediately, because the player is likely still
+            // playing at 'existingPrimary'.
+            // However, if Primary is STAGNANT ( hasn't moved for > 2000ms),
+            // it might be a legitimate Seek that we misidentified.
+            else if (lastPrimaryUpdate != null &&
+                DateTime.now().difference(lastPrimaryUpdate).inMilliseconds >
+                    ProxyConfig.stagnantPrimaryMs) {
+              _logTrace(
+                'Recovering Primary Offset (Stagnant 2s on Forward Jump) -> Adopting $start',
+                fileId: fileId,
+              );
+              shouldUpdatePrimary = true;
+            } else {
+              _debugLog(
+                'Proxy: Ignoring likely Read-Ahead Buffer Request at $start (Primary at $existingPrimary)',
+              );
+              shouldUpdatePrimary = false;
+              // Treat as background/buffer request, don't debounce as seek
+              isSeekRequest = false;
+            }
           }
         }
-      }
 
-      if (shouldUpdatePrimary) {
-        playbackState.primaryPlaybackOffset = start;
-        playbackState.lastPrimaryUpdateTime = DateTime.now();
-        if (isSeekRequest) {
-          // Only log if it was a seek
-          _logTrace('Primary Target UPDATED to $start', fileId: fileId);
+        if (shouldUpdatePrimary) {
+          playbackState.primaryPlaybackOffset = start;
+          playbackState.lastPrimaryUpdateTime = DateTime.now();
+          if (isSeekRequest) {
+            // Only log if it was a seek
+            _logTrace('Primary Target UPDATED to $start', fileId: fileId);
+          }
         }
-      }
 
-      // 2. Ensure File Info is available
-      if (!_filePaths.containsKey(fileId) || _filePaths[fileId]!.path.isEmpty) {
-        await _fetchFileInfo(fileId);
-      }
+        // 2. Ensure File Info is available
+        if (!_filePaths.containsKey(fileId) ||
+            _filePaths[fileId]!.path.isEmpty) {
+          await _fetchFileInfo(fileId);
+        }
 
-      var fileInfo = _filePaths[fileId];
-      if (fileInfo == null || fileInfo.path.isEmpty) {
-        request.response.statusCode = HttpStatus.notFound;
-        await request.response.close();
-        return;
-      }
-
-      var file = File(fileInfo.path);
-
-      // CRITICAL: Verify the file actually exists on disk
-      // TDLib may report a path for a file that was deleted by cache cleanup
-      if (!await file.exists()) {
-        _debugLog(
-          'Proxy: File does not exist on disk: ${fileInfo.path}, re-fetching...',
-        );
-
-        // Clear stale cache entry
-        _filePaths.remove(fileId);
-        _downloadedRanges.remove(fileId);
-
-        // CRITICAL FIX: Explicitly tell TDLib to delete the file logic.
-        // Even if the file is gone from disk, TDLib might still have the path in its database.
-        // Without this, getFile returns the old path and we enter an infinite loop.
-        // Start with internal state reset.
-        _getOrCreateState(fileId).resetDownloadState();
-
-        _debugLog(
-          'Proxy: File missing on disk, forcing TDLib delete for $fileId',
-        );
-        await TelegramService().sendWithResult({
-          '@type': 'deleteFile',
-          'file_id': fileId,
-        });
-
-        // Small wait for TDLib to process the deletion and clear the path
-        await Future.delayed(
-          const Duration(milliseconds: ProxyConfig.tdlibDeleteStabilizationMs),
-        );
-
-        await _fetchFileInfo(fileId);
-
-        fileInfo = _filePaths[fileId];
+        var fileInfo = _filePaths[fileId];
         if (fileInfo == null || fileInfo.path.isEmpty) {
-          _debugLog('Proxy: Failed to re-allocate file $fileId');
           request.response.statusCode = HttpStatus.notFound;
           await request.response.close();
           return;
         }
 
-        file = File(fileInfo.path);
+        var file = File(fileInfo.path);
 
-        // Verify the new file exists
+        // CRITICAL: Verify the file actually exists on disk
+        // TDLib may report a path for a file that was deleted by cache cleanup
         if (!await file.exists()) {
-          _debugLog('Proxy: New file still does not exist: ${fileInfo.path}');
-          request.response.statusCode = HttpStatus.notFound;
-          await request.response.close();
-          return;
-        }
-      }
-
-      final effectiveTotalSize = totalSize > 0
-          ? totalSize
-          : (await file.length());
-      var effectiveEnd =
-          end ?? (effectiveTotalSize > 0 ? effectiveTotalSize - 1 : 0);
-
-      // CRITICAL FIX: Clamp end to actual file size to prevent reading past EOF
-      if (effectiveTotalSize > 0 && effectiveEnd >= effectiveTotalSize) {
-        effectiveEnd = effectiveTotalSize - 1;
-      }
-
-      // Validate Range
-      // Must start strictly before EOF (offset < size)
-      if (start > effectiveEnd ||
-          (effectiveTotalSize > 0 && start >= effectiveTotalSize)) {
-        request.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
-        request.response.headers.set(
-          HttpHeaders.contentRangeHeader,
-          'bytes */$effectiveTotalSize',
-        );
-        await request.response.close();
-        return;
-      }
-
-      final contentLength = effectiveEnd - start + 1;
-
-      // 3. Send Headers
-      request.response.statusCode = HttpStatus.partialContent;
-      request.response.headers.set(
-        HttpHeaders.contentRangeHeader,
-        'bytes $start-$effectiveEnd/$effectiveTotalSize',
-      );
-      request.response.headers.set(
-        HttpHeaders.contentLengthHeader,
-        contentLength,
-      );
-      request.response.headers.contentType = ContentType.parse('video/mp4');
-      request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
-
-      // 4. Stream Data Loop
-      RandomAccessFile? raf;
-      try {
-        // FILE LOCKING FIX (Windows): TDLib may have the file locked while writing.
-        // Retry with exponential backoff to handle temporary file access issues.
-        raf = await _openFileWithRetry(file, fileId);
-        if (raf == null) {
-          throw FileSystemException('Failed to open file after retries');
-        }
-
-        int currentReadOffset = start;
-        int remainingToSend = contentLength;
-
-        // Ensure notifier exists
-        if (!_fileUpdateNotifiers.containsKey(fileId)) {
-          _fileUpdateNotifiers[fileId] = StreamController.broadcast();
-        }
-
-        while (remainingToSend > 0) {
-          if (_abortedRequests.contains(fileId)) {
-            _debugLog('Proxy: Request aborted for $fileId');
-            break;
-          }
-
-          // Check direct availability on disk via TDLib
-          final available = await _getDownloadedPrefixSize(
-            fileId,
-            currentReadOffset,
+          _debugLog(
+            'Proxy: File does not exist on disk: ${fileInfo.path}, re-fetching...',
           );
 
-          if (available > 0) {
-            // Data is available!
-            final chunkToRead = min(
-              available,
-              min(remainingToSend, ProxyConfig.streamChunkSize),
+          // Clear stale cache entry
+          _filePaths.remove(fileId);
+          _downloadedRanges.remove(fileId);
+
+          // CRITICAL FIX: Explicitly tell TDLib to delete the file logic.
+          // Even if the file is gone from disk, TDLib might still have the path in its database.
+          // Without this, getFile returns the old path and we enter an infinite loop.
+          // Start with internal state reset.
+          _getOrCreateState(fileId).resetDownloadState();
+
+          _debugLog(
+            'Proxy: File missing on disk, forcing TDLib delete for $fileId',
+          );
+          await TelegramService().sendWithResult({
+            '@type': 'deleteFile',
+            'file_id': fileId,
+          });
+
+          // Small wait for TDLib to process the deletion and clear the path
+          await Future.delayed(
+            const Duration(
+              milliseconds: ProxyConfig.tdlibDeleteStabilizationMs,
+            ),
+          );
+
+          await _fetchFileInfo(fileId);
+
+          fileInfo = _filePaths[fileId];
+          if (fileInfo == null || fileInfo.path.isEmpty) {
+            _debugLog('Proxy: Failed to re-allocate file $fileId');
+            request.response.statusCode = HttpStatus.notFound;
+            await request.response.close();
+            return;
+          }
+
+          file = File(fileInfo.path);
+
+          // Verify the new file exists
+          if (!await file.exists()) {
+            _debugLog('Proxy: New file still does not exist: ${fileInfo.path}');
+            request.response.statusCode = HttpStatus.notFound;
+            await request.response.close();
+            return;
+          }
+        }
+
+        final effectiveTotalSize = totalSize > 0
+            ? totalSize
+            : (await file.length());
+        var effectiveEnd =
+            end ?? (effectiveTotalSize > 0 ? effectiveTotalSize - 1 : 0);
+
+        // CRITICAL FIX: Clamp end to actual file size to prevent reading past EOF
+        if (effectiveTotalSize > 0 && effectiveEnd >= effectiveTotalSize) {
+          effectiveEnd = effectiveTotalSize - 1;
+        }
+
+        // Validate Range
+        // Must start strictly before EOF (offset < size)
+        if (start > effectiveEnd ||
+            (effectiveTotalSize > 0 && start >= effectiveTotalSize)) {
+          request.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+          request.response.headers.set(
+            HttpHeaders.contentRangeHeader,
+            'bytes */$effectiveTotalSize',
+          );
+          await request.response.close();
+          return;
+        }
+
+        final contentLength = effectiveEnd - start + 1;
+
+        // 3. Send Headers
+        request.response.statusCode = HttpStatus.partialContent;
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes $start-$effectiveEnd/$effectiveTotalSize',
+        );
+        request.response.headers.set(
+          HttpHeaders.contentLengthHeader,
+          contentLength,
+        );
+        request.response.headers.contentType = ContentType.parse('video/mp4');
+        request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
+
+        // 4. Stream Data Loop
+        RandomAccessFile? raf;
+        try {
+          // FILE LOCKING FIX (Windows): TDLib may have the file locked while writing.
+          // Retry with exponential backoff to handle temporary file access issues.
+          raf = await _openFileWithRetry(file, fileId);
+          if (raf == null) {
+            throw FileSystemException('Failed to open file after retries');
+          }
+
+          int currentReadOffset = start;
+          int remainingToSend = contentLength;
+
+          // Ensure notifier exists
+          if (!_fileUpdateNotifiers.containsKey(fileId)) {
+            _fileUpdateNotifiers[fileId] = StreamController.broadcast();
+          }
+
+          while (remainingToSend > 0) {
+            if (_abortedRequests.contains(fileId)) {
+              _debugLog('Proxy: Request aborted for $fileId');
+              break;
+            }
+            if (isClientDisconnected) {
+              _debugLog('Proxy: Client disconnected prematurely ($fileId)');
+              break;
+            }
+
+            // Check direct availability on disk via TDLib
+            final available = await _getDownloadedPrefixSize(
+              fileId,
+              currentReadOffset,
             );
 
-            // LRU Cache: Try cache first, fall back to disk read
-            _streamingCaches.putIfAbsent(fileId, () => StreamingLRUCache());
-            final cache = _streamingCaches[fileId]!;
-            var cachedData = cache.get(currentReadOffset, chunkToRead);
-
-            Uint8List data;
-            if (cachedData != null) {
-              // Cache hit - update global LRU order
-              _cacheLruOrder.remove(fileId);
-              _cacheLruOrder.add(fileId);
-              data = cachedData;
-            } else {
-              // Cache miss - read from disk
-              await raf.setPosition(currentReadOffset);
-              data = await raf.read(chunkToRead);
-
-              // Store in cache for future use
-              if (data.isNotEmpty) {
-                _enforceGlobalCacheBudget(fileId);
-                cache.put(currentReadOffset, data);
-              }
-            }
-
-            if (data.isEmpty) {
-              await Future.delayed(
-                const Duration(milliseconds: ProxyConfig.emptyDataRetryMs),
+            if (available > 0) {
+              // Data is available!
+              final chunkToRead = min(
+                available,
+                min(remainingToSend, ProxyConfig.streamChunkSize),
               );
-              continue;
-            }
 
-            request.response.add(data);
-            await request.response.flush();
+              // LRU Cache: Try cache first, fall back to disk read
+              _streamingCaches.putIfAbsent(fileId, () => StreamingLRUCache());
+              final cache = _streamingCaches[fileId]!;
+              var cachedData = cache.get(currentReadOffset, chunkToRead);
 
-            currentReadOffset += data.length;
-            remainingToSend -= data.length;
-
-            // Track download metrics for adaptive decisions
-            _downloadMetrics.putIfAbsent(fileId, () => DownloadMetrics());
-            _downloadMetrics[fileId]!.recordBytes(data.length);
-
-            // Update last served offset for seek detection
-            _getOrCreateState(fileId).lastServedOffset = currentReadOffset;
-
-            // P0 FIX: MOOV state transition
-            // If we were in loadingMoov state and have now loaded enough data (2MB),
-            // transition to moovReady so pending seeks can proceed
-            final fileState = _getOrCreateState(fileId);
-            if (fileState.loadState == FileLoadState.loadingMoov &&
-                currentReadOffset >= moovReadyBytes) {
-              fileState.loadState = FileLoadState.moovReady;
-              final pendingSeek = _pendingSeekAfterMoov[fileId];
-              if (pendingSeek != null) {
-                _debugLog(
-                  'Proxy: P0 FIX - MOOV ready for $fileId. '
-                  'Player should now seek to ${pendingSeek ~/ 1024}KB',
-                );
+              Uint8List data;
+              if (cachedData != null) {
+                // Cache hit - update global LRU order
+                _cacheLruOrder.remove(fileId);
+                _cacheLruOrder.add(fileId);
+                data = cachedData;
               } else {
-                // No pending seek means this was a fresh start, clear stale status
-                _stalePlaybackPositions.remove(fileId);
-                fileState.loadState = FileLoadState.playing;
-              }
-            }
+                // Cache miss - read from disk
+                await raf.setPosition(currentReadOffset);
+                data = await raf.read(chunkToRead);
 
-            // Ensure download is started at the exact offset the player needs
-            // FIX: Only start download if we still have data to send.
-            // If we just finished the file (remainingToSend == 0), currentReadOffset == totalSize,
-            // which causes TDLib crash if we request it.
-            if (remainingToSend > 0) {
-              _startDownloadAtOffset(fileId, currentReadOffset);
-
-              // POST-SEEK PRELOAD: Trigger proactive preload if we recently seeked
-              final lastSeek = _getOrCreateState(fileId).lastSeekTime;
-              if (lastSeek != null &&
-                  DateTime.now().difference(lastSeek).inMilliseconds <
-                      ProxyConfig.stagnantPrimaryMs) {
-                _triggerPostSeekPreload(fileId, currentReadOffset);
-              }
-            }
-
-            // PRIMARY TRACKING FIX:
-            // Continuously update the Primary Offset as we serve data.
-            // This ensures the "Protection Bubble" moves with the playback head.
-            // FIX: We must THROTTLE this update to prevent "Buffering" from dragging the Primary
-            // Offset far ahead of the actual Playback (Time).
-            // If the player buffers 300MB in 1 second, we should NOT update Primary to +300MB,
-            // because if the player then requests data at +10MB (Playback), it would look like
-            // a "Distant Zombie" relative to the Buffer Head.
-            //
-            // Logic:
-            // 1. Only allow Primary to advance by MAX_SPEED (e.g. 5MB/s) relative to elapsed time.
-            // 2. Seeks (handled in _handleRequest) break this limit instantly.
-            if (data.isNotEmpty) {
-              final streamState = _getOrCreateState(fileId);
-              final lastPrimary = streamState.primaryPlaybackOffset ?? 0;
-              final lastUpdateTime = streamState.lastPrimaryUpdateTime;
-
-              // If this is sequential (close to last known primary)
-              if (currentReadOffset > lastPrimary &&
-                  (currentReadOffset - lastPrimary) < significantJump) {
-                final now = DateTime.now();
-                // Determine allowed progress based on time elapsed
-                // Base 2MB allowed instantly
-                int allowedProgress = primaryProgressBase;
-                if (lastUpdateTime != null) {
-                  final elapsedMs = now
-                      .difference(lastUpdateTime)
-                      .inMilliseconds;
-                  // Allow up to 3MB per second of additional progress (approx 3x realtime 1080p)
-                  // Total max rate ~ 5MB/s roughly.
-                  // (elapsedMs / 1000 * 3MB)
-                  final timeBasedAllowance =
-                      (elapsedMs /
-                              1000 *
-                              ProxyConfig.primaryProgressRateBytesPerSec)
-                          .round();
-                  allowedProgress += timeBasedAllowance;
+                // Store in cache for future use
+                if (data.isNotEmpty) {
+                  _enforceGlobalCacheBudget(fileId);
+                  cache.put(currentReadOffset, data);
                 }
+              }
 
-                // If the new offset is within the allowed progress window, update it.
-                // Otherwise, hold the Primary back (it lags behind buffer).
-                // If the new offset is within the allowed progress window, update it.
-                // Otherwise, hold the Primary back (it lags behind buffer).
-                if ((currentReadOffset - lastPrimary) <= allowedProgress) {
-                  // Throttle the actual map update to avoid spamming debug logs/maps
-                  // Update at most every 200ms
-                  if (lastUpdateTime == null ||
-                      now.difference(lastUpdateTime).inMilliseconds >
-                          ProxyConfig.primaryUpdateThrottleMs) {
+              if (data.isEmpty) {
+                await Future.delayed(
+                  const Duration(milliseconds: ProxyConfig.emptyDataRetryMs),
+                );
+                continue;
+              }
+
+              request.response.add(data);
+              await request.response.flush();
+
+              currentReadOffset += data.length;
+              remainingToSend -= data.length;
+
+              // Track download metrics for adaptive decisions
+              _downloadMetrics.putIfAbsent(fileId, () => DownloadMetrics());
+              _downloadMetrics[fileId]!.recordBytes(data.length);
+
+              // Update last served offset for seek detection
+              _getOrCreateState(fileId).lastServedOffset = currentReadOffset;
+
+              // P0 FIX: MOOV state transition
+              // If we were in loadingMoov state and have now loaded enough data (2MB),
+              // transition to moovReady so pending seeks can proceed
+              final fileState = _getOrCreateState(fileId);
+              if (fileState.loadState == FileLoadState.loadingMoov &&
+                  currentReadOffset >= moovReadyBytes) {
+                fileState.loadState = FileLoadState.moovReady;
+                final pendingSeek = _pendingSeekAfterMoov[fileId];
+                if (pendingSeek != null) {
+                  _debugLog(
+                    'Proxy: P0 FIX - MOOV ready for $fileId. '
+                    'Player should now seek to ${pendingSeek ~/ 1024}KB',
+                  );
+                } else {
+                  // No pending seek means this was a fresh start, clear stale status
+                  _stalePlaybackPositions.remove(fileId);
+                  fileState.loadState = FileLoadState.playing;
+                }
+              }
+
+              // Ensure download is started at the exact offset the player needs
+              // FIX: Only start download if we still have data to send.
+              // If we just finished the file (remainingToSend == 0), currentReadOffset == totalSize,
+              // which causes TDLib crash if we request it.
+              if (remainingToSend > 0) {
+                _startDownloadAtOffset(fileId, currentReadOffset);
+
+                // POST-SEEK PRELOAD: Trigger proactive preload if we recently seeked
+                final lastSeek = _getOrCreateState(fileId).lastSeekTime;
+                if (lastSeek != null &&
+                    DateTime.now().difference(lastSeek).inMilliseconds <
+                        ProxyConfig.stagnantPrimaryMs) {
+                  _triggerPostSeekPreload(fileId, currentReadOffset);
+                }
+              }
+
+              // PRIMARY TRACKING FIX:
+              // Continuously update the Primary Offset as we serve data.
+              // This ensures the "Protection Bubble" moves with the playback head.
+              // FIX: We must THROTTLE this update to prevent "Buffering" from dragging the Primary
+              // Offset far ahead of the actual Playback (Time).
+              // If the player buffers 300MB in 1 second, we should NOT update Primary to +300MB,
+              // because if the player then requests data at +10MB (Playback), it would look like
+              // a "Distant Zombie" relative to the Buffer Head.
+              //
+              // Logic:
+              // 1. Only allow Primary to advance by MAX_SPEED (e.g. 5MB/s) relative to elapsed time.
+              // 2. Seeks (handled in _handleRequest) break this limit instantly.
+              if (data.isNotEmpty) {
+                final streamState = _getOrCreateState(fileId);
+                final lastPrimary = streamState.primaryPlaybackOffset ?? 0;
+                final lastUpdateTime = streamState.lastPrimaryUpdateTime;
+
+                // If this is sequential (close to last known primary)
+                if (currentReadOffset > lastPrimary &&
+                    (currentReadOffset - lastPrimary) < significantJump) {
+                  final now = DateTime.now();
+                  // Determine allowed progress based on time elapsed
+                  // Base 2MB allowed instantly
+                  int allowedProgress = primaryProgressBase;
+                  if (lastUpdateTime != null) {
+                    final elapsedMs = now
+                        .difference(lastUpdateTime)
+                        .inMilliseconds;
+                    // Allow up to 3MB per second of additional progress (approx 3x realtime 1080p)
+                    // Total max rate ~ 5MB/s roughly.
+                    // (elapsedMs / 1000 * 3MB)
+                    final timeBasedAllowance =
+                        (elapsedMs /
+                                1000 *
+                                ProxyConfig.primaryProgressRateBytesPerSec)
+                            .round();
+                    allowedProgress += timeBasedAllowance;
+                  }
+
+                  // If the new offset is within the allowed progress window, update it.
+                  // Otherwise, hold the Primary back (it lags behind buffer).
+                  // If the new offset is within the allowed progress window, update it.
+                  // Otherwise, hold the Primary back (it lags behind buffer).
+                  if ((currentReadOffset - lastPrimary) <= allowedProgress) {
+                    // Throttle the actual map update to avoid spamming debug logs/maps
+                    // Update at most every 200ms
+                    if (lastUpdateTime == null ||
+                        now.difference(lastUpdateTime).inMilliseconds >
+                            ProxyConfig.primaryUpdateThrottleMs) {
+                      streamState.primaryPlaybackOffset = currentReadOffset;
+                      streamState.lastPrimaryUpdateTime = now;
+                    }
+                  }
+                } else if (currentReadOffset > lastPrimary &&
+                    (currentReadOffset - lastPrimary) > significantJump) {
+                  // STAGNANT ADOPTION (Stream Loop):
+                  // We are streaming far ahead of Primary (>significantJump).
+                  // If the Primary hasn't moved for > 2000ms, assume the user seeked here
+                  // and the initial Seek Logic rejected it (or we missed it).
+                  //
+                  // P1 FIX: BACKWARD SEEK PROTECTION (POSITION-BASED)
+                  // If there was an explicit user seek and the proposed adoption offset
+                  // is significantly FORWARD of that seek, DON'T adopt.
+                  // Protection stays active until Primary moves >100MB from seek position.
+                  final lastExplicitSeek = streamState.lastExplicitSeekOffset;
+
+                  // Block adoption if:
+                  // - There was an explicit seek AND
+                  // - Current Primary is still near the seek position (within 100MB) AND
+                  // - The proposed offset is significantly forward of seek (>50MB)
+                  final primaryNearSeek =
+                      lastExplicitSeek != null &&
+                      (lastPrimary - lastExplicitSeek).abs() <
+                          significantJump * 2;
+                  final proposedIsFarForward =
+                      lastExplicitSeek != null &&
+                      currentReadOffset > lastExplicitSeek &&
+                      (currentReadOffset - lastExplicitSeek) > significantJump;
+                  final isOverridingBackwardSeek =
+                      primaryNearSeek && proposedIsFarForward;
+
+                  if (isOverridingBackwardSeek) {
+                    _logTrace(
+                      'BLOCKED Stagnant Adoption for $fileId. Would override recent backward seek '
+                      '(seekTarget: ${lastExplicitSeek ~/ (1024 * 1024)}MB, primary: ${lastPrimary ~/ (1024 * 1024)}MB, proposed: ${currentReadOffset ~/ (1024 * 1024)}MB)',
+                      fileId: fileId,
+                    );
+                    // Don't adopt - keep the user's seek position
+                    // Reset stagnant timer to prevent repeated adoption attempts
+                    streamState.lastPrimaryUpdateTime = DateTime.now();
+                  } else if (lastUpdateTime != null &&
+                      DateTime.now().difference(lastUpdateTime).inMilliseconds >
+                          ProxyConfig.stagnantPrimaryMs) {
+                    _logTrace(
+                      'Recovering Primary Offset (Stagnant 2s in StreamLoop) -> Adopting $currentReadOffset',
+                      fileId: fileId,
+                    );
                     streamState.primaryPlaybackOffset = currentReadOffset;
-                    streamState.lastPrimaryUpdateTime = now;
+                    streamState.lastPrimaryUpdateTime = DateTime.now();
                   }
                 }
-              } else if (currentReadOffset > lastPrimary &&
-                  (currentReadOffset - lastPrimary) > significantJump) {
-                // STAGNANT ADOPTION (Stream Loop):
-                // We are streaming far ahead of Primary (>significantJump).
-                // If the Primary hasn't moved for > 2000ms, assume the user seeked here
-                // and the initial Seek Logic rejected it (or we missed it).
-                //
-                // P1 FIX: BACKWARD SEEK PROTECTION (POSITION-BASED)
-                // If there was an explicit user seek and the proposed adoption offset
-                // is significantly FORWARD of that seek, DON'T adopt.
-                // Protection stays active until Primary moves >100MB from seek position.
-                final lastExplicitSeek = streamState.lastExplicitSeekOffset;
-
-                // Block adoption if:
-                // - There was an explicit seek AND
-                // - Current Primary is still near the seek position (within 100MB) AND
-                // - The proposed offset is significantly forward of seek (>50MB)
-                final primaryNearSeek =
-                    lastExplicitSeek != null &&
-                    (lastPrimary - lastExplicitSeek).abs() <
-                        significantJump * 2;
-                final proposedIsFarForward =
-                    lastExplicitSeek != null &&
-                    currentReadOffset > lastExplicitSeek &&
-                    (currentReadOffset - lastExplicitSeek) > significantJump;
-                final isOverridingBackwardSeek =
-                    primaryNearSeek && proposedIsFarForward;
-
-                if (isOverridingBackwardSeek) {
-                  _logTrace(
-                    'BLOCKED Stagnant Adoption for $fileId. Would override recent backward seek '
-                    '(seekTarget: ${lastExplicitSeek ~/ (1024 * 1024)}MB, primary: ${lastPrimary ~/ (1024 * 1024)}MB, proposed: ${currentReadOffset ~/ (1024 * 1024)}MB)',
-                    fileId: fileId,
+              } else {
+                // NO DATA AVAILABLE -> BLOCKING WAIT (EVENT-DRIVEN)
+                // Throttled log: only print every 2 seconds per file to reduce CPU overhead
+                final now = DateTime.now();
+                final lastLog = _lastWaitingLogTime[fileId];
+                if (lastLog == null ||
+                    now.difference(lastLog) >= _waitingLogThrottle) {
+                  _lastWaitingLogTime[fileId] = now;
+                  final cached = _filePaths[fileId];
+                  _debugLog(
+                    'Proxy: Waiting for data at $currentReadOffset for $fileId '
+                    '(CachedOffset: ${cached?.downloadOffset}, CachedPrefix: ${cached?.downloadedPrefixSize})...',
                   );
-                  // Don't adopt - keep the user's seek position
-                  // Reset stagnant timer to prevent repeated adoption attempts
-                  streamState.lastPrimaryUpdateTime = DateTime.now();
-                } else if (lastUpdateTime != null &&
-                    DateTime.now().difference(lastUpdateTime).inMilliseconds >
-                        ProxyConfig.stagnantPrimaryMs) {
-                  _logTrace(
-                    'Recovering Primary Offset (Stagnant 2s in StreamLoop) -> Adopting $currentReadOffset',
-                    fileId: fileId,
-                  );
-                  streamState.primaryPlaybackOffset = currentReadOffset;
-                  streamState.lastPrimaryUpdateTime = DateTime.now();
+                }
+
+                // Ensure download is started at the exact offset the player needs
+                _startDownloadAtOffset(
+                  fileId,
+                  currentReadOffset,
+                  isBlocking: true,
+                );
+
+                // EXTENDED TIMEOUT FOR MOOV ATOM: Requests near end of file need more time
+                // because TDLib must start a new download from a distant offset
+                final fileInfo = _filePaths[fileId];
+                final totalFileSize = fileInfo?.totalSize ?? 0;
+                final distanceFromEnd = totalFileSize > 0
+                    ? totalFileSize - currentReadOffset
+                    : 0;
+                final moovWaitThreshold = ProxyConfig.scaled(
+                  totalFileSize,
+                  ProxyConfig.moovRegionThresholdPercent,
+                  ProxyConfig.moovRegionMinBytes,
+                  ProxyConfig.moovRegionMaxBytes,
+                );
+                final isMoovRequest =
+                    distanceFromEnd > 0 && distanceFromEnd < moovWaitThreshold;
+
+                // ADAPTIVE TIMEOUT: grows with retry count via exponential backoff
+                final timeout = _getAdaptiveTimeout(fileId, isMoovRequest);
+
+                // EVENT-DRIVEN WAIT: Register a Completer and wait for _onUpdate to wake us
+                final completer = Completer<void>();
+                _byteAvailabilityWaiters.putIfAbsent(fileId, () => []);
+                _byteAvailabilityWaiters[fileId]!.add(
+                  MapEntry(currentReadOffset, completer),
+                );
+
+                try {
+                  // Wait for data to become available, timeout, or client disconnect
+                  final waitResult = await Future.any([
+                    completer.future
+                        .timeout(
+                          timeout,
+                          onTimeout: () {
+                            // Timeout - remove our waiter and check manually
+                            _byteAvailabilityWaiters[fileId]?.removeWhere(
+                              (e) => e.value == completer,
+                            );
+                            if (_byteAvailabilityWaiters[fileId]?.isEmpty ??
+                                false) {
+                              _byteAvailabilityWaiters.remove(fileId);
+                            }
+                          },
+                        )
+                        .then((_) => false),
+                    disconnectCompleter.future,
+                  ]);
+
+                  if (waitResult == true) {
+                    _debugLog(
+                      'Proxy: Client disconnected during wait ($fileId).',
+                    );
+                    _byteAvailabilityWaiters[fileId]?.removeWhere(
+                      (e) => e.value == completer,
+                    );
+                    return;
+                  }
+
+                  // Check if aborted during wait
+                  if (_abortedRequests.contains(fileId)) {
+                    _debugLog('Proxy: Wait aborted for $fileId');
+                    return;
+                  }
+                } catch (_) {
+                  // Timeout or error - check data availability manually on next loop
+                }
+
+                // CIRCUIT BREAKER: Check if file entered terminal error state
+                final currentLoadState = _getOrCreateState(fileId).loadState;
+                if (currentLoadState == FileLoadState.error ||
+                    currentLoadState == FileLoadState.timeout ||
+                    currentLoadState == FileLoadState.unsupported) {
+                  break;
                 }
               }
+
+              // Read-ahead DISABLED due to TDLib limitation
+              // TDLib cancels any ongoing download when a new downloadFile is called
+              // for the same file_id with a different offset. This causes more harm
+              // than benefit, so read-ahead is disabled until TDLib supports parallel
+              // range requests for the same file.
+              // _scheduleReadAhead(fileId, currentReadOffset);
             } else {
               // NO DATA AVAILABLE -> BLOCKING WAIT (EVENT-DRIVEN)
               // Throttled log: only print every 2 seconds per file to reduce CPU overhead
@@ -1785,7 +1903,6 @@ class LocalStreamingProxy {
               );
 
               // EXTENDED TIMEOUT FOR MOOV ATOM: Requests near end of file need more time
-              // because TDLib must start a new download from a distant offset
               final fileInfo = _filePaths[fileId];
               final totalFileSize = fileInfo?.totalSize ?? 0;
               final distanceFromEnd = totalFileSize > 0
@@ -1810,199 +1927,133 @@ class LocalStreamingProxy {
                 MapEntry(currentReadOffset, completer),
               );
 
+              // PER-FILE STALL DETECTION: Update the offset we're waiting for
+              // and ensure a shared stall timer is running for this file.
+              // Unlike per-connection timers, this prevents N connections from
+              // creating N timers that all restart downloads simultaneously.
+              _getOrCreateState(fileId).waitingForOffset = currentReadOffset;
+              _ensureStallTimer(fileId);
+              _ensurePrefetchTimer(fileId);
+
               try {
-                // Wait for data to become available (or timeout)
-                await completer.future.timeout(
-                  timeout,
-                  onTimeout: () {
-                    // Timeout - remove our waiter and check manually
-                    _byteAvailabilityWaiters[fileId]?.removeWhere(
-                      (e) => e.value == completer,
-                    );
-                    if (_byteAvailabilityWaiters[fileId]?.isEmpty ?? false) {
-                      _byteAvailabilityWaiters.remove(fileId);
-                    }
-                  },
-                );
+                // Wait for data to become available, timeout, or client disconnect
+                final waitResult = await Future.any([
+                  completer.future
+                      .timeout(
+                        timeout,
+                        onTimeout: () {
+                          // Timeout - clean up and fall through
+                          _byteAvailabilityWaiters[fileId]?.removeWhere(
+                            (e) => e.value == completer,
+                          );
+                          if (_byteAvailabilityWaiters[fileId]?.isEmpty ??
+                              false) {
+                            _byteAvailabilityWaiters.remove(fileId);
+                          }
+                        },
+                      )
+                      .then((_) => false),
+                  disconnectCompleter.future,
+                ]);
+
+                if (waitResult == true) {
+                  _debugLog(
+                    'Proxy: Client disconnected during wait ($fileId).',
+                  );
+                  _byteAvailabilityWaiters[fileId]?.removeWhere(
+                    (e) => e.value == completer,
+                  );
+                  break;
+                }
 
                 // Check if aborted during wait
                 if (_abortedRequests.contains(fileId)) {
                   _debugLog('Proxy: Wait aborted for $fileId');
-                  return;
+                  break;
                 }
               } catch (_) {
-                // Timeout or error - check data availability manually on next loop
+                // Timeout or error - continue loop to retry
+              } finally {
+                // Clear waiting offset (this connection is no longer blocked)
+                // Don't cancel the per-file timer - other connections may need it
+                _getOrCreateState(fileId).waitingForOffset = null;
               }
 
-              // CIRCUIT BREAKER: Check if file entered terminal error state
-              final currentLoadState = _getOrCreateState(fileId).loadState;
-              if (currentLoadState == FileLoadState.error ||
-                  currentLoadState == FileLoadState.timeout ||
-                  currentLoadState == FileLoadState.unsupported) {
-                break;
-              }
-            }
-
-            // Read-ahead DISABLED due to TDLib limitation
-            // TDLib cancels any ongoing download when a new downloadFile is called
-            // for the same file_id with a different offset. This causes more harm
-            // than benefit, so read-ahead is disabled until TDLib supports parallel
-            // range requests for the same file.
-            // _scheduleReadAhead(fileId, currentReadOffset);
-          } else {
-            // NO DATA AVAILABLE -> BLOCKING WAIT (EVENT-DRIVEN)
-            // Throttled log: only print every 2 seconds per file to reduce CPU overhead
-            final now = DateTime.now();
-            final lastLog = _lastWaitingLogTime[fileId];
-            if (lastLog == null ||
-                now.difference(lastLog) >= _waitingLogThrottle) {
-              _lastWaitingLogTime[fileId] = now;
-              final cached = _filePaths[fileId];
-              _debugLog(
-                'Proxy: Waiting for data at $currentReadOffset for $fileId '
-                '(CachedOffset: ${cached?.downloadOffset}, CachedPrefix: ${cached?.downloadedPrefixSize})...',
-              );
-            }
-
-            // Ensure download is started at the exact offset the player needs
-            _startDownloadAtOffset(fileId, currentReadOffset, isBlocking: true);
-
-            // EXTENDED TIMEOUT FOR MOOV ATOM: Requests near end of file need more time
-            final fileInfo = _filePaths[fileId];
-            final totalFileSize = fileInfo?.totalSize ?? 0;
-            final distanceFromEnd = totalFileSize > 0
-                ? totalFileSize - currentReadOffset
-                : 0;
-            final moovWaitThreshold = ProxyConfig.scaled(
-              totalFileSize,
-              ProxyConfig.moovRegionThresholdPercent,
-              ProxyConfig.moovRegionMinBytes,
-              ProxyConfig.moovRegionMaxBytes,
-            );
-            final isMoovRequest =
-                distanceFromEnd > 0 && distanceFromEnd < moovWaitThreshold;
-
-            // ADAPTIVE TIMEOUT: grows with retry count via exponential backoff
-            final timeout = _getAdaptiveTimeout(fileId, isMoovRequest);
-
-            // EVENT-DRIVEN WAIT: Register a Completer and wait for _onUpdate to wake us
-            final completer = Completer<void>();
-            _byteAvailabilityWaiters.putIfAbsent(fileId, () => []);
-            _byteAvailabilityWaiters[fileId]!.add(
-              MapEntry(currentReadOffset, completer),
-            );
-
-            // PER-FILE STALL DETECTION: Update the offset we're waiting for
-            // and ensure a shared stall timer is running for this file.
-            // Unlike per-connection timers, this prevents N connections from
-            // creating N timers that all restart downloads simultaneously.
-            _getOrCreateState(fileId).waitingForOffset = currentReadOffset;
-            _ensureStallTimer(fileId);
-            _ensurePrefetchTimer(fileId);
-
-            try {
-              // Wait for data to become available (or timeout)
-              await completer.future.timeout(
-                timeout,
-                onTimeout: () {
-                  // Timeout - clean up and fall through
-                  _byteAvailabilityWaiters[fileId]?.removeWhere(
-                    (e) => e.value == completer,
+              // CIRCUIT BREAKER: Break out if stall timer detected terminal error
+              {
+                final ls = _getOrCreateState(fileId).loadState;
+                if (ls == FileLoadState.error ||
+                    ls == FileLoadState.timeout ||
+                    ls == FileLoadState.unsupported) {
+                  _debugLog(
+                    'Proxy: Breaking stream loop - file $fileId in terminal state: $ls',
                   );
-                  if (_byteAvailabilityWaiters[fileId]?.isEmpty ?? false) {
-                    _byteAvailabilityWaiters.remove(fileId);
-                  }
-                },
-              );
-
-              // Check if aborted during wait
-              if (_abortedRequests.contains(fileId)) {
-                _debugLog('Proxy: Wait aborted for $fileId');
-                break;
-              }
-            } catch (_) {
-              // Timeout or error - continue loop to retry
-            } finally {
-              // Clear waiting offset (this connection is no longer blocked)
-              // Don't cancel the per-file timer - other connections may need it
-              _getOrCreateState(fileId).waitingForOffset = null;
-            }
-
-            // CIRCUIT BREAKER: Break out if stall timer detected terminal error
-            {
-              final ls = _getOrCreateState(fileId).loadState;
-              if (ls == FileLoadState.error ||
-                  ls == FileLoadState.timeout ||
-                  ls == FileLoadState.unsupported) {
-                _debugLog(
-                  'Proxy: Breaking stream loop - file $fileId in terminal state: $ls',
-                );
-                break;
+                  break;
+                }
               }
             }
           }
+        } catch (e) {
+          if (e is! SocketException && e is! HttpException) {
+            _debugLog('Proxy: Error streaming: $e');
+          }
+        } finally {
+          await raf?.close();
+          // Clean up this request's offset tracking
+          _activeHttpRequestOffsets[fileId]?.remove(start);
+          if (_activeHttpRequestOffsets[fileId]?.isEmpty ?? false) {
+            _activeHttpRequestOffsets.remove(fileId);
+          }
+          // Decrement connection count
+          final remaining = (_activeConnectionCount[fileId] ?? 1) - 1;
+          if (remaining <= 0) {
+            _activeConnectionCount.remove(fileId);
+          } else {
+            _activeConnectionCount[fileId] = remaining;
+          }
+        }
+
+        // Close response, handling aborts logic
+        if (_abortedRequests.contains(fileId)) {
+          // Destroy to act as forced close
+          // request.response.destroy(); // Not exposed/safe?
+          // Just let it close or fail.
+          // Note: Dart HttpServer responses don't have destroy() easily.
+          // We can just exit without close(), or try close and ignore error.
+          try {
+            await request.response.close();
+          } catch (_) {}
+        } else {
+          await request.response.close();
         }
       } catch (e) {
-        if (e is! SocketException && e is! HttpException) {
-          _debugLog('Proxy: Error streaming: $e');
+        if (e is HttpException) {
+          // Ignore expected HttpExceptions on abort/close
+        } else {
+          _debugLog('Proxy: Top-level error: $e');
         }
+        try {
+          if (!_abortedRequests.contains(fileId)) {
+            request.response.statusCode = HttpStatus.internalServerError;
+            await request.response.close();
+          }
+        } catch (_) {}
       } finally {
-        await raf?.close();
         // Clean up this request's offset tracking
         _activeHttpRequestOffsets[fileId]?.remove(start);
-        if (_activeHttpRequestOffsets[fileId]?.isEmpty ?? false) {
+        if (_activeHttpRequestOffsets[fileId]?.isEmpty == true) {
           _activeHttpRequestOffsets.remove(fileId);
         }
-        // Decrement connection count
+        // Decrement connection count exactly once per request
         final remaining = (_activeConnectionCount[fileId] ?? 1) - 1;
         if (remaining <= 0) {
           _activeConnectionCount.remove(fileId);
         } else {
           _activeConnectionCount[fileId] = remaining;
         }
-      }
-
-      // Close response, handling aborts logic
-      if (_abortedRequests.contains(fileId)) {
-        // Destroy to act as forced close
-        // request.response.destroy(); // Not exposed/safe?
-        // Just let it close or fail.
-        // Note: Dart HttpServer responses don't have destroy() easily.
-        // We can just exit without close(), or try close and ignore error.
-        try {
-          await request.response.close();
-        } catch (_) {}
-      } else {
-        await request.response.close();
       }
     } catch (e) {
-      if (e is HttpException) {
-        // Ignore expected HttpExceptions on abort/close
-      } else {
-        _debugLog('Proxy: Top-level error: $e');
-      }
-      // Clean up on error too
-      if (fileId != null) {
-        _activeHttpRequestOffsets[fileId]?.remove(start);
-        if (_activeHttpRequestOffsets[fileId]?.isEmpty ?? false) {
-          _activeHttpRequestOffsets.remove(fileId);
-        }
-        // Decrement connection count
-        final remaining = (_activeConnectionCount[fileId] ?? 1) - 1;
-        if (remaining <= 0) {
-          _activeConnectionCount.remove(fileId);
-        } else {
-          _activeConnectionCount[fileId] = remaining;
-        }
-      }
-      try {
-        if (!_abortedRequests.contains(
-          fileIdStr != null ? int.tryParse(fileIdStr) : -1,
-        )) {
-          request.response.statusCode = HttpStatus.internalServerError;
-          await request.response.close();
-        }
-      } catch (_) {}
+      _debugLog('Proxy: Fatal error in _handleRequest setup: $e');
     }
   }
 
@@ -2192,6 +2243,7 @@ class LocalStreamingProxy {
     int fileId,
     int requestedOffset, {
     bool isBlocking = false,
+    bool forceRestart = false,
   }) async {
     // DISK SAFETY CHECK: Prevent crash if disk is full (<50MB)
     // Uses cached result for 5 seconds to avoid redundant disk queries
@@ -2338,7 +2390,7 @@ class LocalStreamingProxy {
       final fs = _getOrCreateState(fileId);
       final lastCall = fs.lastDownloadFileCallTime;
       // SKIP RATE LIMIT for blocking requests (e.g. initial load or stall recovery)
-      if (lastCall != null && !isBlocking) {
+      if (lastCall != null && !isBlocking && !forceRestart) {
         final elapsed = DateTime.now().difference(lastCall).inMilliseconds;
         if (elapsed < ProxyConfig.minDownloadCallIntervalMs) {
           _logTrace(
@@ -2393,13 +2445,13 @@ class LocalStreamingProxy {
     // download. Use a time-based guard: if download started recently (<10s),
     // trust that TDLib is still producing data even if isDownloadingActive
     // is momentarily false.
-    final recentDownload = _getOrCreateState(fileId).isRecentDownload(
-      const Duration(seconds: 10),
-    );
-    final atFrontier = distanceFromFrontier >= 0 &&
-        distanceFromFrontier < frontierProximity;
+    final recentDownload = _getOrCreateState(
+      fileId,
+    ).isRecentDownload(const Duration(seconds: 10));
+    final atFrontier =
+        distanceFromFrontier >= 0 && distanceFromFrontier < frontierProximity;
 
-    if (atFrontier && (isDownloading || recentDownload)) {
+    if (!forceRestart && atFrontier && (isDownloading || recentDownload)) {
       // Current download will reach our offset soon, don't restart
       return;
     }
@@ -2407,9 +2459,11 @@ class LocalStreamingProxy {
     // Check if already targeting this offset
     // CRITICAL STALL FIX: Only return if download is ACTUALLY active in TDLib.
     // If we think we are downloading X, but TDLib stopped (isDownloadingActive=false),
-    // we MUST fall through to restart the download.
+    // we MUST fall through to restart the download. Also bypass if forcing restart.
     final isDownloadingCached = cached?.isDownloadingActive ?? false;
-    if (currentActiveOffset == requestedOffset && isDownloadingCached) {
+    if (!forceRestart &&
+        currentActiveOffset == requestedOffset &&
+        isDownloadingCached) {
       return;
     }
 
@@ -2754,6 +2808,7 @@ class LocalStreamingProxy {
     final isLowOffsetRequestForProtection =
         requestedOffset < DownloadPriority.lowOffsetThresholdBytes;
     if (!isBlocking &&
+        !forceRestart &&
         !isLowOffsetRequestForProtection && // NEVER block initial file data
         isHighPriorityActive &&
         priority < activePriority - DownloadPriority.priorityProtectionGap &&
@@ -2804,6 +2859,23 @@ class LocalStreamingProxy {
 
     // Record call time for rate limiter before sending
     _getOrCreateState(fileId).lastDownloadFileCallTime = DateTime.now();
+
+    // FORCE RESTART FIX: If TDLib is stuck but still considers the file
+    // actively downloading, sending a duplicate downloadFile command is a NO-OP.
+    // We must forcibly cancel the active download first to genuinely restart it.
+    if (forceRestart) {
+      _logTrace(
+        'Processing force restart for $fileId: sending cancelDownloadFile first',
+        fileId: fileId,
+      );
+      TelegramService().send({
+        '@type': 'cancelDownloadFile',
+        'file_id': fileId,
+        'only_if_pending': false,
+      });
+      // Short delay to let TDLib process the cancellation before we re-request
+      await Future.delayed(const Duration(milliseconds: 50));
+    }
 
     TelegramService().send({
       '@type': 'downloadFile',
@@ -2857,8 +2929,7 @@ class LocalStreamingProxy {
       } on FileSystemException catch (e) {
         lastError = e;
         if (attempt < maxRetries - 1) {
-          final delayMs =
-              ProxyConfig.fileOpenRetryBaseMs * (1 << attempt);
+          final delayMs = ProxyConfig.fileOpenRetryBaseMs * (1 << attempt);
           _debugLog(
             'Proxy: File locked${fileId != null ? ' ($fileId)' : ''}, '
             'retrying in ${delayMs}ms '
@@ -2888,9 +2959,10 @@ class LocalStreamingProxy {
     final attempts = _retryTracker.totalAttempts(fileId);
     final baseMs = ProxyConfig.normalDataTimeoutInitial.inMilliseconds;
     final maxMs = ProxyConfig.normalDataTimeoutMax.inMilliseconds;
-    final backoffMs = (baseMs * pow(ProxyConfig.timeoutBackoffMultiplier, attempts))
-        .round()
-        .clamp(baseMs, maxMs);
+    final backoffMs =
+        (baseMs * pow(ProxyConfig.timeoutBackoffMultiplier, attempts))
+            .round()
+            .clamp(baseMs, maxMs);
     return Duration(milliseconds: backoffMs);
   }
 
@@ -2944,16 +3016,18 @@ class LocalStreamingProxy {
     if (state.isRecentDownload(const Duration(seconds: 5))) return;
 
     // ACTIVE DOWNLOAD PROTECTION
+    // REMOVED early return. We must analyze progress because TDLib might
+    // report isDownloadingActive=true even if the connection dropped/stalled
+    // silently and no bytes are flowing.
     if (updatedCache.isDownloadingActive) {
       final activeOffset = state.activeDownloadOffset;
       if (activeOffset != null && activeOffset != waitingOffset) {
         _logTrace(
           'Stall timer - download active at different offset '
-          '($activeOffset vs waiting for $waitingOffset), not a stall',
+          '($activeOffset vs waiting for $waitingOffset), analyzing progress anyway...',
           fileId: fileId,
         );
       }
-      return;
     }
 
     final currentPrefix = updatedCache.downloadedPrefixSize;
@@ -3019,7 +3093,7 @@ class LocalStreamingProxy {
           'restarting download without counting stall',
           fileId: fileId,
         );
-        _startDownloadAtOffset(fileId, waitingOffset);
+        _startDownloadAtOffset(fileId, waitingOffset, forceRestart: true);
         return;
       }
     }
@@ -3031,10 +3105,10 @@ class LocalStreamingProxy {
     final metrics = _downloadMetrics[fileId];
     final adaptiveMaxRetries = metrics != null
         ? (metrics.isFastNetwork
-            ? ProxyConfig.retryMinCount
-            : metrics.isSlowNetwork
-                ? ProxyConfig.retryMaxCount
-                : ProxyConfig.retryDefaultCount)
+              ? ProxyConfig.retryMinCount
+              : metrics.isSlowNetwork
+              ? ProxyConfig.retryMaxCount
+              : ProxyConfig.retryDefaultCount)
         : ProxyConfig.retryDefaultCount;
     _retryTracker.setMaxRetries(fileId, adaptiveMaxRetries);
 
@@ -3080,18 +3154,17 @@ class LocalStreamingProxy {
       );
       Timer(backoff, () {
         // Re-check state after backoff - file may have been aborted or recovered
-        final currentState = _fileStates[fileId];
-        if (currentState == null) return;
+        final currentState = _getOrCreateState(fileId);
         if (currentState.loadState == FileLoadState.error ||
             currentState.loadState == FileLoadState.timeout ||
             currentState.loadState == FileLoadState.unsupported) {
           return;
         }
         if (_abortedRequests.contains(fileId)) return;
-        _startDownloadAtOffset(fileId, waitingOffset);
+        _startDownloadAtOffset(fileId, waitingOffset, forceRestart: true);
       });
     } else {
-      _startDownloadAtOffset(fileId, waitingOffset);
+      _startDownloadAtOffset(fileId, waitingOffset, forceRestart: true);
     }
     _lastDownloadProgress[fileId] = currentPrefix;
   }
@@ -3189,7 +3262,14 @@ class LocalStreamingProxy {
   /// Returns immediately if already cached.
   /// This detection does NOT start downloads - only analyzes already available data.
   /// Atoms that are known non-media containers; we walk past them looking for moov.
-  static const _skipAtomTypes = {'ftyp', 'free', 'skip', 'wide', 'pdin', 'uuid'};
+  static const _skipAtomTypes = {
+    'ftyp',
+    'free',
+    'skip',
+    'wide',
+    'pdin',
+    'uuid',
+  };
 
   Future<MoovPosition> _detectMoovPosition(int fileId, int totalSize) async {
     // Check cache first
@@ -3215,7 +3295,9 @@ class LocalStreamingProxy {
         // Read first 4KB — enough to walk past ftyp + free/skip/wide atoms
         const headerSize = 4096;
         final availableBytes = cached.downloadedPrefixSize.clamp(0, totalSize);
-        final readSize = availableBytes < headerSize ? availableBytes : headerSize;
+        final readSize = availableBytes < headerSize
+            ? availableBytes
+            : headerSize;
         if (readSize < 8) return MoovPosition.unknown;
 
         final header = await raf.read(readSize);
@@ -3225,7 +3307,9 @@ class LocalStreamingProxy {
         var offset = 0;
         while (offset + 8 <= header.length) {
           final atomSize = _readMoovUint32BE(header, offset);
-          final atomType = String.fromCharCodes(header.sublist(offset + 4, offset + 8));
+          final atomType = String.fromCharCodes(
+            header.sublist(offset + 4, offset + 8),
+          );
 
           // moov found near start → streaming-optimized
           if (atomType == 'moov') {
@@ -3385,8 +3469,8 @@ class LocalStreamingProxy {
     final availableAhead = ranges.availableBytesFrom(playbackOffset);
 
     // Si hay suficiente buffer, no hacer nada
-    final triggerThreshold =
-        (bufferTarget * ProxyConfig.prefetchTriggerRatio).round();
+    final triggerThreshold = (bufferTarget * ProxyConfig.prefetchTriggerRatio)
+        .round();
     if (availableAhead >= triggerThreshold) {
       state.prefetchActive = false;
       return;
@@ -3428,8 +3512,8 @@ class LocalStreamingProxy {
     final targetSeconds = (metrics!.isFastNetwork)
         ? ProxyConfig.prefetchSecondsFast
         : (metrics.isSlowNetwork)
-            ? ProxyConfig.prefetchSecondsSlow
-            : ProxyConfig.prefetchSecondsNormal;
+        ? ProxyConfig.prefetchSecondsSlow
+        : ProxyConfig.prefetchSecondsNormal;
 
     final speedBasedTarget = (speed * targetSeconds).round();
     return speedBasedTarget.clamp(
