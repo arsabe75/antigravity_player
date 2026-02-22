@@ -19,6 +19,7 @@ class PlayerBottomBar extends StatelessWidget {
   final bool hasNext;
   final bool hasPrevious;
   final bool isPlaylistEmpty;
+  final bool isMirrored;
 
   // Callbacks
   final VoidCallback onTogglePlay;
@@ -34,6 +35,7 @@ class PlayerBottomBar extends StatelessWidget {
   final VoidCallback onTogglePlaylist;
   final VoidCallback? onToggleTracks;
   final VoidCallback onStop;
+  final VoidCallback onToggleMirror;
 
   const PlayerBottomBar({
     super.key,
@@ -48,6 +50,7 @@ class PlayerBottomBar extends StatelessWidget {
     required this.hasNext,
     required this.hasPrevious,
     required this.isPlaylistEmpty,
+    required this.isMirrored,
     required this.onTogglePlay,
     required this.onNext,
     required this.onPrevious,
@@ -60,6 +63,7 @@ class PlayerBottomBar extends StatelessWidget {
     required this.onToggleAlwaysOnTop,
     required this.onTogglePlaylist,
     this.onToggleTracks,
+    required this.onToggleMirror,
     required this.onStop,
   });
 
@@ -162,6 +166,15 @@ class PlayerBottomBar extends StatelessWidget {
                     onPressed: onToggleTracks!,
                     tooltip: 'Audio & Subtitles',
                   ),
+                // Mirror button
+                IconButton(
+                  icon: Icon(
+                    isMirrored ? Icons.flip : Icons.flip,
+                    color: isMirrored ? Colors.blue : Colors.white,
+                  ),
+                  onPressed: onToggleMirror,
+                  tooltip: isMirrored ? 'Disable Mirror' : 'Enable Mirror',
+                ),
                 // Always on top button
                 IconButton(
                   icon: Icon(

@@ -25,6 +25,7 @@ abstract class PlayerState with _$PlayerState {
     String? currentVideoPath,
     String? currentVideoTitle,
     String? error,
+    @Default(false) bool isMirrored,
     @Default('media_kit') String playerBackend,
     // Video not optimized for streaming (moov atom at end of file)
     @Default(false) bool isVideoNotOptimizedForStreaming,

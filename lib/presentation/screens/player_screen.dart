@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -525,9 +526,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                         isAlwaysOnTop: state.isAlwaysOnTop,
                         showPlaylist: _showPlaylist,
                         isPlaylistEmpty: playlist.isEmpty,
+                        isMirrored: state.isMirrored,
                         hasNext: playlist.hasNext,
                         hasPrevious: playlist.hasPrevious,
                         onTogglePlay: notifier.togglePlay,
+                        onToggleMirror: notifier.toggleMirror,
                         onNext: playNext,
                         onPrevious: playPrevious,
                         onSeek: notifier.seekTo,
@@ -818,6 +821,14 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       videoWidget = Video(
         controller: (controller as VideoController),
         controls: NoVideoControls,
+      );
+    }
+
+    if (state.isMirrored) {
+      videoWidget = Transform(
+        alignment: Alignment.center,
+        transform: Matrix4.rotationY(math.pi),
+        child: videoWidget,
       );
     }
 

@@ -715,6 +715,10 @@ class PlayerNotifier extends _$PlayerNotifier {
     state = state.copyWith(isAlwaysOnTop: newState);
   }
 
+  void toggleMirror() {
+    state = state.copyWith(isMirrored: !state.isMirrored);
+  }
+
   Future<void> setPlaybackSpeed(double speed) async {
     await _repository.setPlaybackSpeed(speed);
     state = state.copyWith(playbackSpeed: speed);
