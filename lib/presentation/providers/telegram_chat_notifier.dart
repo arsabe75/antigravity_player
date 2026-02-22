@@ -56,12 +56,21 @@ class TelegramChat extends _$TelegramChat {
 
       if (updateType == 'updateNewMessage') {
         final message = update['message'];
+
         if (message['chat_id'] == chatId) {
           // For thread messages, check message_thread_id
           if (messageThreadId != null) {
-            final msgThreadId = message['message_thread_id'] as int?;
-            // Accept nulls? Usually live updates have explicit thread ID.
-            if (msgThreadId != null && msgThreadId != messageThreadId) return;
+            int? msgThreadId = message['message_thread_id'] as int?;
+            if (msgThreadId == null && message.containsKey('topic_id')) {
+              final topicObj = message['topic_id'];
+              if (topicObj is Map) {
+                msgThreadId = topicObj['forum_topic_id'] as int?;
+              } else if (topicObj is int) {
+                msgThreadId = topicObj;
+              }
+            }
+            final finalThreadId = msgThreadId ?? 0;
+            if (finalThreadId != messageThreadId) return;
           }
 
           if (_isMessageExists(message['id'])) {

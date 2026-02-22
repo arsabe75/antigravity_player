@@ -163,6 +163,62 @@ class TelegramForum extends _$TelegramForum {
           currentTopics[index] = {...currentTopics[index], 'info': topicInfo};
           state = state.copyWith(topics: currentTopics);
         }
+      } else if (update['@type'] == 'updateNewMessage') {
+        final message = update['message'] as Map<String, dynamic>?;
+        if (message == null || message['chat_id'] != chatId) return;
+
+        int? topicId = message['message_thread_id'] as int?;
+        if (topicId == null && message.containsKey('topic_id')) {
+          final topicObj = message['topic_id'];
+          if (topicObj is Map) {
+            topicId = topicObj['forum_topic_id'] as int?;
+          } else if (topicObj is int) {
+            topicId = topicObj;
+          }
+        }
+
+        // debugPrint('Forum LiveUpdate: extracted topicId=$topicId');
+        if (topicId == null || topicId == 0) return;
+
+        final currentTopics = List<Map<String, dynamic>>.from(state.topics);
+        final index = currentTopics.indexWhere((t) {
+          final info = t['info'] as Map<String, dynamic>?;
+          return info?['forum_topic_id'] == topicId;
+        });
+
+        if (index != -1) {
+          final topic = Map<String, dynamic>.from(currentTopics[index]);
+          topic['last_message'] = message;
+
+          // Find max order among unpinned topics to bump this topic to the top
+          BigInt maxOrder = BigInt.zero;
+          for (final t in currentTopics) {
+            if (t['is_pinned'] == true) continue;
+            final orderStr = t['order']?.toString() ?? '0';
+            final order = BigInt.tryParse(orderStr) ?? BigInt.zero;
+            if (order > maxOrder) maxOrder = order;
+          }
+
+          // Increment the order
+          topic['order'] = (maxOrder + BigInt.one).toString();
+
+          currentTopics[index] = topic;
+
+          // Re-sort currentTopics
+          currentTopics.sort((a, b) {
+            final aPinned = a['is_pinned'] == true ? 1 : 0;
+            final bPinned = b['is_pinned'] == true ? 1 : 0;
+            if (aPinned != bPinned) return bPinned - aPinned;
+
+            final aOrderStr = a['order']?.toString() ?? '0';
+            final bOrderStr = b['order']?.toString() ?? '0';
+            final aOrder = BigInt.tryParse(aOrderStr) ?? BigInt.zero;
+            final bOrder = BigInt.tryParse(bOrderStr) ?? BigInt.zero;
+            return bOrder.compareTo(aOrder);
+          });
+
+          state = state.copyWith(topics: currentTopics);
+        }
       }
     } catch (e, st) {
       debugPrint('TelegramForum Error: $e\n$st');

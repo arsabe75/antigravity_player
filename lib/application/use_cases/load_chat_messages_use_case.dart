@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../use_case.dart';
@@ -78,7 +79,15 @@ class LoadChatMessagesUseCase
 
     final validMsgs = allMsgs.where((msg) {
       if (params.messageThreadId != null) {
-        final msgThreadId = msg['message_thread_id'] as int?;
+        int? msgThreadId = msg['message_thread_id'] as int?;
+        if (msgThreadId == null && msg.containsKey('topic_id')) {
+          final topicObj = msg['topic_id'];
+          if (topicObj is Map) {
+            msgThreadId = topicObj['forum_topic_id'] as int?;
+          } else if (topicObj is int) {
+            msgThreadId = topicObj;
+          }
+        }
         if (msgThreadId != null && msgThreadId != params.messageThreadId) {
           return false;
         }
@@ -117,6 +126,9 @@ class LoadChatMessagesUseCase
       });
 
       if (result['@type'] == 'error') {
+        debugPrint(
+          'TDLib searchChatMessages error: ${result['code']} - ${result['message']}',
+        );
         return [];
       }
 
