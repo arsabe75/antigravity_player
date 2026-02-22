@@ -749,6 +749,8 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       const SingleActivator(LogicalKeyboardKey.keyP): onPrevious,
       // Stop / Back
       const SingleActivator(LogicalKeyboardKey.keyS): _handleBack,
+      // Mirror
+      const SingleActivator(LogicalKeyboardKey.keyE): notifier.toggleMirror,
 
       const SingleActivator(LogicalKeyboardKey.keyM): notifier.toggleMute,
       const SingleActivator(LogicalKeyboardKey.arrowUp): () {
