@@ -22,7 +22,14 @@ class TelegramChat extends _$TelegramChat {
   TelegramChatState build(TelegramChatParams params) {
     _service = TelegramService();
     final sub = _service.updates.listen(_handleUpdate);
-    ref.onDispose(() => sub.cancel());
+    ref.onDispose(() {
+      sub.cancel();
+      // Inform TDLib we are no longer viewing this chat/topic
+      _service.send({'@type': 'closeChat', 'chat_id': params.chatId});
+    });
+
+    // Inform TDLib we are viewing this chat/topic to ensure live updates
+    _service.send({'@type': 'openChat', 'chat_id': params.chatId});
 
     // Defer loading to avoid modifying state during build
     Future.microtask(() => loadMessages());
@@ -88,6 +95,20 @@ class TelegramChat extends _$TelegramChat {
           );
           currentMessages.insert(0, message);
           state = state.copyWith(messages: currentMessages);
+        }
+      } else if (updateType == 'updateDeleteMessages') {
+        if (update['chat_id'] == chatId) {
+          final messageIdsList = update['message_ids'] as List?;
+          if (messageIdsList != null && messageIdsList.isNotEmpty) {
+            final deletedIds = messageIdsList.cast<int>().toSet();
+            final updatedMessages = state.messages
+                .where((msg) => !deletedIds.contains(msg['id'] as int))
+                .toList();
+
+            if (updatedMessages.length != state.messages.length) {
+              state = state.copyWith(messages: updatedMessages);
+            }
+          }
         }
       }
       // Note: We no longer handle 'foundChatMessages' here because we use sendWithResult

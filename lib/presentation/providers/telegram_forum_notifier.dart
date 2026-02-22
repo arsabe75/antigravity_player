@@ -49,7 +49,12 @@ class TelegramForum extends _$TelegramForum {
   TelegramForumState build(int chatId) {
     _service = TelegramService();
     final sub = _service.updates.listen(_handleUpdate);
-    ref.onDispose(() => sub.cancel());
+    ref.onDispose(() {
+      sub.cancel();
+      _service.send({'@type': 'closeChat', 'chat_id': chatId});
+    });
+
+    _service.send({'@type': 'openChat', 'chat_id': chatId});
 
     // Defer loading to avoid modifying state during build
     Future.microtask(() => loadTopics());
@@ -218,6 +223,26 @@ class TelegramForum extends _$TelegramForum {
           });
 
           state = state.copyWith(topics: currentTopics);
+        }
+      } else if (update['@type'] == 'updateDeleteMessages') {
+        if (update['chat_id'] == chatId) {
+          final messageIdsList = update['message_ids'] as List?;
+          if (messageIdsList != null && messageIdsList.isNotEmpty) {
+            final deletedIds = messageIdsList.cast<int>().toSet();
+            final updatedTopics = state.topics.where((t) {
+              final info = t['info'] as Map<String, dynamic>?;
+              final topicId = info?['forum_topic_id'] as int?;
+              if (topicId == null) return true;
+              // In TDLib for supergroups, the message ID of a topic is its topicId * 2^20
+              final topicMessageId = topicId * 1048576;
+              return !deletedIds.contains(topicId) &&
+                  !deletedIds.contains(topicMessageId);
+            }).toList();
+
+            if (updatedTopics.length != state.topics.length) {
+              state = state.copyWith(topics: updatedTopics);
+            }
+          }
         }
       }
     } catch (e, st) {

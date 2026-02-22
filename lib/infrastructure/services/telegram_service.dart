@@ -358,7 +358,6 @@ class TelegramService {
             // print('Isolate received updateFile: ${resultJson['file']['id']}');
           }
           if (type != null && !ignoredTypes.contains(type)) {
-            // if (type == 'updateFile') print('Isolate sending updateFile to main');
             args.sendPort.send(resultJson);
           }
         } catch (e) {
