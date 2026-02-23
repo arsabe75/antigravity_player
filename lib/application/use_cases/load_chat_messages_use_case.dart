@@ -114,12 +114,9 @@ class LoadChatMessagesUseCase
       final result = await _service.sendWithResult({
         '@type': 'searchChatMessages',
         'chat_id': chatId,
-        'topic_id': messageThreadId != null
-            ? {'@type': 'messageTopicForum', 'forum_topic_id': messageThreadId}
-            : null,
+        'message_thread_id': messageThreadId ?? 0,
         'query': '',
-        'sender_id': null,
-        'fromMessageId': fromMessageId,
+        'from_message_id': fromMessageId,
         'offset': 0,
         'limit': 20,
         'filter': filter,
