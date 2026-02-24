@@ -60,7 +60,7 @@ class LoadChatMessagesUseCase
               fromMessageId: currentNextVideoFromId,
               filter: {'@type': 'searchMessagesFilterVideo'},
             ).then((batch) {
-              if (batch.length < 20) hasMoreVideos = false;
+              if (batch.length < 100) hasMoreVideos = false;
               if (batch.isNotEmpty) currentNextVideoFromId = batch.last['id'];
               return batch;
             })
@@ -74,7 +74,7 @@ class LoadChatMessagesUseCase
               fromMessageId: currentNextDocFromId,
               filter: {'@type': 'searchMessagesFilterDocument'},
             ).then((batch) {
-              if (batch.length < 20) hasMoreDocs = false;
+              if (batch.length < 100) hasMoreDocs = false;
               if (batch.isNotEmpty) currentNextDocFromId = batch.last['id'];
               return batch;
             })
@@ -190,7 +190,7 @@ class LoadChatMessagesUseCase
         'query': '',
         'from_message_id': fromMessageId,
         'offset': 0,
-        'limit': 20,
+        'limit': 100,
         'filter': filter,
       });
 
@@ -203,7 +203,7 @@ class LoadChatMessagesUseCase
 
       final msgsList = result['messages'] as List?;
       debugPrint(
-        'TDLib searchChatMessages result limit 20 got ${msgsList?.length} messages for global chat',
+        'TDLib searchChatMessages result limit 100 got ${msgsList?.length} messages for global chat',
       );
       if (msgsList == null) return [];
       return msgsList.cast<Map<String, dynamic>>();
@@ -224,10 +224,33 @@ class LoadChatMessagesUseCase
       final fileName = (document['file_name'] as String? ?? '').toLowerCase();
 
       if (mimeType.startsWith('video/')) return true;
+      if (mimeType == 'application/x-matroska' ||
+          mimeType == 'application/matroska') {
+        return true;
+      }
 
-      const videoExtensions = ['.mkv', '.avi', '.mp4', '.mov', '.webm', '.flv'];
+      const videoExtensions = [
+        '.mkv',
+        '.avi',
+        '.mp4',
+        '.mov',
+        '.webm',
+        '.flv',
+        '.wmv',
+        '.ts',
+        '.m2ts',
+        '.m4v',
+        '.mpg',
+        '.mpeg',
+        '.3gp',
+      ];
       for (final ext in videoExtensions) {
         if (fileName.endsWith(ext)) return true;
+      }
+
+      final size = document['document']['size'] ?? 0;
+      if (size > 20 * 1024 * 1024 && !fileName.contains('.')) {
+        return true;
       }
     }
     return false;

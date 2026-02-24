@@ -160,7 +160,12 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
               controller: _scrollController,
               slivers: [
                 SliverPadding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.only(
+                    left: 16,
+                    right: 16,
+                    top: 16,
+                    bottom: 96,
+                  ), // 96px bottom padding to prevent system taskbars (like KDE Plasma) from overlapping the last videos
                   sliver: SliverGrid(
                     gridDelegate:
                         const SliverGridDelegateWithMaxCrossAxisExtent(

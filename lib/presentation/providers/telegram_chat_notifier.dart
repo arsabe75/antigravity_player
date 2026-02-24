@@ -130,17 +130,45 @@ class TelegramChat extends _$TelegramChat {
     // Standard video
     if (content['@type'] == 'messageVideo') return true;
 
-    // MKV/AVI as Document
+    // MKV/AVI/others as Document
     if (content['@type'] == 'messageDocument') {
       final document = content['document'];
       final mimeType = (document['mime_type'] as String? ?? '').toLowerCase();
       final fileName = (document['file_name'] as String? ?? '').toLowerCase();
 
       if (mimeType.startsWith('video/')) return true;
+      if (mimeType == 'application/x-matroska' ||
+          mimeType == 'application/matroska') {
+        return true;
+      }
 
-      const videoExtensions = ['.mkv', '.avi', '.mp4', '.mov', '.webm', '.flv'];
+      const videoExtensions = [
+        '.mkv',
+        '.avi',
+        '.mp4',
+        '.mov',
+        '.webm',
+        '.flv',
+        '.wmv',
+        '.ts',
+        '.m2ts',
+        '.m4v',
+        '.mpg',
+        '.mpeg',
+        '.3gp',
+      ];
+
       for (final ext in videoExtensions) {
         if (fileName.endsWith(ext)) return true;
+      }
+
+      // If no valid extension and Linux failed to parse a video MIME type,
+      // we can do a heuristic check: if it's a large file (>50MB) and we're
+      // explicitly keeping videos, we might want to include it, but to be
+      // safe we just check if it literally has no extension and size > 20MB.
+      final size = document['document']['size'] ?? 0;
+      if (size > 20 * 1024 * 1024 && !fileName.contains('.')) {
+        return true;
       }
     }
     return false;
