@@ -216,10 +216,7 @@ class TelegramChat extends _$TelegramChat {
   }
 
   Future<void> loadMoreMessages() async {
-    if (state.isLoading ||
-        state.isLoadingMore ||
-        !state.hasMore ||
-        state.messages.isEmpty) {
+    if (state.isLoading || state.isLoadingMore || !state.hasMore) {
       return;
     }
 
@@ -242,9 +239,9 @@ class TelegramChat extends _$TelegramChat {
         LoadChatMessagesParams(
           chatId: chatId,
           messageThreadId: messageThreadId,
-          // If a stream is exhausted, pass 0 but the usecase handles fetching from new IDs
-          nextVideoFromId: _hasMoreVideos ? _nextVideoFromId : 0,
-          nextDocFromId: _hasMoreDocs ? _nextDocFromId : 0,
+          // If a stream is exhausted, pass -1 to kill fetching that type
+          nextVideoFromId: _hasMoreVideos ? _nextVideoFromId : -1,
+          nextDocFromId: _hasMoreDocs ? _nextDocFromId : -1,
         ),
       );
 

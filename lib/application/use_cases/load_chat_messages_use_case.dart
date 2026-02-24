@@ -44,32 +44,44 @@ class LoadChatMessagesUseCase
 
   @override
   Future<LoadChatMessagesResult> call(LoadChatMessagesParams params) async {
+    if (params.messageThreadId != null && params.messageThreadId != 0) {
+      return _fetchTopicHistory(params);
+    }
+
     bool hasMoreVideos = true;
     bool hasMoreDocs = true;
     int currentNextVideoFromId = params.nextVideoFromId;
     int currentNextDocFromId = params.nextDocFromId;
 
     final results = await Future.wait([
-      _fetchBatch(
-        chatId: params.chatId,
-        messageThreadId: params.messageThreadId,
-        fromMessageId: currentNextVideoFromId,
-        filter: {'@type': 'searchMessagesFilterVideo'},
-      ).then((batch) {
-        if (batch.length < 20) hasMoreVideos = false;
-        if (batch.isNotEmpty) currentNextVideoFromId = batch.last['id'];
-        return batch;
-      }),
-      _fetchBatch(
-        chatId: params.chatId,
-        messageThreadId: params.messageThreadId,
-        fromMessageId: currentNextDocFromId,
-        filter: {'@type': 'searchMessagesFilterDocument'},
-      ).then((batch) {
-        if (batch.length < 20) hasMoreDocs = false;
-        if (batch.isNotEmpty) currentNextDocFromId = batch.last['id'];
-        return batch;
-      }),
+      currentNextVideoFromId != -1
+          ? _fetchBatch(
+              chatId: params.chatId,
+              fromMessageId: currentNextVideoFromId,
+              filter: {'@type': 'searchMessagesFilterVideo'},
+            ).then((batch) {
+              if (batch.length < 20) hasMoreVideos = false;
+              if (batch.isNotEmpty) currentNextVideoFromId = batch.last['id'];
+              return batch;
+            })
+          : Future.value(<Map<String, dynamic>>[]).then((batch) {
+              hasMoreVideos = false;
+              return batch;
+            }),
+      currentNextDocFromId != -1
+          ? _fetchBatch(
+              chatId: params.chatId,
+              fromMessageId: currentNextDocFromId,
+              filter: {'@type': 'searchMessagesFilterDocument'},
+            ).then((batch) {
+              if (batch.length < 20) hasMoreDocs = false;
+              if (batch.isNotEmpty) currentNextDocFromId = batch.last['id'];
+              return batch;
+            })
+          : Future.value(<Map<String, dynamic>>[]).then((batch) {
+              hasMoreDocs = false;
+              return batch;
+            }),
     ]);
 
     final allMsgs = <Map<String, dynamic>>[];
@@ -77,23 +89,7 @@ class LoadChatMessagesUseCase
       allMsgs.addAll(batch);
     }
 
-    final validMsgs = allMsgs.where((msg) {
-      if (params.messageThreadId != null) {
-        int? msgThreadId = msg['message_thread_id'] as int?;
-        if (msgThreadId == null && msg.containsKey('topic_id')) {
-          final topicObj = msg['topic_id'];
-          if (topicObj is Map) {
-            msgThreadId = topicObj['forum_topic_id'] as int?;
-          } else if (topicObj is int) {
-            msgThreadId = topicObj;
-          }
-        }
-        if (msgThreadId != null && msgThreadId != params.messageThreadId) {
-          return false;
-        }
-      }
-      return _isVideoMessage(msg);
-    }).toList();
+    final validMsgs = allMsgs.where(_isVideoMessage).toList();
 
     return LoadChatMessagesResult(
       messages: validMsgs,
@@ -104,17 +100,93 @@ class LoadChatMessagesUseCase
     );
   }
 
+  Future<LoadChatMessagesResult> _fetchTopicHistory(
+    LoadChatMessagesParams params,
+  ) async {
+    if (params.nextVideoFromId == -1) {
+      return LoadChatMessagesResult(
+        messages: [],
+        nextVideoFromId: -1,
+        nextDocFromId: -1,
+        hasMoreVideos: false,
+        hasMoreDocs: false,
+      );
+    }
+
+    try {
+      final topicMessageId = params.messageThreadId! * 1048576;
+      final result = await _service.sendWithResult({
+        '@type': 'getMessageThreadHistory',
+        'chat_id': params.chatId,
+        'message_id': topicMessageId,
+        'from_message_id': params.nextVideoFromId,
+        'offset': 0,
+        'limit': 100, // Fetch large batches to locate videos quickly
+      });
+
+      if (result['@type'] == 'error') {
+        debugPrint(
+          'TDLib getMessageThreadHistory error: ${result['code']} - ${result['message']}',
+        );
+        return LoadChatMessagesResult(
+          messages: [],
+          nextVideoFromId: -1,
+          nextDocFromId: -1,
+          hasMoreVideos: false,
+          hasMoreDocs: false,
+        );
+      }
+
+      final msgsList = result['messages'] as List?;
+      if (msgsList == null) {
+        return LoadChatMessagesResult(
+          messages: [],
+          nextVideoFromId: -1,
+          nextDocFromId: -1,
+          hasMoreVideos: false,
+          hasMoreDocs: false,
+        );
+      }
+
+      final typedMsgs = msgsList.cast<Map<String, dynamic>>();
+      bool hasMore = typedMsgs.length == 100;
+      int nextId = typedMsgs.isNotEmpty
+          ? typedMsgs.last['id']
+          : params.nextVideoFromId;
+
+      final validMsgs = typedMsgs.where(_isVideoMessage).toList();
+
+      return LoadChatMessagesResult(
+        messages: validMsgs,
+        nextVideoFromId: hasMore ? nextId : -1,
+        nextDocFromId: hasMore ? nextId : -1,
+        hasMoreVideos: hasMore,
+        hasMoreDocs: hasMore,
+      );
+    } catch (e) {
+      return LoadChatMessagesResult(
+        messages: [],
+        nextVideoFromId: -1,
+        nextDocFromId: -1,
+        hasMoreVideos: false,
+        hasMoreDocs: false,
+      );
+    }
+  }
+
   Future<List<Map<String, dynamic>>> _fetchBatch({
     required int chatId,
-    required int? messageThreadId,
     required int fromMessageId,
     required Map<String, dynamic>? filter,
   }) async {
+    if (fromMessageId == -1) return [];
+
     try {
       final result = await _service.sendWithResult({
         '@type': 'searchChatMessages',
         'chat_id': chatId,
-        'message_thread_id': messageThreadId ?? 0,
+        // Omit message_thread_id physically if not explicitly supported in TDLib 1.8.59
+        // We handle thread filtering strictly on the Dart side.
         'query': '',
         'from_message_id': fromMessageId,
         'offset': 0,
@@ -130,6 +202,9 @@ class LoadChatMessagesUseCase
       }
 
       final msgsList = result['messages'] as List?;
+      debugPrint(
+        'TDLib searchChatMessages result limit 20 got ${msgsList?.length} messages for global chat',
+      );
       if (msgsList == null) return [];
       return msgsList.cast<Map<String, dynamic>>();
     } catch (e) {
