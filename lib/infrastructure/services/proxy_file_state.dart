@@ -40,6 +40,10 @@ class ProxyFileState {
   /// Last seek time (for adaptive buffer after seek)
   DateTime? lastSeekTime;
 
+  /// Timestamp del último seek debounced ejecutado.
+  /// El stall timer lo usa para evitar reinicios redundantes.
+  DateTime? lastDebouncedSeekTime;
+
   // ============================================================
   // DOWNLOAD TRACKING
   // ============================================================
@@ -65,6 +69,10 @@ class ProxyFileState {
 
   /// Last explicit seek target offset
   int? lastExplicitSeekOffset;
+
+  /// Número de secuencia de seek. Se incrementa con cada seek del usuario.
+  /// Conexiones HTTP creadas antes del último seek no actualizan primaryPlaybackOffset.
+  int seekSequenceNumber = 0;
 
   /// Pending seek offset after MOOV loads
   int? pendingSeekAfterMoov;
@@ -139,6 +147,7 @@ class ProxyFileState {
     lastExplicitSeekTime = null;
     lastPrimaryUpdateTime = null;
     lastSeekTime = null;
+    lastDebouncedSeekTime = null;
 
     // Download tracking
     lastDownloadFileCallTime = null;
@@ -148,6 +157,7 @@ class ProxyFileState {
     activePriority = 0;
     lastDownloadProgress = 0;
     lastExplicitSeekOffset = null;
+    seekSequenceNumber = 0;
     pendingSeekAfterMoov = null;
     pendingSeekOffset = null;
     seekDebounceTimer?.cancel();

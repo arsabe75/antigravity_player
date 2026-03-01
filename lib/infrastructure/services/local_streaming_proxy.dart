@@ -286,6 +286,12 @@ class LocalStreamingProxy {
   // Track aborted requests to cancel waiting loops
   final Set<int> _abortedRequests = {};
 
+  // FIX R2: Seek generation counter per file. Incremented on each user seek.
+  // Stream loops capture the generation at start and break if it changes.
+  // This replaces the Set-based approach (Fix R) which had a race condition:
+  // new HTTP connections cleared the flag before old loops could see it.
+  final Map<int, int> _seekGeneration = {};
+
   // ============================================================
   // TELEGRAM ANDROID-INSPIRED IMPROVEMENTS
   // ============================================================
@@ -304,6 +310,13 @@ class LocalStreamingProxy {
   // Prevents the player from creating hundreds of concurrent connections
   // that overwhelm the Windows message queue via TDLib event floods.
   final Map<int, int> _activeConnectionCount = {};
+  // FIX O2: Eviction mechanism for zombie connections. When the connection
+  // limit is reached, the oldest/most-stale connection is flagged for eviction.
+  // The stream loop checks this set and exits gracefully.
+  final Map<int, Set<int>> _evictedConnectionOffsets = {};
+  // FIX O3: Track connections whose counter was already pre-decremented
+  // during eviction, so the finally block doesn't double-decrement.
+  final Map<int, Set<int>> _connectionsSkipDecrement = {};
 
   // INITIALIZATION GRACE PERIOD: Track when video was first opened
   // Used to prevent false stalls during MOOV-at-end video initialization
@@ -400,7 +413,20 @@ class LocalStreamingProxy {
     // Also reset stall count in metrics to prevent accumulated stall counts
     // from affecting buffer sizing after recovery
     _downloadMetrics[fileId]?.resetStallCount();
-    _debugLog('Proxy: Retry count reset for $fileId (playback recovered)');
+
+    // CRITICAL FIX: También resetear el loadState si estaba en error/timeout.
+    // Sin esto, el circuit breaker rechaza todas las requests futuras (503)
+    // incluyendo seeks del usuario, haciendo el video irrecuperable.
+    final state = _getOrCreateState(fileId);
+    if (state.loadState == FileLoadState.error ||
+        state.loadState == FileLoadState.timeout) {
+      state.loadState = FileLoadState.idle;
+      _debugLog(
+        'Proxy: Retry count reset for $fileId - loadState restored to idle',
+      );
+    } else {
+      _debugLog('Proxy: Retry count reset for $fileId (playback recovered)');
+    }
   }
 
   /// Report a player-detected error (e.g. unsupported codec, corrupt file).
@@ -596,6 +622,9 @@ class LocalStreamingProxy {
     _downloadMetrics.remove(fileId);
     _activeHttpRequestOffsets.remove(fileId);
     _activeConnectionCount.remove(fileId);
+    _evictedConnectionOffsets.remove(fileId);
+    _connectionsSkipDecrement.remove(fileId);
+    _seekGeneration.remove(fileId);
     _lastDownloadProgress.remove(fileId);
     _lastStallCheckOffset.remove(fileId);
     _downloadHighWaterMark.remove(fileId);
@@ -614,6 +643,9 @@ class LocalStreamingProxy {
     _downloadedRanges.clear();
     _activeHttpRequestOffsets.clear();
     _activeConnectionCount.clear();
+    _evictedConnectionOffsets.clear();
+    _connectionsSkipDecrement.clear();
+    _seekGeneration.clear();
 
     _downloadMetrics.clear();
     _sampleTableCache.clear();
@@ -674,8 +706,29 @@ class LocalStreamingProxy {
   /// Call this from MediaKitVideoRepository.seekTo() BEFORE the player seeks.
   void signalUserSeek(int fileId, int targetTimeMs) {
     _log('USER SEEK SIGNALED for $fileId to ${targetTimeMs}ms');
-    // Simplified - just update primary offset tracking
-    // The actual seek handling is done when the new offset request arrives
+    // FIX J: Restaurar la señal explícita de seek para que la detección
+    // de primary offset en _handleRequest la use (línea ~1334).
+    // Sin esto, el proxy depende de heurísticas que pueden fallar.
+    _getOrCreateState(fileId).userSeekInProgress = true;
+
+    // FIX R2: Increment seek generation to force all existing connections to close.
+    // Each stream loop captures the generation at start. When it changes, loops break.
+    // This replaces the Set-based approach which had a race condition: new connections
+    // cleared the flag before old loops could check it.
+    final newGen = (_seekGeneration[fileId] ?? 0) + 1;
+    _seekGeneration[fileId] = newGen;
+    // Also complete any pending byte-availability waiters so they unblock
+    final waiters = _byteAvailabilityWaiters.remove(fileId);
+    if (waiters != null) {
+      for (final entry in waiters) {
+        if (!entry.value.isCompleted) {
+          entry.value.complete();
+        }
+      }
+    }
+    _debugLog(
+      'Proxy: FIX R2 - Seek generation $newGen for $fileId, breaking all connections (seek to ${targetTimeMs}ms)',
+    );
   }
 
   Future<void> start() async {
@@ -1083,6 +1136,11 @@ class LocalStreamingProxy {
       final state = _getOrCreateState(fileId);
       state.openTime ??= DateTime.now();
 
+      // FIX R2: Capture seek generation for this connection.
+      // Old connections have a stale generation and will break.
+      // New connections capture the current generation and are safe.
+      final mySeekGeneration = _seekGeneration[fileId] ?? 0;
+
       // CIRCUIT BREAKER: Reject requests for files in terminal error state.
       // This covers unsupported codecs, corrupt files, max retries exceeded,
       // and timeouts. Prevents the player from endlessly retrying and
@@ -1098,18 +1156,60 @@ class LocalStreamingProxy {
         return;
       }
 
-      // CONNECTION LIMITER: Reject excess HTTP connections per file.
-      // The player (libmpv) creates new connections for each seek between
-      // audio/video tracks. Without a limit, 100+ concurrent connections
-      // flood TDLib with async calls, overflowing the Windows message queue.
+      // CONNECTION LIMITER with EVICTION (FIX O/O2):
+      // mpv/ffmpeg opens new HTTP connections for each seek and track switch
+      // but never closes old ones. Without management, connections accumulate
+      // and eventually a 503 rejection causes ffmpeg to report "partial file"
+      // → false EOF → playback stops.
+      // Solution: when the limit is reached, evict the most stale connection
+      // (furthest behind the primary playback offset) instead of rejecting.
       final currentConnections = _activeConnectionCount[fileId] ?? 0;
       if (currentConnections >= ProxyConfig.maxConnectionsPerFile) {
-        // Silently reject — no debugPrint to avoid adding to the flood
-        request.response.statusCode = HttpStatus.serviceUnavailable;
-        await request.response.close();
-        return;
+        final offsets = _activeHttpRequestOffsets[fileId];
+        final primary = _getOrCreateState(fileId).primaryPlaybackOffset ?? 0;
+        if (offsets != null && offsets.length > 1) {
+          // Find the connection whose start offset is furthest behind primary
+          int? mostStale;
+          int maxDist = -1;
+          for (final o in offsets) {
+            // Only evict connections behind the primary playback offset
+            if (o < primary) {
+              final dist = primary - o;
+              if (dist > maxDist) {
+                maxDist = dist;
+                mostStale = o;
+              }
+            }
+          }
+          // If no connection is behind primary, evict the oldest (smallest offset)
+          mostStale ??= offsets.reduce((a, b) => a < b ? a : b);
+          _evictedConnectionOffsets.putIfAbsent(fileId, () => {}).add(mostStale);
+          // FIX O3: Pre-decrement the counter for the evicted connection so it
+          // doesn't climb while waiting for the evicted stream loop to exit.
+          // Track the offset so the finally block skips its decrement.
+          _connectionsSkipDecrement.putIfAbsent(fileId, () => {}).add(mostStale);
+          _activeConnectionCount[fileId] = currentConnections; // -1 evicted, +1 new = net 0
+          _debugLog(
+            'Proxy: CONNECTION LIMIT for $fileId '
+            '($currentConnections/${ProxyConfig.maxConnectionsPerFile}), '
+            'evicting stale connection at ${mostStale ~/ 1024}KB '
+            '(primary: ${primary ~/ 1024}KB, new: ${start ~/ 1024}KB)',
+          );
+          // Allow the new connection through — counter already adjusted
+        } else {
+          // No evictable connections, reject as last resort
+          _debugLog(
+            'Proxy: CONNECTION LIMIT for $fileId, no evictable connections, '
+            'rejecting at offset ${start ~/ 1024}KB',
+          );
+          request.response.statusCode = HttpStatus.serviceUnavailable;
+          await request.response.close();
+          return;
+        }
+      } else {
+        // Normal case: under the limit, just increment
+        _activeConnectionCount[fileId] = currentConnections + 1;
       }
-      _activeConnectionCount[fileId] = currentConnections + 1;
 
       // TRACK CLIENT DISCONNECTS TO PREVENT CONNECTION LEAKS DURING STALLS
       bool isClientDisconnected = false;
@@ -1324,14 +1424,29 @@ class LocalStreamingProxy {
           // Accept any offset significantly different from current Primary (>50MB)
           final distFromPrimary = (start - existingPrimary).abs();
           if (distFromPrimary > significantJump) {
-            _debugLog(
-              'Proxy: EXPLICIT USER SEEK for $fileId. Primary $existingPrimary -> $start.',
-            );
-            shouldUpdatePrimary = true;
-            playbackState.userSeekInProgress = false;
-            // P1 FIX: Track this seek to protect from stagnant adoption
-            playbackState.lastExplicitSeekOffset = start;
-            playbackState.lastExplicitSeekTime = DateTime.now();
+            // FIX Q: After a seek, mpv sends track-detection probes near the end
+            // of the file (subtitle/data streams). These are NOT the actual seek
+            // target. Don't adopt them as primary — wait for the real video request.
+            final isEndOfFileProbe = totalSize > 0 &&
+                (totalSize - start) < totalSize * 0.10 &&
+                existingPrimary < totalSize * 0.85;
+            if (isEndOfFileProbe) {
+              _debugLog(
+                'Proxy: IGNORING end-of-file probe during user seek for $fileId. '
+                'Probe at ${start ~/ 1024}KB (${(totalSize - start) ~/ (1024 * 1024)}MB from end), '
+                'keeping primary at ${existingPrimary ~/ 1024}KB',
+              );
+              // Don't clear userSeekInProgress — the real seek request comes next
+            } else {
+              _debugLog(
+                'Proxy: EXPLICIT USER SEEK for $fileId. Primary $existingPrimary -> $start.',
+              );
+              shouldUpdatePrimary = true;
+              playbackState.userSeekInProgress = false;
+              // P1 FIX: Track this seek to protect from stagnant adoption
+              playbackState.lastExplicitSeekOffset = start;
+              playbackState.lastExplicitSeekTime = DateTime.now();
+            }
           } else {
             _debugLog(
               'Proxy: USER SEEK SIGNAL active but offset $start too close to Primary $existingPrimary (${distFromPrimary ~/ 1024}KB)',
@@ -1355,10 +1470,15 @@ class LocalStreamingProxy {
               // The initial "Primary at 0" was just the player probing metadata/start.
               // We should ALWAYS adopt this new seek.
               //
-              // MOOV FIX: Ensure we don't accidentally adopt the "Moov Atom" request (End of File)
-              // as the Primary, because that will block the actual playback request at the middle.
+              // MOOV FIX / FIX Q: Don't adopt end-of-file probes as Primary.
+              // mpv sends track-detection probes to the last portion of the file.
+              // Use 10% of file size (min 100MB) to catch probes that are further
+              // from the end than the old significantJump*2 (100MB) threshold.
+              final endOfFileThreshold = totalSize > 0
+                  ? (totalSize * 0.10).clamp(significantJump * 2, totalSize * 0.10).toInt()
+                  : significantJump * 2;
               final isMoovRequestForCheck =
-                  totalSize > 0 && (totalSize - start) < significantJump * 2;
+                  totalSize > 0 && (totalSize - start) < endOfFileThreshold;
 
               final isResumeFromStart =
                   !isMoovRequestForCheck &&
@@ -1370,7 +1490,8 @@ class LocalStreamingProxy {
                   'Proxy: RESUME DETECTED ($existingPrimary -> $start). Forcing Primary update.',
                 );
                 shouldUpdatePrimary = true;
-              } else if (DateTime.now()
+              } else if (!isMoovRequestForCheck &&
+                  DateTime.now()
                       .difference(lastPrimaryUpdate)
                       .inMilliseconds >
                   2000) {
@@ -1392,7 +1513,20 @@ class LocalStreamingProxy {
               shouldUpdatePrimary = true; // Close enough, update it
             }
           } else {
-            shouldUpdatePrimary = true; // Stable seek
+            // FIX Q3: Don't adopt end-of-file probes as "stable seek" either
+            final endOfFileThresholdStable = totalSize > 0
+                ? (totalSize * 0.10).clamp(significantJump * 2, totalSize * 0.10).toInt()
+                : significantJump * 2;
+            final isMoovStable =
+                totalSize > 0 && (totalSize - start) < endOfFileThresholdStable;
+            if (isMoovStable && existingPrimary < totalSize * 0.85) {
+              _debugLog(
+                'Proxy: IGNORING end-of-file stable seek for $fileId at ${start ~/ 1024}KB, '
+                'keeping primary at ${existingPrimary ~/ 1024}KB',
+              );
+            } else {
+              shouldUpdatePrimary = true; // Stable seek
+            }
           }
         } else if (start < existingPrimary) {
           // Only track lower offsets if they are reasonable (not huge jumps back which are likely zombie streams)
@@ -1440,12 +1574,43 @@ class LocalStreamingProxy {
           }
         }
 
-        if (shouldUpdatePrimary) {
+        // PROTECCIÓN CONTRA ZOMBIES CON SECUENCIA DE SEEK:
+        // Si hubo un seek reciente (seekSequenceNumber incrementó), rechazar
+        // actualizaciones no-seek de primary offset que podrían venir de
+        // conexiones HTTP stale creadas antes del seek.
+        if (shouldUpdatePrimary && isSeekRequest) {
+          playbackState.seekSequenceNumber++;
           playbackState.primaryPlaybackOffset = start;
           playbackState.lastPrimaryUpdateTime = DateTime.now();
-          if (isSeekRequest) {
-            // Only log if it was a seek
-            _logTrace('Primary Target UPDATED to $start', fileId: fileId);
+          _logTrace(
+            'Primary Target UPDATED to $start via SEEK '
+            '(seekSeq: ${playbackState.seekSequenceNumber})',
+            fileId: fileId,
+          );
+        } else if (shouldUpdatePrimary) {
+          // Actualización no-seek (backward o sequential): verificar que no haya
+          // un seek reciente que esta conexión desconoce.
+          final lastSeekTime = playbackState.lastExplicitSeekTime;
+          final isRecentSeek = lastSeekTime != null &&
+              DateTime.now().difference(lastSeekTime).inMilliseconds < 3000;
+
+          if (isRecentSeek && existingPrimary != null) {
+            // Hay un seek reciente — solo aceptar si la conexión va en la misma
+            // dirección que el seek (offset cercano al primary actual).
+            final distFromPrimary = (start - existingPrimary).abs();
+            if (distFromPrimary > significantJump) {
+              _logTrace(
+                'ZOMBIE BLOCKED: Ignorando primary update $existingPrimary -> $start '
+                '(seek reciente, dist: ${distFromPrimary ~/ (1024 * 1024)}MB)',
+                fileId: fileId,
+              );
+              shouldUpdatePrimary = false;
+            }
+          }
+
+          if (shouldUpdatePrimary) {
+            playbackState.primaryPlaybackOffset = start;
+            playbackState.lastPrimaryUpdateTime = DateTime.now();
           }
         }
 
@@ -1556,6 +1721,12 @@ class LocalStreamingProxy {
         request.response.headers.contentType = ContentType.parse('video/mp4');
         request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
 
+        // DIAG: Log HTTP response headers for debugging
+        _debugLog(
+          'Proxy: HTTP 206 for $fileId: Range $start-$effectiveEnd/$effectiveTotalSize '
+          '(contentLength: $contentLength, ${contentLength ~/ (1024 * 1024)}MB)',
+        );
+
         // 4. Stream Data Loop
         RandomAccessFile? raf;
         try {
@@ -1574,13 +1745,36 @@ class LocalStreamingProxy {
             _fileUpdateNotifiers[fileId] = StreamController.broadcast();
           }
 
+          // FIX F: Contador de timeouts consecutivos en gap MOOV inllenable
+          int moovGapConsecutiveTimeouts = 0;
+          const int moovGapMaxTimeouts = 5; // ~50s total
+
           while (remainingToSend > 0) {
             if (_abortedRequests.contains(fileId)) {
               _debugLog('Proxy: Request aborted for $fileId');
               break;
             }
+            // FIX R2: User seek increments generation, stale connections break
+            if ((_seekGeneration[fileId] ?? 0) != mySeekGeneration) {
+              _debugLog(
+                'Proxy: Seek-break (gen $mySeekGeneration→${_seekGeneration[fileId]}) for $fileId at offset ${currentReadOffset ~/ 1024}KB',
+              );
+              break;
+            }
             if (isClientDisconnected) {
               _debugLog('Proxy: Client disconnected prematurely ($fileId)');
+              break;
+            }
+            // FIX O2: Check if this connection was evicted to make room for a new one
+            if (_evictedConnectionOffsets[fileId]?.contains(start) == true) {
+              _evictedConnectionOffsets[fileId]!.remove(start);
+              if (_evictedConnectionOffsets[fileId]!.isEmpty) {
+                _evictedConnectionOffsets.remove(fileId);
+              }
+              _debugLog(
+                'Proxy: Connection evicted for $fileId at offset '
+                '${start ~/ 1024}KB (readOffset: ${currentReadOffset ~/ 1024}KB)',
+              );
               break;
             }
 
@@ -1757,7 +1951,23 @@ class LocalStreamingProxy {
                   final isOverridingBackwardSeek =
                       primaryNearSeek && proposedIsFarForward;
 
-                  if (isOverridingBackwardSeek) {
+                  // FIX Q2: Never adopt end-of-file offsets as primary via
+                  // stagnant recovery. These are track-detection probes (subtitle,
+                  // data streams), not actual playback. Last 10% of file.
+                  final isEndOfFilePrimary = totalSize > 0 &&
+                      (totalSize - currentReadOffset) < totalSize * 0.10 &&
+                      lastPrimary < totalSize * 0.85;
+
+                  if (isEndOfFilePrimary) {
+                    _logTrace(
+                      'BLOCKED end-of-file Stagnant Adoption for $fileId '
+                      '(proposed: ${currentReadOffset ~/ (1024 * 1024)}MB, '
+                      '${(totalSize - currentReadOffset) ~/ (1024 * 1024)}MB from end, '
+                      'primary: ${lastPrimary ~/ (1024 * 1024)}MB)',
+                      fileId: fileId,
+                    );
+                    streamState.lastPrimaryUpdateTime = DateTime.now();
+                  } else if (isOverridingBackwardSeek) {
                     _logTrace(
                       'BLOCKED Stagnant Adoption for $fileId. Would override recent backward seek '
                       '(seekTarget: ${lastExplicitSeek ~/ (1024 * 1024)}MB, primary: ${lastPrimary ~/ (1024 * 1024)}MB, proposed: ${currentReadOffset ~/ (1024 * 1024)}MB)',
@@ -1778,6 +1988,16 @@ class LocalStreamingProxy {
                   }
                 }
               } else {
+                // FIX G: Detección temprana del gap MOOV inllenable.
+                // Si el offset está en el gap entre el frontier principal y la
+                // región MOOV, no tiene sentido esperar ni redirigir TDLib ahí.
+                if (_isInMoovGap(fileId, currentReadOffset)) {
+                  _debugLog(
+                    'Proxy: MOOV gap detected at $currentReadOffset for $fileId - ending stream',
+                  );
+                  break;
+                }
+
                 // NO DATA AVAILABLE -> BLOCKING WAIT (EVENT-DRIVEN)
                 // Throttled log: only print every 2 seconds per file to reduce CPU overhead
                 final now = DateTime.now();
@@ -1825,6 +2045,17 @@ class LocalStreamingProxy {
                   MapEntry(currentReadOffset, completer),
                 );
 
+                // Doble verificación post-registro para prevenir wakeups perdidos.
+                // Si updateFile llegó entre el check de datos y el registro del waiter,
+                // los datos ya están disponibles pero nadie despertará al completer.
+                if (!completer.isCompleted) {
+                  final postCheck = _filePaths[fileId];
+                  if (postCheck != null &&
+                      postCheck.availableBytesFrom(currentReadOffset) > 0) {
+                    completer.complete();
+                  }
+                }
+
                 try {
                   // Wait for data to become available, timeout, or client disconnect
                   final waitResult = await Future.any([
@@ -1870,7 +2101,29 @@ class LocalStreamingProxy {
                 if (currentLoadState == FileLoadState.error ||
                     currentLoadState == FileLoadState.timeout ||
                     currentLoadState == FileLoadState.unsupported) {
+                  _debugLog(
+                    'Proxy: CIRCUIT BREAKER - killing stream for $fileId at offset '
+                    '$currentReadOffset (loadState: $currentLoadState)',
+                  );
                   break;
+                }
+
+                // FIX F: MOOV gap timeout - detectar conexiones atrapadas en gap inllenable
+                if (_getOrCreateState(fileId).isMoovAtEnd) {
+                  final gapRanges = _downloadedRanges[fileId];
+                  if (gapRanges != null &&
+                      gapRanges.availableBytesFrom(currentReadOffset) == 0) {
+                    moovGapConsecutiveTimeouts++;
+                    if (moovGapConsecutiveTimeouts >= moovGapMaxTimeouts) {
+                      _debugLog(
+                        'Proxy: MOOV gap timeout at $currentReadOffset for $fileId '
+                        '($moovGapConsecutiveTimeouts timeouts) - breaking wait',
+                      );
+                      break;
+                    }
+                  } else {
+                    moovGapConsecutiveTimeouts = 0;
+                  }
                 }
               }
 
@@ -1881,6 +2134,14 @@ class LocalStreamingProxy {
               // range requests for the same file.
               // _scheduleReadAhead(fileId, currentReadOffset);
             } else {
+              // FIX G: Detección temprana del gap MOOV inllenable.
+              if (_isInMoovGap(fileId, currentReadOffset)) {
+                _debugLog(
+                  'Proxy: MOOV gap detected at $currentReadOffset for $fileId - ending stream',
+                );
+                break;
+              }
+
               // NO DATA AVAILABLE -> BLOCKING WAIT (EVENT-DRIVEN)
               // Throttled log: only print every 2 seconds per file to reduce CPU overhead
               final now = DateTime.now();
@@ -1926,6 +2187,15 @@ class LocalStreamingProxy {
               _byteAvailabilityWaiters[fileId]!.add(
                 MapEntry(currentReadOffset, completer),
               );
+
+              // Doble verificación post-registro para prevenir wakeups perdidos.
+              if (!completer.isCompleted) {
+                final postCheck = _filePaths[fileId];
+                if (postCheck != null &&
+                    postCheck.availableBytesFrom(currentReadOffset) > 0) {
+                  completer.complete();
+                }
+              }
 
               // PER-FILE STALL DETECTION: Update the offset we're waiting for
               // and ensure a shared stall timer is running for this file.
@@ -1991,26 +2261,53 @@ class LocalStreamingProxy {
                   break;
                 }
               }
+
+              // FIX F: MOOV gap timeout - detectar conexiones atrapadas en gap inllenable
+              if (_getOrCreateState(fileId).isMoovAtEnd) {
+                final gapRanges = _downloadedRanges[fileId];
+                if (gapRanges != null &&
+                    gapRanges.availableBytesFrom(currentReadOffset) == 0) {
+                  moovGapConsecutiveTimeouts++;
+                  if (moovGapConsecutiveTimeouts >= moovGapMaxTimeouts) {
+                    _debugLog(
+                      'Proxy: MOOV gap timeout at $currentReadOffset for $fileId '
+                      '($moovGapConsecutiveTimeouts timeouts) - breaking wait',
+                    );
+                    break;
+                  }
+                } else {
+                  moovGapConsecutiveTimeouts = 0;
+                }
+              }
             }
+          }
+
+          // DIAG: Log when streaming loop exits normally
+          if (remainingToSend <= 0) {
+            _debugLog(
+              'Proxy: Stream loop COMPLETED normally for $fileId '
+              '(served ${contentLength ~/ 1024}KB from offset $start)',
+            );
+          } else {
+            _debugLog(
+              'Proxy: Stream loop EXITED EARLY for $fileId '
+              '(served ${(contentLength - remainingToSend) ~/ 1024}KB of '
+              '${contentLength ~/ 1024}KB, readOffset: $currentReadOffset)',
+            );
           }
         } catch (e) {
           if (e is! SocketException && e is! HttpException) {
-            _debugLog('Proxy: Error streaming: $e');
+            _debugLog('Proxy: Error streaming $fileId: $e');
+          } else {
+            _debugLog(
+              'Proxy: Stream connection closed for $fileId at offset '
+              '$start (${e.runtimeType})',
+            );
           }
         } finally {
           await raf?.close();
-          // Clean up this request's offset tracking
-          _activeHttpRequestOffsets[fileId]?.remove(start);
-          if (_activeHttpRequestOffsets[fileId]?.isEmpty ?? false) {
-            _activeHttpRequestOffsets.remove(fileId);
-          }
-          // Decrement connection count
-          final remaining = (_activeConnectionCount[fileId] ?? 1) - 1;
-          if (remaining <= 0) {
-            _activeConnectionCount.remove(fileId);
-          } else {
-            _activeConnectionCount[fileId] = remaining;
-          }
+          // Note: offset tracking and connection count cleanup is done
+          // in the outer finally block to avoid double-decrement.
         }
 
         // Close response, handling aborts logic
@@ -2044,12 +2341,19 @@ class LocalStreamingProxy {
         if (_activeHttpRequestOffsets[fileId]?.isEmpty == true) {
           _activeHttpRequestOffsets.remove(fileId);
         }
-        // Decrement connection count exactly once per request
-        final remaining = (_activeConnectionCount[fileId] ?? 1) - 1;
-        if (remaining <= 0) {
-          _activeConnectionCount.remove(fileId);
+        // FIX O3: If this connection was pre-decremented during eviction, skip
+        if (_connectionsSkipDecrement[fileId]?.remove(start) == true) {
+          if (_connectionsSkipDecrement[fileId]?.isEmpty == true) {
+            _connectionsSkipDecrement.remove(fileId);
+          }
         } else {
-          _activeConnectionCount[fileId] = remaining;
+          // Decrement connection count exactly once per request
+          final remaining = (_activeConnectionCount[fileId] ?? 1) - 1;
+          if (remaining <= 0) {
+            _activeConnectionCount.remove(fileId);
+          } else {
+            _activeConnectionCount[fileId] = remaining;
+          }
         }
       }
     } catch (e) {
@@ -2091,10 +2395,16 @@ class LocalStreamingProxy {
           ProxyConfig.cacheEdgeProximityMinBytes,
           ProxyConfig.cacheEdgeProximityMaxBytes,
         );
+        // FIX P: Never delete a file that has active connections serving it.
+        // TDLib can report transient states (downloading: false, small prefix)
+        // during seeks/track switches, which would falsely trigger stale detection
+        // and destroy gigabytes of already-downloaded data.
+        final hasActiveConnections = (_activeConnectionCount[fileId] ?? 0) > 0;
         final isStaleWithLittleData =
             path.isNotEmpty &&
             !isCompleted &&
             !isDownloadingActive &&
+            !hasActiveConnections &&
             downloadedPrefixSize > 0 &&
             downloadedPrefixSize < minUsableData;
 
@@ -2266,6 +2576,17 @@ class LocalStreamingProxy {
     if (totalSize > 0 && requestedOffset >= totalSize) {
       _debugLog(
         'Proxy: Ignoring request at EOF ($requestedOffset >= $totalSize) for $fileId',
+      );
+      return;
+    }
+
+    // FIX H: No redirigir TDLib al gap MOOV inllenable.
+    // Si el offset está en el gap entre el frontier de descarga y la región MOOV,
+    // enviar downloadFile aquí mata la descarga secuencial principal sin beneficio.
+    if (_isInMoovGap(fileId, requestedOffset)) {
+      _logTrace(
+        'Ignoring download request in MOOV gap at $requestedOffset for $fileId',
+        fileId: fileId,
       );
       return;
     }
@@ -2873,8 +3194,29 @@ class LocalStreamingProxy {
         'file_id': fileId,
         'only_if_pending': false,
       });
-      // Short delay to let TDLib process the cancellation before we re-request
-      await Future.delayed(const Duration(milliseconds: 50));
+      // Retardo configurable para que TDLib procese la cancelación vía FFI.
+      // 50ms era insuficiente en Windows; 200ms da margen al message queue.
+      await Future.delayed(
+        const Duration(milliseconds: ProxyConfig.cancelToDownloadDelayMs),
+      );
+
+      // Verificar si la cancelación fue procesada; si no, reintentar
+      final cachedAfterCancel = _filePaths[fileId];
+      if (cachedAfterCancel != null && cachedAfterCancel.isDownloadingActive) {
+        _logTrace(
+          'Cancelación no confirmada para $fileId después de '
+          '${ProxyConfig.cancelToDownloadDelayMs}ms, enviando segundo cancel',
+          fileId: fileId,
+        );
+        TelegramService().send({
+          '@type': 'cancelDownloadFile',
+          'file_id': fileId,
+          'only_if_pending': false,
+        });
+        await Future.delayed(
+          const Duration(milliseconds: ProxyConfig.cancelRetryDelayMs),
+        );
+      }
     }
 
     TelegramService().send({
@@ -3003,6 +3345,18 @@ class LocalStreamingProxy {
       return;
     }
 
+    // COORDINACIÓN CON SEEK DEBOUNCE: Si hay un seek pendiente por ejecutar,
+    // no interferir — el debounce se encargará de reiniciar la descarga.
+    if (_pendingSeekOffsets.containsKey(fileId)) return;
+
+    // Si un seek debounced se ejecutó recientemente, dar tiempo a TDLib
+    // para procesar la nueva descarga antes de declarar stall.
+    final lastDebounced = state.lastDebouncedSeekTime;
+    if (lastDebounced != null &&
+        DateTime.now().difference(lastDebounced) < const Duration(seconds: 3)) {
+      return;
+    }
+
     // MOOV PROTECTION
     if (state.forcedMoovOffset != null) return;
 
@@ -3012,8 +3366,16 @@ class LocalStreamingProxy {
     final updatedCache = _filePaths[fileId];
     if (updatedCache == null) return;
 
-    // DOWNLOAD COOLDOWN PROTECTION
-    if (state.isRecentDownload(const Duration(seconds: 5))) return;
+    // DOWNLOAD COOLDOWN PROTECTION (diferenciado según contexto)
+    // Post-seek: cooldown reducido (2s) para recuperación rápida de fallos.
+    // Normal: cooldown estándar (5s) para evitar reinicios innecesarios.
+    final isPostSeek = state.lastSeekTime != null &&
+        DateTime.now().difference(state.lastSeekTime!) <
+            const Duration(seconds: 10);
+    final stallCooldown = isPostSeek
+        ? Duration(milliseconds: ProxyConfig.stallCooldownPostSeekMs)
+        : Duration(milliseconds: ProxyConfig.stallCooldownNormalMs);
+    if (state.isRecentDownload(stallCooldown)) return;
 
     // ACTIVE DOWNLOAD PROTECTION
     // REMOVED early return. We must analyze progress because TDLib might
@@ -3066,6 +3428,29 @@ class LocalStreamingProxy {
       return;
     }
 
+    // FIX N: BUFFER-AHEAD PROTECTION
+    // If the download frontier is significantly ahead of the primary playback
+    // offset, TDLib's download pause is harmless — the player has plenty of
+    // buffered data. Restarting the download now would be counterproductive:
+    // cancelDownloadFile + downloadFile creates gaps (TDLib aligns to chunk
+    // boundaries), triggers offset redirections from other HTTP connections,
+    // and can cascade into download disruptions that starve the player.
+    final primaryOffset = state.primaryPlaybackOffset ?? 0;
+    final bufferAhead = newHighWater - primaryOffset;
+    if (bufferAhead > ProxyConfig.stallBufferAheadBytes) {
+      _logTrace(
+        'Stall timer - BUFFER AHEAD PROTECTION for $fileId: '
+        'frontier ${newHighWater ~/ (1024 * 1024)}MB is '
+        '${bufferAhead ~/ (1024 * 1024)}MB ahead of playback '
+        '${primaryOffset ~/ (1024 * 1024)}MB (threshold: '
+        '${ProxyConfig.stallBufferAheadBytes ~/ (1024 * 1024)}MB). '
+        'Not restarting download.',
+        fileId: fileId,
+      );
+      _lastDownloadProgress[fileId] = currentPrefix;
+      return;
+    }
+
     // DEBOUNCE
     final now = DateTime.now();
     final lastStallTime = _lastStallRecordedTime[fileId];
@@ -3076,16 +3461,45 @@ class LocalStreamingProxy {
 
     // TRUE STALL detected
 
-    // NEAR-EOF PROTECTION
+    // PROTECCIÓN MOOV-AT-END GAP: Cuando el archivo tiene MOOV al final y el
+    // download principal ya cubrió >90% del archivo, queda un gap pequeño entre
+    // el frontier y la región MOOV (ya descargada). El prefetch intenta llenar
+    // ese gap pero compite con el stall timer por el mismo file_id en TDLib,
+    // causando cancelaciones mutuas que se acumulan falsamente como stalls.
+    // No contar stalls en este escenario — el gap se llenará eventualmente.
     final totalFileSize = updatedCache.totalSize;
+    if (totalFileSize > 0 && state.isMoovAtEnd) {
+      final mainDownloadProgress = newHighWater.toDouble() / totalFileSize;
+      if (mainDownloadProgress > 0.90) {
+        // FIX E: NO hacer forceRestart si TDLib ya está descargando activamente.
+        // El forceRestart cancela la descarga en curso, creando un ciclo
+        // cancel-restart cada 5s que impide a TDLib completar el gap pequeño
+        // (~440KB) entre el frontier principal y la región MOOV.
+        if (updatedCache.isDownloadingActive) {
+          _logTrace(
+            'Stall timer - MOOV-at-end file $fileId, ${(mainDownloadProgress * 100).toStringAsFixed(1)}% descargado, '
+            'TDLib activo - NO reiniciar (dejar que complete el gap)',
+            fileId: fileId,
+          );
+        } else {
+          _logTrace(
+            'Stall timer - MOOV-at-end file $fileId, ${(mainDownloadProgress * 100).toStringAsFixed(1)}% descargado, '
+            'TDLib idle - reiniciando descarga en gap MOOV',
+            fileId: fileId,
+          );
+          _startDownloadAtOffset(fileId, waitingOffset, forceRestart: true);
+        }
+        return;
+      }
+    }
+
+    // NEAR-EOF PROTECTION
     if (totalFileSize > 0) {
       final remainingBytes = totalFileSize - newHighWater;
-      final nearEofThreshold = ProxyConfig.scaled(
-        totalFileSize,
-        0.05,
-        1 * 1024 * 1024,
-        5 * 1024 * 1024,
-      );
+      // Threshold mayor para MOOV-at-end: el gap MOOV puede ser >5MB
+      final nearEofThreshold = state.isMoovAtEnd
+          ? ProxyConfig.scaled(totalFileSize, 0.05, 5 * 1024 * 1024, 20 * 1024 * 1024)
+          : ProxyConfig.scaled(totalFileSize, 0.05, 1 * 1024 * 1024, 5 * 1024 * 1024);
       if (remainingBytes >= 0 && remainingBytes < nearEofThreshold) {
         _logTrace(
           'Stall timer - file $fileId near EOF '
@@ -3722,6 +4136,36 @@ class LocalStreamingProxy {
   // SEEK DEBOUNCE
   // ============================================================
 
+  /// FIX G: Detecta si un offset está en el gap inllenable entre el frontier
+  /// principal de descarga y la región MOOV ya descargada al final del archivo.
+  /// Retorna true si el offset está en dicho gap y no tiene datos disponibles.
+  bool _isInMoovGap(int fileId, int offset) {
+    final state = _getOrCreateState(fileId);
+    if (!state.isMoovAtEnd) return false;
+
+    final cached = _filePaths[fileId];
+    if (cached == null) return false;
+    final totalSize = cached.totalSize;
+    if (totalSize <= 0) return false;
+
+    // Solo aplica a offsets cercanos al final del archivo (último 5%)
+    final nearEndThreshold = totalSize * 0.95;
+    if (offset < nearEndThreshold) return false;
+
+    final ranges = _downloadedRanges[fileId];
+    if (ranges == null) return false;
+
+    // No hay datos disponibles en el offset
+    if (ranges.availableBytesFrom(offset) > 0) return false;
+
+    // Verificar que hay datos descargados DESPUÉS del offset (la región MOOV)
+    // Si el último byte del archivo está descargado, la MOOV ya está disponible
+    if (!ranges.containsOffset(totalSize - 1)) return false;
+
+    // Offset sin datos, cerca del final, MOOV disponible → estamos en el gap
+    return true;
+  }
+
   /// Debounced seek handler to prevent flooding TDLib with rapid cancellations.
   /// Instead of immediately cancelling and restarting download on each seek,
   /// this coalesces rapid seeks into a single request.
@@ -3740,9 +4184,29 @@ class LocalStreamingProxy {
         _seekDebounceTimers.remove(fileId);
 
         if (pendingOffset != null && !_abortedRequests.contains(fileId)) {
+          // FIX D: Invalidar seek debounced si el usuario ya movió la reproducción
+          // a otro punto. Esto evita redirigir TDLib al gap MOOV cuando el usuario
+          // ya hizo seeks hacia atrás.
+          final primary = _getOrCreateState(fileId).primaryPlaybackOffset;
+          if (primary != null) {
+            final distFromPrimary = (pendingOffset - primary).abs();
+            final totalSize = _filePaths[fileId]?.totalSize ?? 0;
+            final staleThreshold = totalSize > 0
+                ? ProxyConfig.scaled(totalSize, 0.01, 1 * 1024 * 1024, 10 * 1024 * 1024)
+                : 10 * 1024 * 1024;
+            if (distFromPrimary > staleThreshold) {
+              _log(
+                'Skipping STALE debounced seek for $fileId to ${pendingOffset ~/ 1024}KB '
+                '(primary moved to ${primary ~/ 1024}KB, dist: ${distFromPrimary ~/ 1024}KB)',
+              );
+              return;
+            }
+          }
           _log(
             'Executing debounced seek for $fileId to offset ${pendingOffset ~/ 1024}KB',
           );
+          // Registrar timestamp para coordinación con stall timer
+          _getOrCreateState(fileId).lastDebouncedSeekTime = DateTime.now();
           // Execute the actual seek by starting download at the debounced offset
           _startDownloadAtOffset(fileId, pendingOffset);
         }

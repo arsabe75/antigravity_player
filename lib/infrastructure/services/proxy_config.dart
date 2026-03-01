@@ -61,6 +61,13 @@ class ProxyConfig {
   /// Interval for stall detection checks.
   static const Duration stallCheckInterval = Duration(seconds: 2);
 
+  /// FIX N: Minimum buffer ahead of playback (in bytes) before allowing stall
+  /// restarts. When the download frontier is this far ahead of the primary
+  /// playback offset, TDLib pauses are harmless (player has plenty of data).
+  /// Preventing unnecessary restarts avoids download disruptions (gaps, offset
+  /// redirections) that can cascade and ultimately starve the player.
+  static const int stallBufferAheadBytes = 50 * 1024 * 1024; // 50MB
+
   // ============================================================
   // THROTTLING
   // ============================================================
@@ -76,7 +83,12 @@ class ProxyConfig {
   static const int minDownloadCallIntervalMs = 300;
 
   /// Maximum concurrent HTTP connections per file.
-  static const int maxConnectionsPerFile = 6;
+  /// FIX O: Increased from 6 to 12. MP4 files with 4+ streams (video, audio,
+  /// subtitle, data) cause mpv/ffmpeg to open many concurrent connections —
+  /// especially during track switching and seeks. With limit=6, the 7th
+  /// connection gets 503, which ffmpeg interprets as "partial file" → false
+  /// EOF → playback stops at ~61s. 12 allows 4 streams × 3 connections each.
+  static const int maxConnectionsPerFile = 12;
 
   /// "Waiting for data" log throttle duration.
   static const Duration waitingLogThrottle = Duration(seconds: 2);
@@ -330,6 +342,19 @@ class ProxyConfig {
 
   /// Seek preview preload size.
   static const int previewPreloadBytes = 2 * 1024 * 1024; // 2MB
+
+  /// Retardo después de cancelar descarga TDLib para garantizar procesamiento (ms).
+  /// En Windows, el bus de mensajes FFI necesita más tiempo que 50ms.
+  static const int cancelToDownloadDelayMs = 200;
+
+  /// Retardo adicional si la cancelación no fue confirmada (ms).
+  static const int cancelRetryDelayMs = 100;
+
+  /// Cooldown del stall timer después de iniciar descarga normal (ms).
+  static const int stallCooldownNormalMs = 5000;
+
+  /// Cooldown del stall timer después de seek (reducido para recuperación rápida).
+  static const int stallCooldownPostSeekMs = 2000;
 
   /// Fetch file info: wait interval per attempt (ms).
   static const int fetchWaitIntervalMs = 200;

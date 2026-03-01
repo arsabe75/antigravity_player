@@ -31,5 +31,7 @@ abstract class PlayerState with _$PlayerState {
     @Default(false) bool isVideoNotOptimizedForStreaming,
     // Streaming proxy error (max retries, timeout, etc.)
     StreamingError? streamingError,
+    // Contador de reintentos automáticos de seek (recuperación de buffering atascado)
+    @Default(0) int seekRetryCount,
   }) = _PlayerState;
 }

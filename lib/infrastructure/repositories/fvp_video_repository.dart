@@ -50,6 +50,12 @@ class FvpVideoRepository implements VideoRepository {
         'cache-secs': '20', // Require 20 seconds of buffer
         'cache-pause-initial': 'yes', // Pre-buffer before start
         'stream-buffer-size': '16777216', // 16MB stream buffer
+        // FIX M/M2: Disable network timeout for local proxy connections.
+        // MDK default timeout kills connections after ~60s of low throughput,
+        // but the local proxy may have variable speeds from TDLib.
+        'timeout': '0',
+        // FIX M2: Disable ffmpeg-level HTTP timeout and enable reconnect.
+        'stream-lavf-o': 'timeout=0,reconnect=1,reconnect_delay_max=2',
       },
     );
   }

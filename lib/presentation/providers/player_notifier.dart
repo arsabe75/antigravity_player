@@ -108,6 +108,14 @@ class PlayerNotifier extends _$PlayerNotifier {
   StreamSubscription? _errorSub;
   Timer? _saveTimer;
   Timer? _moovCheckTimer;
+  Timer? _seekRecoveryTimer;
+  Duration? _lastSeekTarget;
+  DateTime? _lastSeekTime;
+  static const int _maxSeekRetries = 2;
+  static const Duration _seekRecoveryTimeout = Duration(seconds: 8);
+  int _seekRecoveryExtensions = 0;
+  int _seekRecoveryBytesSnapshot = 0;
+  static const int _maxSeekRecoveryExtensions = 3;
   int? _currentProxyFileId;
 
   // Track the position when initial loading started to detect actual playback
@@ -159,6 +167,7 @@ class PlayerNotifier extends _$PlayerNotifier {
       _errorSub?.cancel();
       _saveTimer?.cancel();
       _moovCheckTimer?.cancel();
+      _seekRecoveryTimer?.cancel();
       _savePosition();
       _abortCurrentProxyRequest();
       // Clear streaming error callback
@@ -183,10 +192,24 @@ class PlayerNotifier extends _$PlayerNotifier {
           now.difference(_lastPositionUpdate) >= _positionUpdateThrottle;
 
       if (shouldUpdateState) {
+        // FIX K: Ignorar resets de posición a 0 durante un seek activo.
+        // media_kit/mpv puede emitir posición 0 brevemente al re-abrir
+        // la conexión HTTP durante un seek, causando que el video
+        // "vuelva al segundo 0" visualmente.
+        if (_lastSeekTarget != null &&
+            _lastSeekTime != null &&
+            _lastSeekTarget!.inSeconds > 5 &&
+            pos.inMilliseconds < 1000 &&
+            now.difference(_lastSeekTime!).inSeconds < 10) {
+          debugPrint(
+            'PlayerNotifier: Ignoring position reset to ${pos.inMilliseconds}ms '
+            '(active seek to ${_lastSeekTarget!.inSeconds}s)',
+          );
+          return;
+        }
+
+
         _lastPositionUpdate = now;
-        // Riverpod 3: 'state' es la propiedad que mantiene el estado actual.
-        // Es inmutable (en este caso), por lo que usamos copyWith para actualizarlo.
-        // Al asignar un nuevo valor a 'state', se notifica a los listeners.
         state = state.copyWith(position: pos);
       }
 
@@ -241,6 +264,13 @@ class PlayerNotifier extends _$PlayerNotifier {
     });
     _playingSub = _repository.isPlayingStream.listen((playing) {
       if (!ref.mounted) return;
+      // DIAG: Log playing state changes for debugging video stops
+      if (playing != state.isPlaying) {
+        debugPrint(
+          'PlayerNotifier: isPlaying changed: ${state.isPlaying} -> $playing '
+          '(pos: ${state.position.inSeconds}s)',
+        );
+      }
       state = state.copyWith(isPlaying: playing);
       // Don't clear isInitialLoading here - let position listener handle it
     });
@@ -261,6 +291,9 @@ class PlayerNotifier extends _$PlayerNotifier {
       } else {
         // Stop timer when not buffering
         _stopMoovCheckTimer();
+        // Cancelar recuperación de seek: el buffering terminó normalmente
+        _seekRecoveryTimer?.cancel();
+        _seekRecoveryTimer = null;
       }
 
       // UX FIX: Ignore ALL buffering state changes during initial load
@@ -275,6 +308,13 @@ class PlayerNotifier extends _$PlayerNotifier {
         return;
       }
 
+      // DIAG: Log buffering state changes for debugging video stops
+      if (buffering != state.isBuffering) {
+        debugPrint(
+          'PlayerNotifier: isBuffering changed: ${state.isBuffering} -> $buffering '
+          '(pos: ${state.position.inSeconds}s)',
+        );
+      }
       state = state.copyWith(
         isBuffering: buffering,
         isVideoNotOptimizedForStreaming: isNotOptimized,
@@ -509,7 +549,6 @@ class PlayerNotifier extends _$PlayerNotifier {
     bool startAtZero = false,
   }) async {
     _abortCurrentProxyRequest();
-
     try {
       // CRITICAL FIX: Capture previous video data BEFORE resetting state.
       // This ensures we can clear progress for finished videos using the correct
@@ -683,10 +722,142 @@ class PlayerNotifier extends _$PlayerNotifier {
   }
 
   Future<void> seekTo(Duration position) async {
+    // Cancelar recuperación de seek anterior
+    _seekRecoveryTimer?.cancel();
+    _seekRecoveryTimer = null;
+    _lastSeekTarget = position;
+    _lastSeekTime = DateTime.now();
+    _seekRecoveryExtensions = 0;
+
+    // CRITICAL: Si hay un error de streaming activo, limpiar ANTES del seek.
+    // Sin esto, el proxy rechaza la request con 503 (circuit breaker) y el
+    // seek falla silenciosamente sin que el player entre en buffering.
+    if (state.streamingError != null && _currentProxyFileId != null) {
+      debugPrint(
+        'PlayerNotifier: Limpiando error de streaming antes de seek',
+      );
+      clearStreamingError();
+    }
+
+    // Capturar bytes descargados para detectar progreso en recovery
+    _seekRecoveryBytesSnapshot = _currentProxyFileId != null
+        ? _streamingRepository
+                .getLoadingProgress(_currentProxyFileId!)
+                ?.bytesLoaded ??
+            0
+        : 0;
+
     // Optimistic update
-    state = state.copyWith(position: position);
+    state = state.copyWith(position: position, seekRetryCount: 0);
     await _savePosition();
     await _repository.seekTo(position);
+
+    // Iniciar recuperación automática solo para videos de Telegram
+    if (_currentProxyFileId != null) {
+      _startSeekRecovery(position);
+    }
+  }
+
+  /// Inicia un timer de recuperación que reintenta el seek si el buffering
+  /// se queda atascado por más de [_seekRecoveryTimeout].
+  ///
+  /// FIX I: Antes de re-seek destructivo, verifica si el proxy está
+  /// descargando activamente. Si hay progreso, extiende el timeout en vez
+  /// de cancelar la descarga de TDLib con un re-seek innecesario.
+  void _startSeekRecovery(Duration seekTarget) {
+    _seekRecoveryTimer?.cancel();
+    _seekRecoveryTimer = Timer(_seekRecoveryTimeout, () {
+      if (!ref.mounted) return;
+
+      // Recuperar si: buffering atascado O hay error de streaming activo
+      // (el proxy puede rechazar con 503 sin que el player entre en buffering)
+      final needsRecovery = _lastSeekTarget == seekTarget &&
+          (state.isBuffering || state.streamingError != null);
+
+      if (needsRecovery) {
+        // FIX I: Si solo es buffering (sin error), verificar si la descarga
+        // está progresando antes de hacer un re-seek destructivo.
+        if (state.streamingError == null && _currentProxyFileId != null) {
+          final progress = _streamingRepository.getLoadingProgress(
+            _currentProxyFileId!,
+          );
+          final currentBytes = progress?.bytesLoaded ?? 0;
+          final bytesGrew = currentBytes >
+              _seekRecoveryBytesSnapshot + 100 * 1024; // >100KB de progreso
+
+          if (bytesGrew &&
+              _seekRecoveryExtensions < _maxSeekRecoveryExtensions) {
+            _seekRecoveryExtensions++;
+            final progressMB =
+                (currentBytes - _seekRecoveryBytesSnapshot) / 1024 / 1024;
+            debugPrint(
+              'PlayerNotifier: Seek recovery - buffering pero descarga activa '
+              '(${progressMB.toStringAsFixed(1)}MB progreso), '
+              'extendiendo timeout '
+              '($_seekRecoveryExtensions/$_maxSeekRecoveryExtensions)',
+            );
+            // Actualizar snapshot para la siguiente comparación
+            _seekRecoveryBytesSnapshot = currentBytes;
+            // Re-programar sin re-seek destructivo
+            _startSeekRecovery(seekTarget);
+            return;
+          }
+        }
+
+        final retryCount = state.seekRetryCount;
+
+        if (retryCount < _maxSeekRetries) {
+          debugPrint(
+            'PlayerNotifier: Seek recovery - '
+            '${state.isBuffering ? "buffering atascado" : "error de streaming"} '
+            'por ${_seekRecoveryTimeout.inSeconds}s, reintentando seek '
+            '(intento ${retryCount + 1}/$_maxSeekRetries)',
+          );
+          state = state.copyWith(seekRetryCount: retryCount + 1);
+
+          // Limpiar error completo del proxy (resetea loadState, retries, etc.)
+          if (_currentProxyFileId != null) {
+            _streamingRepository.clearError(_currentProxyFileId!);
+          }
+          state = state.copyWith(streamingError: null);
+
+          // Reintentar el seek
+          _repository.seekTo(seekTarget);
+
+          // Programar siguiente chequeo de recuperación
+          _startSeekRecovery(seekTarget);
+        } else {
+          debugPrint(
+            'PlayerNotifier: Seek recovery agotada después de $_maxSeekRetries '
+            'intentos. Recargando video completo.',
+          );
+          _reloadVideoAtPosition(seekTarget);
+        }
+      }
+    });
+  }
+
+  /// Último recurso: recargar el video completo desde la posición del seek.
+  Future<void> _reloadVideoAtPosition(Duration position) async {
+    final path = state.currentVideoPath;
+    if (path == null) return;
+
+    // Limpiar error completo del proxy
+    if (_currentProxyFileId != null) {
+      _streamingRepository.clearError(_currentProxyFileId!);
+    }
+    state = state.copyWith(streamingError: null);
+
+    await loadVideo(
+      path,
+      isNetwork: true,
+      title: state.currentVideoTitle,
+      telegramChatId: _telegramChatId,
+      telegramMessageId: _telegramMessageId,
+      telegramFileSize: _telegramFileSize,
+      telegramTopicId: _telegramTopicId,
+      telegramTopicName: _telegramTopicName,
+    );
   }
 
   double _lastVolume = 1.0;

@@ -95,7 +95,11 @@ class MediaKitVideoRepository implements VideoRepository {
     if (_player != null) return;
 
     final player = Player(
-      configuration: const PlayerConfiguration(bufferSize: 32 * 1024 * 1024),
+      configuration: const PlayerConfiguration(
+        bufferSize: 32 * 1024 * 1024,
+        // DIAG: Enable verbose logging to diagnose 61s playback stop
+        logLevel: MPVLogLevel.info,
+      ),
     );
     _player = player;
 
@@ -134,13 +138,26 @@ class MediaKitVideoRepository implements VideoRepository {
     if (_initId != currentId) return;
     await setProp('demuxer-max-back-bytes', (32 * 1024 * 1024).toString());
     if (_initId != currentId) return;
-    await setProp('network-timeout', '60');
+    // FIX M/M2: Disable ALL network timeouts for local proxy connections.
+    // The proxy streams data from TDLib which may have variable download speeds.
+    // mpv's network-timeout kills connections after N seconds of no data.
+    // ffmpeg's http protocol also has its own timeout via stream-lavf-o.
+    // Both must be disabled for localhost proxy connections.
+    await setProp('network-timeout', '0');
+    if (_initId != currentId) return;
+    // FIX M2: Also disable ffmpeg-level HTTP timeout and enable reconnect.
+    // stream-lavf-o passes options directly to ffmpeg's HTTP protocol handler.
+    await setProp('stream-lavf-o', 'timeout=0,reconnect=1,reconnect_delay_max=2');
     if (_initId != currentId) return;
     await setProp('cache-pause', 'yes');
     if (_initId != currentId) return;
     await setProp('cache-pause-initial', 'yes');
     if (_initId != currentId) return;
     await setProp('cache-secs', '20');
+    if (_initId != currentId) return;
+    // DIAG: Enable mpv verbose logging for cache/demux/stream components
+    // to diagnose why playback stops at 61 seconds
+    await setProp('msg-level', 'cache=info,demux=info,stream=info,cplayer=v');
     if (_initId != currentId) return;
 
     // One-time listener setup
@@ -166,6 +183,30 @@ class MediaKitVideoRepository implements VideoRepository {
     player.stream.error.listen((error) {
       debugPrint('MediaKit Error: $error');
       _errorController.add(error);
+    });
+
+    // DIAG: Log mpv internal messages to diagnose 61s stop
+    player.stream.log.listen((log) {
+      // Filter: only show warn/error/fatal, or info/debug with relevant keywords
+      final level = log.level.toLowerCase();
+      if (level == 'error' || level == 'fatal' || level == 'warn') {
+        debugPrint('mpv[${log.level}] ${log.prefix}: ${log.text}');
+      } else if (log.text.contains('eof') ||
+          log.text.contains('EOF') ||
+          log.text.contains('end of file') ||
+          log.text.contains('pause') ||
+          log.text.contains('underrun') ||
+          log.text.contains('stall') ||
+          log.text.contains('reconnect') ||
+          log.text.contains('timeout') ||
+          log.text.contains('cache') && level == 'info') {
+        debugPrint('mpv[${log.level}] ${log.prefix}: ${log.text}');
+      }
+    });
+
+    // DIAG: Log completed events to detect spurious EOF
+    player.stream.completed.listen((completed) {
+      debugPrint('MediaKit: completed=$completed (pos: ${_currentPosition.inSeconds}s, dur: ${_totalDuration.inSeconds}s)');
     });
 
     // Track selection logic

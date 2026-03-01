@@ -10,7 +10,8 @@
       "WebFetch(domain:api.github.com)",
       "WebFetch(domain:fossies.org)",
       "WebFetch(domain:raw.githubusercontent.com)",
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(flutter pub run build_runner build --delete-conflicting-outputs)"
     ]
   }
 }
