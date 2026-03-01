@@ -37,7 +37,7 @@ class MediaKitVideoRepository implements VideoRepository {
     _initId++; // Cancel pending ops
 
     // If we were playing a proxy URL, extract file_id and abort proxy wait
-    if (_videoUrl != null && _videoUrl!.contains('/stream?file_id=')) {
+    if (_videoUrl != null && _videoUrl!.contains('/stream?') && _videoUrl!.contains('file_id=')) {
       try {
         final uri = Uri.parse(_videoUrl!);
         final idStr = uri.queryParameters['file_id'];
@@ -323,7 +323,7 @@ class MediaKitVideoRepository implements VideoRepository {
 
     // P1 FIX: Signal explicit user seek to proxy BEFORE player seeks
     // This helps proxy prioritize the first offset request after seek
-    if (_videoUrl != null && _videoUrl!.contains('/stream?file_id=')) {
+    if (_videoUrl != null && _videoUrl!.contains('/stream?') && _videoUrl!.contains('file_id=')) {
       try {
         final uri = Uri.parse(_videoUrl!);
         final idStr = uri.queryParameters['file_id'];

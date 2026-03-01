@@ -291,7 +291,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (videoPath == null) return;
 
     // Only for Telegram streaming videos (proxy URLs)
-    if (!videoPath.contains('/stream?file_id=')) return;
+    if (!videoPath.contains('/stream?') || !videoPath.contains('file_id=')) return;
 
     try {
       final uri = Uri.parse(videoPath);

@@ -69,7 +69,7 @@ class LoadVideoUseCase extends UseCase<LoadVideoResult, LoadVideoParams> {
     int? proxyFileId;
 
     // Extract and validate proxy file ID from streaming URLs
-    if (path.contains('/stream?file_id=')) {
+    if (path.contains('/stream?') && path.contains('file_id=')) {
       try {
         final uri = Uri.parse(path);
         final fileIdStr = uri.queryParameters['file_id'];

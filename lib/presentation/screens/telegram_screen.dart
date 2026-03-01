@@ -527,7 +527,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
 
                     // Fallback to stored URL if fresh fetch failed
                     if (url == video.path &&
-                        video.path.contains('/stream?file_id=')) {
+                        video.path.contains('/stream?') && video.path.contains('file_id=')) {
                       try {
                         final uri = Uri.parse(video.path);
                         final fileIdStr = uri.queryParameters['file_id'];

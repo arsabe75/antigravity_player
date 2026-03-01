@@ -292,6 +292,13 @@ class LocalStreamingProxy {
   // new HTTP connections cleared the flag before old loops could see it.
   final Map<int, int> _seekGeneration = {};
 
+  // FIX T: Connection flood detector for broken videos.
+  // Tracks eviction timestamps per file. If evictions exceed threshold
+  // in a time window, the video is marked as corrupt and rejected.
+  final Map<int, List<DateTime>> _evictionTimestamps = {};
+  static const int _floodEvictionThreshold = 30;
+  static const Duration _floodTimeWindow = Duration(seconds: 10);
+
   // ============================================================
   // TELEGRAM ANDROID-INSPIRED IMPROVEMENTS
   // ============================================================
@@ -625,6 +632,7 @@ class LocalStreamingProxy {
     _evictedConnectionOffsets.remove(fileId);
     _connectionsSkipDecrement.remove(fileId);
     _seekGeneration.remove(fileId);
+    _evictionTimestamps.remove(fileId);
     _lastDownloadProgress.remove(fileId);
     _lastStallCheckOffset.remove(fileId);
     _downloadHighWaterMark.remove(fileId);
@@ -646,6 +654,7 @@ class LocalStreamingProxy {
     _evictedConnectionOffsets.clear();
     _connectionsSkipDecrement.clear();
     _seekGeneration.clear();
+    _evictionTimestamps.clear();
 
     _downloadMetrics.clear();
     _sampleTableCache.clear();
@@ -1195,6 +1204,39 @@ class LocalStreamingProxy {
             'evicting stale connection at ${mostStale ~/ 1024}KB '
             '(primary: ${primary ~/ 1024}KB, new: ${start ~/ 1024}KB)',
           );
+
+          // FIX T: Track eviction rate to detect broken videos flooding connections.
+          // A healthy video may evict occasionally (seek, track switch).
+          // A broken video floods: dozens of evictions per second as mpv
+          // keeps reopening connections that immediately fail.
+          final now = DateTime.now();
+          final timestamps = _evictionTimestamps.putIfAbsent(fileId, () => []);
+          timestamps.add(now);
+          // Prune old timestamps outside the window
+          final cutoff = now.subtract(_floodTimeWindow);
+          timestamps.removeWhere((t) => t.isBefore(cutoff));
+          if (timestamps.length >= _floodEvictionThreshold) {
+            _logError(
+              'CONNECTION FLOOD detected for $fileId: '
+              '${timestamps.length} evictions in ${_floodTimeWindow.inSeconds}s. '
+              'File appears damaged — blocking further requests.',
+              fileId: fileId,
+            );
+            _evictionTimestamps.remove(fileId);
+            final error = StreamingError.corruptFile(fileId);
+            _notifyErrorIfNew(fileId, error);
+            // Abort all pending operations for this file
+            _abortedRequests.add(fileId);
+            final waiters = _byteAvailabilityWaiters.remove(fileId);
+            if (waiters != null) {
+              for (final entry in waiters) {
+                if (!entry.value.isCompleted) entry.value.complete();
+              }
+            }
+            request.response.statusCode = HttpStatus.serviceUnavailable;
+            await request.response.close();
+            return;
+          }
           // Allow the new connection through — counter already adjusted
         } else {
           // No evictable connections, reject as last resort
