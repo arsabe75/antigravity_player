@@ -97,6 +97,14 @@ class ProxyFileState {
   /// Forced MOOV download offset (while downloading MOOV)
   int? forcedMoovOffset;
 
+  /// FIX U: Timestamp when forced MOOV download started.
+  /// Used to detect stuck MOOV downloads that never progress.
+  DateTime? forcedMoovStartTime;
+
+  /// FIX U: Last observed byte count for the forced MOOV download.
+  /// Tracks progress to distinguish between slow-but-progressing and truly stuck.
+  int forcedMoovLastProgress = 0;
+
   /// Whether early MOOV detection has been triggered
   bool earlyMoovDetectionTriggered = false;
 
@@ -167,6 +175,8 @@ class ProxyFileState {
     isMoovAtEnd = false;
     moovPosition = null;
     forcedMoovOffset = null;
+    forcedMoovStartTime = null;
+    forcedMoovLastProgress = 0;
     earlyMoovDetectionTriggered = false;
 
     // State machine

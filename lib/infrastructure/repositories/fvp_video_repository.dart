@@ -5,6 +5,7 @@ import 'package:fvp/fvp.dart' as fvp;
 import 'package:video_player/video_player.dart';
 import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
+import '../services/local_streaming_proxy.dart';
 
 /// FVP-based video repository using the video_player package with libmpv backend.
 ///
@@ -32,6 +33,7 @@ class FvpVideoRepository implements VideoRepository {
   Duration _totalDuration = Duration.zero;
   bool _isPlaying = false;
   bool _isBuffering = false;
+  String? _videoUrl; // Track URL for proxy abort/seek signaling
 
   int _initId = 0;
 
@@ -63,6 +65,20 @@ class FvpVideoRepository implements VideoRepository {
   @override
   Future<void> dispose() async {
     _initId++; // Cancel pending inits
+
+    // If we were playing a proxy URL, extract file_id and abort proxy wait
+    if (_videoUrl != null && _videoUrl!.contains('/stream?') && _videoUrl!.contains('file_id=')) {
+      try {
+        final uri = Uri.parse(_videoUrl!);
+        final idStr = uri.queryParameters['file_id'];
+        if (idStr != null) {
+          LocalStreamingProxy().abortRequest(int.parse(idStr));
+        }
+      } catch (e) {
+        debugPrint('FvpVideoRepository: Error parsing abort URL: $e');
+      }
+    }
+
     _stopPoller();
     await _controller?.dispose();
     _controller = null;
@@ -115,6 +131,9 @@ class FvpVideoRepository implements VideoRepository {
     // 1. Generate Init ID
     _initId++;
     final int currentId = _initId;
+
+    // Track URL for proxy abort/seek signaling
+    _videoUrl = video.path;
 
     // 2. Initialize NEW controller locally (don't touch current one yet)
     VideoPlayerController newController;
@@ -204,6 +223,23 @@ class FvpVideoRepository implements VideoRepository {
 
   @override
   Future<void> seekTo(Duration position) async {
+    // Signal explicit user seek to proxy BEFORE player seeks
+    // This helps proxy prioritize the first offset request after seek (Fix R2/S)
+    if (_videoUrl != null && _videoUrl!.contains('/stream?') && _videoUrl!.contains('file_id=')) {
+      try {
+        final uri = Uri.parse(_videoUrl!);
+        final idStr = uri.queryParameters['file_id'];
+        if (idStr != null) {
+          LocalStreamingProxy().signalUserSeek(
+            int.parse(idStr),
+            position.inMilliseconds,
+          );
+        }
+      } catch (e) {
+        debugPrint('FVP: Error signaling seek to proxy: $e');
+      }
+    }
+
     await _controller?.seekTo(position);
   }
 

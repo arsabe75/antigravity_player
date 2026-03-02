@@ -260,6 +260,11 @@ class ProxyConfig {
   /// Max MOOV-ready threshold (large files).
   static const int moovReadyMaxBytes = 2 * 1024 * 1024; // 2MB
 
+  /// FIX U: Timeout in seconds for forced MOOV download with no progress.
+  /// If TDLib can't deliver any data at the MOOV offset within this time,
+  /// the file is considered damaged.
+  static const int moovDownloadTimeoutSeconds = 30;
+
   /// Min base bytes for instant primary offset progress (small files).
   static const int primaryProgressBaseMinBytes = 256 * 1024; // 256KB
 

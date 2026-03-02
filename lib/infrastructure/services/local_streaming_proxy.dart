@@ -2681,6 +2681,41 @@ class LocalStreamingProxy {
         _getOrCreateState(fileId).activePriority =
             0; // CRITICAL: Reset priority to avoid deadlock
       } else if (requestedOffset != forcedOffset) {
+        // FIX U: Check if MOOV download is stuck (no progress for 30 seconds).
+        // This catches damaged files where TDLib can't deliver data at the MOOV offset,
+        // creating a deadlock where all connections are blocked waiting for MOOV.
+        final moovState = _getOrCreateState(fileId);
+        final moovStartTime = moovState.forcedMoovStartTime;
+        if (moovStartTime != null) {
+          final moovElapsed = DateTime.now().difference(moovStartTime);
+          if (availableAtForced > moovState.forcedMoovLastProgress) {
+            // Progress detected - reset the timer
+            moovState.forcedMoovStartTime = DateTime.now();
+            moovState.forcedMoovLastProgress = availableAtForced;
+          } else if (moovElapsed.inSeconds >= ProxyConfig.moovDownloadTimeoutSeconds) {
+            // No progress for too long - file is likely damaged or MOOV is unreachable
+            _logError(
+              'MOOV DOWNLOAD TIMEOUT for $fileId: no progress for ${moovElapsed.inSeconds}s '
+              '(have $availableAtForced/$targetSize bytes at offset $forcedOffset). '
+              'File appears damaged — blocking further requests.',
+              fileId: fileId,
+            );
+            // Clear the MOOV lock and emit error
+            moovState.forcedMoovOffset = null;
+            moovState.forcedMoovStartTime = null;
+            moovState.forcedMoovLastProgress = 0;
+            final error = StreamingError.corruptFile(fileId);
+            _notifyErrorIfNew(fileId, error);
+            _abortedRequests.add(fileId);
+            final waiters = _byteAvailabilityWaiters.remove(fileId);
+            if (waiters != null) {
+              for (final entry in waiters) {
+                if (!entry.value.isCompleted) entry.value.complete();
+              }
+            }
+            return;
+          }
+        }
         _debugLog(
           'Proxy: Ignoring request for $requestedOffset while forcing moov download at $forcedOffset for $fileId (have $availableAtForced/$targetSize)',
         );
@@ -3652,6 +3687,8 @@ class LocalStreamingProxy {
 
     // Activar lock: bloquea otras descargas hasta que MOOV termine
     _getOrCreateState(fileId).forcedMoovOffset = moovOffset;
+    _getOrCreateState(fileId).forcedMoovStartTime = DateTime.now();
+    _getOrCreateState(fileId).forcedMoovLastProgress = 0;
     _getOrCreateState(fileId).loadState = FileLoadState.loadingMoov;
 
     _debugLog(
