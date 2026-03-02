@@ -1514,10 +1514,13 @@ class LocalStreamingProxy {
               //
               // MOOV FIX / FIX Q: Don't adopt end-of-file probes as Primary.
               // mpv sends track-detection probes to the last portion of the file.
-              // Use 10% of file size (min 100MB) to catch probes that are further
-              // from the end than the old significantJump*2 (100MB) threshold.
+              // Use 10% of file size (min significantJump*2) to catch probes that
+              // are further from the end than the old threshold.
+              // FIX: Usar max() en vez de clamp() — para archivos < 1GB,
+              // significantJump*2 > totalSize*0.10, y clamp(min>max) lanza
+              // ArgumentError, crasheando el handler HTTP con error 500.
               final endOfFileThreshold = totalSize > 0
-                  ? (totalSize * 0.10).clamp(significantJump * 2, totalSize * 0.10).toInt()
+                  ? max(significantJump * 2, (totalSize * 0.10).toInt())
                   : significantJump * 2;
               final isMoovRequestForCheck =
                   totalSize > 0 && (totalSize - start) < endOfFileThreshold;
@@ -1556,8 +1559,9 @@ class LocalStreamingProxy {
             }
           } else {
             // FIX Q3: Don't adopt end-of-file probes as "stable seek" either
+            // FIX: Usar max() — misma corrección que endOfFileThreshold arriba.
             final endOfFileThresholdStable = totalSize > 0
-                ? (totalSize * 0.10).clamp(significantJump * 2, totalSize * 0.10).toInt()
+                ? max(significantJump * 2, (totalSize * 0.10).toInt())
                 : significantJump * 2;
             final isMoovStable =
                 totalSize > 0 && (totalSize - start) < endOfFileThresholdStable;
@@ -2680,6 +2684,29 @@ class LocalStreamingProxy {
         _getOrCreateState(fileId).forcedMoovOffset = null;
         _getOrCreateState(fileId).activePriority =
             0; // CRITICAL: Reset priority to avoid deadlock
+
+        // POST-MOOV: Reiniciar descarga desde offset primario inmediatamente.
+        // TDLib queda en el offset del MOOV (final); si el near-end stream
+        // necesita datos, los toma del cache (el preload cubre el read-ahead
+        // de mpv gracias a moovPreloadMaxBytes ≥ 10MB). Así no hay competencia
+        // entre near-end y main stream por el slot de descarga de TDLib.
+        if (!_abortedRequests.contains(fileId)) {
+          final primaryOffset =
+              _getOrCreateState(fileId).primaryPlaybackOffset ?? 0;
+          _debugLog(
+            'Proxy: POST-MOOV resuming download from offset $primaryOffset for $fileId',
+          );
+          _getOrCreateState(fileId).activeDownloadOffset = primaryOffset;
+          _getOrCreateState(fileId).lastOffsetChangeTime = DateTime.now();
+          TelegramService().send({
+            '@type': 'downloadFile',
+            'file_id': fileId,
+            'priority': DownloadPriority.critical,
+            'offset': primaryOffset,
+            'limit': 0,
+            'synchronous': false,
+          });
+        }
       } else if (requestedOffset != forcedOffset) {
         // FIX U: Check if MOOV download is stuck (no progress for 30 seconds).
         // This catches damaged files where TDLib can't deliver data at the MOOV offset,
@@ -3696,8 +3723,15 @@ class LocalStreamingProxy {
       '(last ${moovPreloadBytes ~/ 1024}KB) for file $fileId',
     );
 
-    // Iniciar descarga - cancela la descarga secuencial desde 0
-    _startDownloadAtOffset(fileId, moovOffset);
+    // Iniciar descarga - cancela la descarga secuencial desde 0.
+    // CRITICAL FIX: Usar isBlocking + forceRestart para garantizar que:
+    // 1. isBlocking: bypasea el cooldown de _startDownloadAtOffset (que lo
+    //    silenciaba si el streaming loop acababa de llamar _startDownloadAtOffset).
+    // 2. forceRestart: envía cancelDownloadFile primero, evitando que TDLib
+    //    ignore el downloadFile como NO-OP si ya hay una descarga activa.
+    // Sin esto, el MOOV se queda en 0 bytes indefinidamente bloqueando todo.
+    _startDownloadAtOffset(fileId, moovOffset,
+        isBlocking: true, forceRestart: true);
   }
 
   /// Triggers early MOOV detection when sufficient bytes arrive.
@@ -4240,6 +4274,19 @@ class LocalStreamingProxy {
     // Verificar que hay datos descargados DESPUÉS del offset (la región MOOV)
     // Si el último byte del archivo está descargado, la MOOV ya está disponible
     if (!ranges.containsOffset(totalSize - 1)) return false;
+
+    // FIX: Si el gap entre el offset y la región MOOV descargada es pequeño
+    // (< 1MB), NO considerarlo como gap inllenable. La descarga secuencial
+    // está a punto de llenarlo. Sin esto, el stream se cortaba prematuramente
+    // cuando la descarga secuencial estaba a ~140KB de la región MOOV.
+    final gapsList = ranges.gaps(offset, totalSize);
+    if (gapsList.isNotEmpty) {
+      final firstGap = gapsList.first;
+      final gapSize = firstGap.end - firstGap.start;
+      if (gapSize < 1024 * 1024) {
+        return false; // Gap pequeño, la descarga secuencial lo llenará pronto
+      }
+    }
 
     // Offset sin datos, cerca del final, MOOV disponible → estamos en el gap
     return true;

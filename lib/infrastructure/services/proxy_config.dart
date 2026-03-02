@@ -143,7 +143,9 @@ class ProxyConfig {
   // ============================================================
 
   /// Minimum bytes for MOOV region detection.
-  static const int moovRegionMinBytes = 5 * 1024 * 1024; // 5MB
+  /// Debe ser >= moovPreloadMaxBytes para que isMoovDownload reconozca
+  /// correctamente las solicitudes del proactive MOOV download.
+  static const int moovRegionMinBytes = 12 * 1024 * 1024; // 12MB
 
   /// Minimum bytes served to consider active playback (small files).
   static const int activePlaybackMinBytes = 1 * 1024 * 1024; // 1MB
@@ -162,7 +164,11 @@ class ProxyConfig {
   static const double sequentialReadThresholdPercent = 0.05;
 
   static const double moovPreloadThresholdPercent = 0.05;
-  static const int moovPreloadMaxBytes = 5 * 1024 * 1024; // 5MB
+  // 10MB: Cubre el MOOV atom (~2-5MB) + el read-ahead de mpv (~7.5MB desde el
+  // final del archivo). Con 5MB, quedaba un gap de ~2.3MB que forzaba al
+  // near-end stream a robar la descarga del main stream, causando ping-pong
+  // y retrasando el inicio de reproducción.
+  static const int moovPreloadMaxBytes = 10 * 1024 * 1024; // 10MB
 
   static const double activePlaybackThresholdPercent = 0.10;
   static const int activePlaybackMaxBytes = 10 * 1024 * 1024; // 10MB
@@ -175,7 +181,7 @@ class ProxyConfig {
   static const int frontierProximityMaxBytes = 5 * 1024 * 1024; // 5MB
 
   static const double moovRegionThresholdPercent = 0.005;
-  static const int moovRegionMaxBytes = 10 * 1024 * 1024; // 10MB
+  static const int moovRegionMaxBytes = 15 * 1024 * 1024; // 15MB
 
   static const double moovDownloadThresholdPercent = 0.01;
 
@@ -381,6 +387,7 @@ class ProxyConfig {
     int absoluteMin,
     int absoluteMax,
   ) {
-    return (fileSize * percent).round().clamp(absoluteMin, absoluteMax);
+    final effectiveMax = absoluteMax < absoluteMin ? absoluteMin : absoluteMax;
+    return (fileSize * percent).round().clamp(absoluteMin, effectiveMax);
   }
 }
