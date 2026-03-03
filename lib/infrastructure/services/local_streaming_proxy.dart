@@ -1321,10 +1321,13 @@ class LocalStreamingProxy {
         if (_filePaths.containsKey(fileId)) {
           final cached = _filePaths[fileId]!;
           // If the cached file was actively downloading but we're re-requesting,
-          // clear it to get fresh state
+          // clear filePaths to get fresh TDLib state on next update.
+          // IMPORTANT: Do NOT clear _downloadedRanges here. The ranges represent
+          // accumulated knowledge of bytes on disk (e.g., MOOV region downloaded
+          // proactively). Clearing them causes the proxy to "forget" the MOOV bytes,
+          // leading to MOOV gap timeouts near end-of-file playback.
           if (cached.isDownloadingActive) {
             _filePaths.remove(fileId);
-            _downloadedRanges.remove(fileId);
           }
         }
 
@@ -2034,17 +2037,12 @@ class LocalStreamingProxy {
                   }
                 }
               } else {
-                // FIX G: Detección temprana del gap MOOV inllenable.
-                // Si el offset está en el gap entre el frontier principal y la
-                // región MOOV, no tiene sentido esperar ni redirigir TDLib ahí.
-                if (_isInMoovGap(fileId, currentReadOffset)) {
-                  _debugLog(
-                    'Proxy: MOOV gap detected at $currentReadOffset for $fileId - ending stream',
-                  );
-                  break;
-                }
-
                 // NO DATA AVAILABLE -> BLOCKING WAIT (EVENT-DRIVEN)
+                // Nota: FIX G (_isInMoovGap) fue removido aquí. El mecanismo FIX F
+                // (moovGapConsecutiveTimeouts) es suficiente para detectar conexiones
+                // genuinamente estancadas. _isInMoovGap cortaba streams prematuramente
+                // en archivos grandes (~1.7GB) donde el gap entre el frontier y MOOV
+                // es legítimamente grande pero se está llenando activamente.
                 // Throttled log: only print every 2 seconds per file to reduce CPU overhead
                 final now = DateTime.now();
                 final lastLog = _lastWaitingLogTime[fileId];
@@ -2180,14 +2178,6 @@ class LocalStreamingProxy {
               // range requests for the same file.
               // _scheduleReadAhead(fileId, currentReadOffset);
             } else {
-              // FIX G: Detección temprana del gap MOOV inllenable.
-              if (_isInMoovGap(fileId, currentReadOffset)) {
-                _debugLog(
-                  'Proxy: MOOV gap detected at $currentReadOffset for $fileId - ending stream',
-                );
-                break;
-              }
-
               // NO DATA AVAILABLE -> BLOCKING WAIT (EVENT-DRIVEN)
               // Throttled log: only print every 2 seconds per file to reduce CPU overhead
               final now = DateTime.now();
@@ -2626,16 +2616,10 @@ class LocalStreamingProxy {
       return;
     }
 
-    // FIX H: No redirigir TDLib al gap MOOV inllenable.
-    // Si el offset está en el gap entre el frontier de descarga y la región MOOV,
-    // enviar downloadFile aquí mata la descarga secuencial principal sin beneficio.
-    if (_isInMoovGap(fileId, requestedOffset)) {
-      _logTrace(
-        'Ignoring download request in MOOV gap at $requestedOffset for $fileId',
-        fileId: fileId,
-      );
-      return;
-    }
+    // Nota: FIX H (_isInMoovGap) fue removido aquí. Bloquear la redirección
+    // de TDLib al gap impedía que el gap se llenara, creando una profecía
+    // autocumplida. Ahora TDLib se redirige al gap y lo llena normalmente.
+    // FIX F (moovGapConsecutiveTimeouts) maneja descargas genuinamente estancadas.
 
     // Proportional thresholds for correct small-file behavior
     final localSeekThreshold = ProxyConfig.scaled(
@@ -4248,49 +4232,6 @@ class LocalStreamingProxy {
   // ============================================================
   // SEEK DEBOUNCE
   // ============================================================
-
-  /// FIX G: Detecta si un offset está en el gap inllenable entre el frontier
-  /// principal de descarga y la región MOOV ya descargada al final del archivo.
-  /// Retorna true si el offset está en dicho gap y no tiene datos disponibles.
-  bool _isInMoovGap(int fileId, int offset) {
-    final state = _getOrCreateState(fileId);
-    if (!state.isMoovAtEnd) return false;
-
-    final cached = _filePaths[fileId];
-    if (cached == null) return false;
-    final totalSize = cached.totalSize;
-    if (totalSize <= 0) return false;
-
-    // Solo aplica a offsets cercanos al final del archivo (último 5%)
-    final nearEndThreshold = totalSize * 0.95;
-    if (offset < nearEndThreshold) return false;
-
-    final ranges = _downloadedRanges[fileId];
-    if (ranges == null) return false;
-
-    // No hay datos disponibles en el offset
-    if (ranges.availableBytesFrom(offset) > 0) return false;
-
-    // Verificar que hay datos descargados DESPUÉS del offset (la región MOOV)
-    // Si el último byte del archivo está descargado, la MOOV ya está disponible
-    if (!ranges.containsOffset(totalSize - 1)) return false;
-
-    // FIX: Si el gap entre el offset y la región MOOV descargada es pequeño
-    // (< 1MB), NO considerarlo como gap inllenable. La descarga secuencial
-    // está a punto de llenarlo. Sin esto, el stream se cortaba prematuramente
-    // cuando la descarga secuencial estaba a ~140KB de la región MOOV.
-    final gapsList = ranges.gaps(offset, totalSize);
-    if (gapsList.isNotEmpty) {
-      final firstGap = gapsList.first;
-      final gapSize = firstGap.end - firstGap.start;
-      if (gapSize < 1024 * 1024) {
-        return false; // Gap pequeño, la descarga secuencial lo llenará pronto
-      }
-    }
-
-    // Offset sin datos, cerca del final, MOOV disponible → estamos en el gap
-    return true;
-  }
 
   /// Debounced seek handler to prevent flooding TDLib with rapid cancellations.
   /// Instead of immediately cancelling and restarting download on each seek,
