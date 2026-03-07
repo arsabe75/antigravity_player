@@ -366,6 +366,8 @@ class LocalStreamingProxy {
   final Map<int, DateTime> _lastWaitingLogTime = {};
   // Maps fileId -> last time "PROTECTED" was logged
   final Map<int, DateTime> _lastProtectedLogTime = {};
+  // Maps fileId -> last time "Ignoring request (moov lock)" was logged
+  final Map<int, DateTime> _lastMoovIgnoreLogTime = {};
   // See ProxyConfig for throttle durations
   static Duration get _waitingLogThrottle => ProxyConfig.waitingLogThrottle;
   static Duration get _protectedLogThrottle => ProxyConfig.protectedLogThrottle;
@@ -640,6 +642,7 @@ class LocalStreamingProxy {
 
     _lastWaitingLogTime.remove(fileId);
     _lastProtectedLogTime.remove(fileId);
+    _lastMoovIgnoreLogTime.remove(fileId);
     _pendingFileUpdates.remove(fileId);
   }
 
@@ -1907,7 +1910,11 @@ class LocalStreamingProxy {
               // FIX: Only start download if we still have data to send.
               // If we just finished the file (remainingToSend == 0), currentReadOffset == totalSize,
               // which causes TDLib crash if we request it.
-              if (remainingToSend > 0) {
+              // MOOV LOCK: Skip if MOOV download is in progress — calling
+              // _startDownloadAtOffset would just hit the "Ignoring" path,
+              // wasting async work on every chunk read.
+              if (remainingToSend > 0 &&
+                  _getOrCreateState(fileId).forcedMoovOffset == null) {
                 _startDownloadAtOffset(fileId, currentReadOffset);
 
                 // POST-SEEK PRELOAD: Trigger proactive preload if we recently seeked
@@ -2057,11 +2064,15 @@ class LocalStreamingProxy {
                 }
 
                 // Ensure download is started at the exact offset the player needs
-                _startDownloadAtOffset(
-                  fileId,
-                  currentReadOffset,
-                  isBlocking: true,
-                );
+                // MOOV LOCK: Skip if MOOV download is in progress — the MOOV
+                // lock would reject this call anyway, avoid async overhead.
+                if (_getOrCreateState(fileId).forcedMoovOffset == null) {
+                  _startDownloadAtOffset(
+                    fileId,
+                    currentReadOffset,
+                    isBlocking: true,
+                  );
+                }
 
                 // EXTENDED TIMEOUT FOR MOOV ATOM: Requests near end of file need more time
                 // because TDLib must start a new download from a distant offset
@@ -2193,11 +2204,15 @@ class LocalStreamingProxy {
               }
 
               // Ensure download is started at the exact offset the player needs
-              _startDownloadAtOffset(
-                fileId,
-                currentReadOffset,
-                isBlocking: true,
-              );
+              // MOOV LOCK: Skip if MOOV download is in progress — the MOOV
+              // lock would reject this call anyway, avoid async overhead.
+              if (_getOrCreateState(fileId).forcedMoovOffset == null) {
+                _startDownloadAtOffset(
+                  fileId,
+                  currentReadOffset,
+                  isBlocking: true,
+                );
+              }
 
               // EXTENDED TIMEOUT FOR MOOV ATOM: Requests near end of file need more time
               final fileInfo = _filePaths[fileId];
@@ -2727,9 +2742,17 @@ class LocalStreamingProxy {
             return;
           }
         }
-        _debugLog(
-          'Proxy: Ignoring request for $requestedOffset while forcing moov download at $forcedOffset for $fileId (have $availableAtForced/$targetSize)',
-        );
+        // Throttled log: only print every 2 seconds per file to reduce log spam
+        // during MOOV download (streaming loops call this on every chunk read)
+        final moovLogNow = DateTime.now();
+        final lastMoovLog = _lastMoovIgnoreLogTime[fileId];
+        if (lastMoovLog == null ||
+            moovLogNow.difference(lastMoovLog) >= _waitingLogThrottle) {
+          _lastMoovIgnoreLogTime[fileId] = moovLogNow;
+          _debugLog(
+            'Proxy: Ignoring request for $requestedOffset while forcing moov download at $forcedOffset for $fileId (have $availableAtForced/$targetSize)',
+          );
+        }
         return;
       }
     }
