@@ -5,6 +5,8 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:flutter_single_instance/flutter_single_instance.dart';
+import 'package:windows_single_instance/windows_single_instance.dart';
 
 import 'config/router/app_router.dart';
 import 'config/theme/app_theme.dart';
@@ -60,6 +62,27 @@ void main() async {
     await windowManager.setResizable(true);
   });
 
+  // Single Instance Check
+  if (Platform.isWindows) {
+    await WindowsSingleInstance.ensureSingleInstance(
+      [],
+      "antigravity_player",
+      onSecondWindow: (args) {
+        debugPrint("Second window attempted to open on Windows");
+      },
+      bringWindowToFront: true,
+    );
+  } else if (Platform.isLinux) {
+    if (!(await FlutterSingleInstance().isFirstInstance())) {
+      debugPrint("Instance already running. Focusing existing instance.");
+      final err = await FlutterSingleInstance().focus();
+      if (err != null) {
+        debugPrint("Error focusing existing instance: $err");
+      }
+      exit(0);
+    }
+  }
+
   runApp(
     ProviderScope(
       overrides: [
@@ -70,6 +93,7 @@ void main() async {
       child: const VideoPlayerApp(),
     ),
   );
+
 }
 
 class VideoPlayerApp extends ConsumerStatefulWidget {
