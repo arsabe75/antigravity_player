@@ -281,7 +281,32 @@ class MediaKitVideoRepository implements VideoRepository {
 
     if (_initId != currentId) return;
 
+    // RESUME FIX WITH STUTTER PROTECTION:
+    // The 'start' property (mpv --start) is sometimes ignored when reusing the player instance
+    // across cold starts (e.g., opening from file explorer).
+    // We wait 500ms and check if the player started near 0 instead of the requested position.
+    // If it started correctly, we SKIP the seek to prevent visual stutter and audio echo.
+    if (startPosition != null && startPosition > Duration.zero) {
+      // Allow mpv to initialize media info and emit real position
+      if (_initId == currentId) {
+        await Future.delayed(const Duration(milliseconds: 500));
+      }
 
+      if (_initId == currentId) {
+        // If current position is lagging more than 2 seconds behind the start position,
+        // it means the '--start' property was completely ignored by the backend.
+        if (_currentPosition < startPosition - const Duration(seconds: 2)) {
+          debugPrint(
+            'MediaKit: \'start\' property was ignored (pos: ${_currentPosition.inSeconds}s, target: ${startPosition.inSeconds}s). Explicitly seeking... (resume fallback)',
+          );
+          await player.seek(startPosition);
+        } else {
+          debugPrint(
+            'MediaKit: \'start\' property succeeded. Skipping explicit seek to avoid stutter.',
+          );
+        }
+      }
+    }
 
     _videoUrl = video.path;
 
