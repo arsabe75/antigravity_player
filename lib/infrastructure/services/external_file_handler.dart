@@ -66,7 +66,7 @@ class ExternalFileHandler {
   /// Reads and processes the Linux IPC file if it exists, then deletes it
   static Future<void> processLinuxIpcFile(
     ProviderContainer container,
-    BuildContext context,
+    BuildContext? context,
   ) async {
     try {
       final file = File(_linuxTempFilePath);
@@ -75,7 +75,7 @@ class ExternalFileHandler {
         await file.delete(); // Clean up immediately
         debugPrint('ExternalFileHandler: Processed IPC file -> $path');
         if (path.isNotEmpty) {
-          if (!context.mounted) return;
+          if (context != null && !context.mounted) return;
           await handleExternalFile(path.trim(), container, context);
         }
       }

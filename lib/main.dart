@@ -175,7 +175,12 @@ class _VideoPlayerAppState extends ConsumerState<VideoPlayerApp>
     // Check for IPC file when gaining focus (Linux IPC)
     if (Platform.isLinux && mounted) {
       final container = ProviderScope.containerOf(context);
-      await ExternalFileHandler.processLinuxIpcFile(container, context);
+      // We must use rootNavigatorKey.currentContext for navigation,
+      // as the state context is above the Router.
+      await ExternalFileHandler.processLinuxIpcFile(
+        container,
+        rootNavigatorKey.currentContext,
+      );
     }
   }
 
