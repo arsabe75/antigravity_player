@@ -16,6 +16,7 @@ import 'infrastructure/services/player_settings_service.dart';
 import 'infrastructure/services/secure_storage_service.dart';
 import 'presentation/providers/video_repository_provider.dart';
 import 'presentation/providers/player_notifier.dart';
+import 'infrastructure/services/external_file_handler.dart';
 
 class _PreloadedBackendNotifier extends PlayerBackend {
   final String initialBackend;
@@ -25,7 +26,7 @@ class _PreloadedBackendNotifier extends PlayerBackend {
   String build() => initialBackend;
 }
 
-void main() async {
+void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   // Load environment variables
@@ -40,6 +41,15 @@ void main() async {
   // Load Player Settings
   final settingsService = PlayerSettingsService();
   final backend = await settingsService.getPlayerEngine();
+
+  // Create explicitly to allow programmatic access from outside the widget tree
+  final container = ProviderContainer(
+    overrides: [
+      playerBackendProvider.overrideWith(
+        () => _PreloadedBackendNotifier(backend),
+      ),
+    ],
+  );
 
   // Initialize Window Manager
   await windowManager.ensureInitialized();
@@ -65,16 +75,26 @@ void main() async {
   // Single Instance Check
   if (Platform.isWindows) {
     await WindowsSingleInstance.ensureSingleInstance(
-      [],
+      args,
       "antigravity_player",
-      onSecondWindow: (args) {
-        debugPrint("Second window attempted to open on Windows");
+      onSecondWindow: (newArgs) {
+        debugPrint("Second window attempted to open on Windows with args: $newArgs");
+        if (newArgs.isNotEmpty) {
+          ExternalFileHandler.handleExternalFile(
+            newArgs.first,
+            container,
+            rootNavigatorKey.currentContext,
+          );
+        }
       },
       bringWindowToFront: true,
     );
   } else if (Platform.isLinux) {
     if (!(await FlutterSingleInstance().isFirstInstance())) {
       debugPrint("Instance already running. Focusing existing instance.");
+      if (args.isNotEmpty) {
+        await ExternalFileHandler.writeLinuxIpcFile(args.first);
+      }
       final err = await FlutterSingleInstance().focus();
       if (err != null) {
         debugPrint("Error focusing existing instance: $err");
@@ -83,13 +103,21 @@ void main() async {
     }
   }
 
+  // Handle initial file launch for the first instance
+  if (args.isNotEmpty) {
+    // Delayed slightly to allow the app routing and UI to mount
+    Future.delayed(const Duration(milliseconds: 500), () {
+      ExternalFileHandler.handleExternalFile(
+        args.first,
+        container,
+        rootNavigatorKey.currentContext,
+      );
+    });
+  }
+
   runApp(
-    ProviderScope(
-      overrides: [
-        playerBackendProvider.overrideWith(
-          () => _PreloadedBackendNotifier(backend),
-        ),
-      ],
+    UncontrolledProviderScope(
+      container: container,
       child: const VideoPlayerApp(),
     ),
   );
@@ -139,6 +167,15 @@ class _VideoPlayerAppState extends ConsumerState<VideoPlayerApp>
       // for Flutter's full cleanup cycle
       await windowManager.setPreventClose(false);
       await windowManager.close();
+    }
+  }
+
+  @override
+  Future<void> onWindowFocus() async {
+    // Check for IPC file when gaining focus (Linux IPC)
+    if (Platform.isLinux && mounted) {
+      final container = ProviderScope.containerOf(context);
+      await ExternalFileHandler.processLinuxIpcFile(container, context);
     }
   }
 

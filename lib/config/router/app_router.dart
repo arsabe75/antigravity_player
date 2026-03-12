@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
@@ -54,6 +54,8 @@ class _ExtraDecoder extends Converter<Object?, Object?> {
 // Type-Safe Router with Riverpod Integration
 // ============================================================================
 
+final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
+
 class _RouterNotifier extends ChangeNotifier {
   final Ref _ref;
 
@@ -77,6 +79,7 @@ GoRouter appRouter(Ref ref) {
   final notifier = _RouterNotifier(ref);
 
   return GoRouter(
+    navigatorKey: rootNavigatorKey,
     initialLocation: '/',
     debugLogDiagnostics: true,
     routes: $appRoutes, // Generated from routes.g.dart

@@ -99,6 +99,35 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     _initMediaControl();
   }
 
+  @override
+  void didUpdateWidget(PlayerScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.videoUrl != oldWidget.videoUrl && widget.videoUrl != null) {
+      final isNetwork = widget.videoUrl!.startsWith('http');
+      Future.microtask(() {
+        final playlist = ref.read(playlistProvider);
+        // If loading same video as current playlist item, use its config
+        final bool startAtZero = playlist.currentItem?.path == widget.videoUrl
+            ? playlist.startFromBeginning
+            : false;
+
+        ref
+            .read(playerProvider.notifier)
+            .loadVideo(
+              widget.videoUrl!,
+              isNetwork: isNetwork,
+              title: widget.title,
+              telegramChatId: widget.telegramChatId,
+              telegramMessageId: widget.telegramMessageId,
+              telegramFileSize: widget.telegramFileSize,
+              telegramTopicId: widget.telegramTopicId,
+              telegramTopicName: widget.telegramTopicName,
+              startAtZero: startAtZero,
+            );
+      });
+    }
+  }
+
   Future<void> _initMediaControl() async {
     // Set callbacks
     _mediaControl.onPlay = () => ref.read(playerProvider.notifier).togglePlay();
