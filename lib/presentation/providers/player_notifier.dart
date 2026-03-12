@@ -657,6 +657,16 @@ class PlayerNotifier extends _$PlayerNotifier {
       // OPTIMIZATION: Pass startPosition to play()
       // This allows the player (MediaKit/libmpv) to start directly at this timestamp
       // avoiding the "start at 0 -> seek to X" pattern which causes double-loading and proxy crashes.
+      
+      // FIX: Set seek target variables to prevent the position listener from flashing
+      // the UI back to 0% when MediaKit emits its initial 0-position events.
+      if (startPosition > Duration.zero) {
+        _lastSeekTarget = startPosition;
+        _lastSeekTime = DateTime.now();
+        // Clear any previous recovery extensions to avoid confusion
+        _seekRecoveryExtensions = 0;
+      }
+      
       await _repository.play(video, startPosition: startPosition);
 
       // FIX: Start MOOV check timer immediately for network videos

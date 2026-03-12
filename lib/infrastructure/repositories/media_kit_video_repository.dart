@@ -281,23 +281,7 @@ class MediaKitVideoRepository implements VideoRepository {
 
     if (_initId != currentId) return;
 
-    // RESUME FIX: Explicitly seek if start position was requested.
-    // The 'start' property (mpv --start) is sometimes ignored when reusing the player instance.
-    // This semantic seek ensures we definitely start at the right place.
-    if (startPosition != null && startPosition > Duration.zero) {
-      // Allow mpv to initialize media info (helps with some formats)
-      if (_initId == currentId) {
-        await Future.delayed(const Duration(milliseconds: 500));
-      }
 
-      // Check cancellation again after delay
-      if (_initId == currentId) {
-        debugPrint(
-          'MediaKit: Explicitly seeking to $startPosition (resume fallback)',
-        );
-        await player.seek(startPosition);
-      }
-    }
 
     _videoUrl = video.path;
 
