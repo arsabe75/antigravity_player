@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:path/path.dart' as p;
+import 'package:window_manager/window_manager.dart';
 
 import '../../domain/entities/playlist_entity.dart';
 import '../../presentation/providers/playlist_notifier.dart';
@@ -77,6 +78,14 @@ class ExternalFileHandler {
         if (path.isNotEmpty) {
           if (context != null && !context.mounted) return;
           await handleExternalFile(path.trim(), container, context);
+          
+          // Force window to front on Linux (helps with Wayland/some DEs)
+          try {
+            await windowManager.show();
+            await windowManager.focus();
+          } catch (e) {
+            debugPrint('ExternalFileHandler: Error focusing window: $e');
+          }
         }
       }
     } catch (e) {
