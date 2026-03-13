@@ -51,6 +51,22 @@ void main(List<String> args) async {
     ],
   );
 
+  // Linux Single Instance Check (Done early, before GUI is prepared)
+  // If it's a second instance, write IPC and exit immediately.
+  if (Platform.isLinux) {
+    if (!(await FlutterSingleInstance().isFirstInstance())) {
+      debugPrint("Instance already running. Focusing existing instance.");
+      if (args.isNotEmpty) {
+        await ExternalFileHandler.writeLinuxIpcFile(args.first);
+      }
+      final err = await FlutterSingleInstance().focus();
+      if (err != null) {
+        debugPrint("Error focusing existing instance: $err");
+      }
+      exit(0);
+    }
+  }
+
   // Initialize Window Manager
   await windowManager.ensureInitialized();
 
@@ -66,13 +82,18 @@ void main(List<String> args) async {
     titleBarStyle: TitleBarStyle.hidden,
   );
 
-  await windowManager.waitUntilReadyToShow(windowOptions, () async {
+  // Wait for the UI frame to render before showing the window
+  // CRITICAL: DO NOT `await` this call. Awaiting it will block Flutter from
+  // reaching `runApp()`, creating a deadlock that only resolves via timeout,
+  // which causes the "empty window for seconds" glitch on Linux/Wayland.
+  windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.show();
     await windowManager.focus();
     await windowManager.setResizable(true);
   });
 
-  // Single Instance Check
+  // Windows Single Instance Check
+  // Note: Windows hook relies on window creation, so it runs after GUI init.
   if (Platform.isWindows) {
     await WindowsSingleInstance.ensureSingleInstance(
       args,
@@ -89,18 +110,6 @@ void main(List<String> args) async {
       },
       bringWindowToFront: true,
     );
-  } else if (Platform.isLinux) {
-    if (!(await FlutterSingleInstance().isFirstInstance())) {
-      debugPrint("Instance already running. Focusing existing instance.");
-      if (args.isNotEmpty) {
-        await ExternalFileHandler.writeLinuxIpcFile(args.first);
-      }
-      final err = await FlutterSingleInstance().focus();
-      if (err != null) {
-        debugPrint("Error focusing existing instance: $err");
-      }
-      exit(0);
-    }
   }
 
   // Handle initial file launch for the first instance
