@@ -83,10 +83,10 @@ void main(List<String> args) async {
   );
 
   // Wait for the UI frame to render before showing the window
-  // CRITICAL: DO NOT `await` this call. Awaiting it will block Flutter from
-  // reaching `runApp()`, creating a deadlock that only resolves via timeout,
-  // which causes the "empty window for seconds" glitch on Linux/Wayland.
-  windowManager.waitUntilReadyToShow(windowOptions, () async {
+  // Restored `await` here. Wayland requires the window to be fully realized
+  // before displaying it, otherwise it loses frame decorations, snaps to top-left,
+  // and breaks hit-testing (mouse clicks). 
+  await windowManager.waitUntilReadyToShow(windowOptions, () async {
     await windowManager.show();
     await windowManager.focus();
     await windowManager.setResizable(true);
