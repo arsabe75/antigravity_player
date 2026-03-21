@@ -11,12 +11,14 @@ class LoadChatMessagesParams {
   final int? messageThreadId;
   final int nextVideoFromId;
   final int nextDocFromId;
+  final String query;
 
   const LoadChatMessagesParams({
     required this.chatId,
     this.messageThreadId,
     this.nextVideoFromId = 0,
     this.nextDocFromId = 0,
+    this.query = '',
   });
 }
 
@@ -44,7 +46,10 @@ class LoadChatMessagesUseCase
 
   @override
   Future<LoadChatMessagesResult> call(LoadChatMessagesParams params) async {
-    if (params.messageThreadId != null && params.messageThreadId != 0) {
+    // If a search query is provided, we use the standard searchChatMessages (even for topics)
+    // with the thread specified (if applicable, though TDLib searchChatMessages supports message_thread_id).
+    // If it's a regular thread history load with no generic search, use _fetchTopicHistory.
+    if (params.query.isEmpty && params.messageThreadId != null && params.messageThreadId != 0) {
       return _fetchTopicHistory(params);
     }
 
@@ -57,7 +62,9 @@ class LoadChatMessagesUseCase
       currentNextVideoFromId != -1
           ? _fetchBatch(
               chatId: params.chatId,
+              messageThreadId: params.messageThreadId,
               fromMessageId: currentNextVideoFromId,
+              query: params.query,
               filter: {'@type': 'searchMessagesFilterVideo'},
             ).then((batch) {
               if (batch.length < 100) hasMoreVideos = false;
@@ -71,7 +78,9 @@ class LoadChatMessagesUseCase
       currentNextDocFromId != -1
           ? _fetchBatch(
               chatId: params.chatId,
+              messageThreadId: params.messageThreadId,
               fromMessageId: currentNextDocFromId,
+              query: params.query,
               filter: {'@type': 'searchMessagesFilterDocument'},
             ).then((batch) {
               if (batch.length < 100) hasMoreDocs = false;
@@ -176,23 +185,29 @@ class LoadChatMessagesUseCase
 
   Future<List<Map<String, dynamic>>> _fetchBatch({
     required int chatId,
+    int? messageThreadId,
     required int fromMessageId,
+    String query = '',
     required Map<String, dynamic>? filter,
   }) async {
     if (fromMessageId == -1) return [];
 
     try {
-      final result = await _service.sendWithResult({
+      final request = <String, dynamic>{
         '@type': 'searchChatMessages',
         'chat_id': chatId,
-        // Omit message_thread_id physically if not explicitly supported in TDLib 1.8.59
-        // We handle thread filtering strictly on the Dart side.
-        'query': '',
+        'query': query,
         'from_message_id': fromMessageId,
         'offset': 0,
         'limit': 100,
         'filter': filter,
-      });
+      };
+
+      if (messageThreadId != null && messageThreadId != 0) {
+        request['message_thread_id'] = messageThreadId;
+      }
+
+      final result = await _service.sendWithResult(request);
 
       if (result['@type'] == 'error') {
         debugPrint(

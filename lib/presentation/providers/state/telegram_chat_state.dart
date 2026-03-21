@@ -10,6 +10,7 @@ abstract class TelegramChatState with _$TelegramChatState {
     @Default(false) bool isLoading,
     @Default(false) bool isLoadingMore,
     @Default(true) bool hasMore,
+    @Default('') String searchQuery,
     String? error,
   }) = _TelegramChatState;
 }

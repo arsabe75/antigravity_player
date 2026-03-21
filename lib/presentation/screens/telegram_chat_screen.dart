@@ -27,6 +27,9 @@ class TelegramChatScreen extends ConsumerStatefulWidget {
 
 class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
   final ScrollController _scrollController = ScrollController();
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
 
   TelegramChatParams get _params => TelegramChatParams(
     chatId: widget.chatId,
@@ -51,6 +54,8 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
 
   @override
   void dispose() {
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     _scrollController.dispose();
     super.dispose();
   }
@@ -123,19 +128,56 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.title),
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                focusNode: _searchFocusNode,
+                decoration: const InputDecoration(
+                  hintText: 'Search videos...',
+                  border: InputBorder.none,
+                ),
+                textInputAction: TextInputAction.search,
+                onSubmitted: (value) {
+                  ref.read(telegramChatProvider(_params).notifier).setSearchQuery(value);
+                },
+              )
+            : Text(widget.title),
         flexibleSpace: GestureDetector(
           onPanStart: (_) => windowManager.startDragging(),
           behavior: HitTestBehavior.translucent,
         ),
         actions: [
-          IconButton(
-            icon: const Icon(LucideIcons.refreshCw),
-            tooltip: 'Refresh',
-            onPressed: () => ref
-                .read(telegramChatProvider(_params).notifier)
-                .refreshMessages(),
-          ),
+          if (_isSearching)
+            IconButton(
+              icon: const Icon(LucideIcons.x),
+              tooltip: 'Cancel Search',
+              onPressed: () {
+                setState(() {
+                  _isSearching = false;
+                  _searchController.clear();
+                });
+                ref.read(telegramChatProvider(_params).notifier).setSearchQuery('');
+              },
+            )
+          else
+            IconButton(
+              icon: const Icon(LucideIcons.search),
+              tooltip: 'Search',
+              onPressed: () {
+                setState(() {
+                  _isSearching = true;
+                });
+                _searchFocusNode.requestFocus();
+              },
+            ),
+          if (!_isSearching)
+            IconButton(
+              icon: const Icon(LucideIcons.refreshCw),
+              tooltip: 'Refresh',
+              onPressed: () => ref
+                  .read(telegramChatProvider(_params).notifier)
+                  .refreshMessages(),
+            ),
           const SizedBox(width: 8),
           const WindowControls(),
           const SizedBox(width: 8),

@@ -201,6 +201,7 @@ class TelegramChat extends _$TelegramChat {
           messageThreadId: messageThreadId,
           nextVideoFromId: _nextVideoFromId,
           nextDocFromId: _nextDocFromId,
+          query: state.searchQuery,
         ),
       );
 
@@ -243,6 +244,13 @@ class TelegramChat extends _$TelegramChat {
     await loadMessages(forceRefresh: true);
   }
 
+  Future<void> setSearchQuery(String query) async {
+    if (state.searchQuery == query) return;
+    state = state.copyWith(searchQuery: query);
+    // Reload messages based on the new query
+    await loadMessages(forceRefresh: true);
+  }
+
   Future<void> loadMoreMessages() async {
     if (state.isLoading || state.isLoadingMore || !state.hasMore) {
       return;
@@ -270,6 +278,7 @@ class TelegramChat extends _$TelegramChat {
           // If a stream is exhausted, pass -1 to kill fetching that type
           nextVideoFromId: _hasMoreVideos ? _nextVideoFromId : -1,
           nextDocFromId: _hasMoreDocs ? _nextDocFromId : -1,
+          query: state.searchQuery,
         ),
       );
 
