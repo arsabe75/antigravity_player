@@ -237,6 +237,12 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                           effectiveFileName ??
                           'Video sin título';
 
+                      String videoExt = 'VIDEO';
+                      if (effectiveFileName != null && effectiveFileName.contains('.')) {
+                        videoExt = effectiveFileName.split('.').last.toUpperCase();
+                        if (videoExt.length > 5) videoExt = videoExt.substring(0, 5); // Prevent UI overflow
+                      }
+
                       final isSelected = _selectedMessages.contains(messageId);
 
                       return Card(
@@ -273,6 +279,28 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                             color: Colors.transparent,
                                           ),
                                         ),
+                                        Positioned(
+                                          top: 8,
+                                          left: 8,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                              vertical: 2,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.black54,
+                                              borderRadius: BorderRadius.circular(4),
+                                            ),
+                                            child: Text(
+                                              videoExt,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
                                         Center(
                                           child: Container(
                                             padding: const EdgeInsets.all(12),
@@ -289,38 +317,29 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                             ),
                                           ),
                                         ),
-                                        Positioned(
-                                          bottom: 8,
-                                          right: 8,
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 4,
-                                              vertical: 2,
+                                        if (duration > 0)
+                                          Positioned(
+                                            bottom: 8,
+                                            right: 8,
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 4,
+                                                vertical: 2,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.black54,
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                _formatDuration(duration),
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
                                             ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.black54,
-                                              borderRadius:
-                                                  BorderRadius.circular(4),
-                                            ),
-                                            child: duration > 0
-                                                ? Text(
-                                                    _formatDuration(duration),
-                                                    style: const TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 12,
-                                                    ),
-                                                  )
-                                                : const Text(
-                                                    'MKV', // Badge for files without duration (likely MKV)
-                                                    style: TextStyle(
-                                                      color: Colors.white,
-                                                      fontSize: 10,
-                                                      fontWeight:
-                                                          FontWeight.bold,
-                                                    ),
-                                                  ),
                                           ),
-                                        ),
                                       ],
                                     ),
                                   ),
