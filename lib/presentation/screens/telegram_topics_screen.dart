@@ -27,6 +27,18 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
   final FocusNode _searchFocusNode = FocusNode();
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final state = ref.read(telegramForumProvider(widget.chatId));
+      if (state.searchQuery.isNotEmpty) {
+        ref.read(telegramForumProvider(widget.chatId).notifier).setSearchQuery('');
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _searchController.dispose();
     _searchFocusNode.dispose();

@@ -50,6 +50,14 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
         }
       }
     });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final state = ref.read(telegramChatProvider(_params));
+      if (state.searchQuery.isNotEmpty) {
+        ref.read(telegramChatProvider(_params).notifier).setSearchQuery('');
+      }
+    });
   }
 
   @override
