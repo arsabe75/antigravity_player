@@ -7,7 +7,7 @@ import '../providers/telegram_forum_notifier.dart';
 import '../widgets/custom_emoji_icon.dart';
 import '../../config/router/routes.dart';
 
-class TelegramTopicsScreen extends ConsumerWidget {
+class TelegramTopicsScreen extends ConsumerStatefulWidget {
   final int chatId;
   final String title;
 
@@ -16,6 +16,22 @@ class TelegramTopicsScreen extends ConsumerWidget {
     required this.chatId,
     required this.title,
   });
+
+  @override
+  ConsumerState<TelegramTopicsScreen> createState() => _TelegramTopicsScreenState();
+}
+
+class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
+  bool _isSearching = false;
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocusNode.dispose();
+    super.dispose();
+  }
 
   /// Get topic icon color from topic info.
   /// Uses TDLib icon color, or falls back to theme-aware colors for contrast.
@@ -34,33 +50,70 @@ class TelegramTopicsScreen extends ConsumerWidget {
   }
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final state = ref.watch(telegramForumProvider(chatId));
+  Widget build(BuildContext context) {
+    final state = ref.watch(telegramForumProvider(widget.chatId));
 
     return Scaffold(
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: const TextStyle(fontSize: 16)),
-            const Text(
-              'Topics',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
-            ),
-          ],
-        ),
+        title: _isSearching
+            ? TextField(
+                controller: _searchController,
+                focusNode: _searchFocusNode,
+                decoration: const InputDecoration(
+                  hintText: 'Search topics...',
+                  border: InputBorder.none,
+                ),
+                textInputAction: TextInputAction.search,
+                onSubmitted: (value) {
+                  ref.read(telegramForumProvider(widget.chatId).notifier).setSearchQuery(value);
+                },
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(widget.title, style: const TextStyle(fontSize: 16)),
+                  const Text(
+                    'Topics',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+                  ),
+                ],
+              ),
         flexibleSpace: GestureDetector(
           onPanStart: (_) => windowManager.startDragging(),
           behavior: HitTestBehavior.translucent,
         ),
         actions: [
-          IconButton(
-            icon: const Icon(LucideIcons.refreshCw),
-            tooltip: 'Refresh',
-            onPressed: () {
-              ref.read(telegramForumProvider(chatId).notifier).refreshTopics();
-            },
-          ),
+          if (_isSearching)
+            IconButton(
+              icon: const Icon(LucideIcons.x),
+              tooltip: 'Cancel Search',
+              onPressed: () {
+                setState(() {
+                  _isSearching = false;
+                  _searchController.clear();
+                });
+                ref.read(telegramForumProvider(widget.chatId).notifier).setSearchQuery('');
+              },
+            )
+          else
+            IconButton(
+              icon: const Icon(LucideIcons.search),
+              tooltip: 'Search',
+              onPressed: () {
+                setState(() {
+                  _isSearching = true;
+                });
+                _searchFocusNode.requestFocus();
+              },
+            ),
+          if (!_isSearching)
+            IconButton(
+              icon: const Icon(LucideIcons.refreshCw),
+              tooltip: 'Refresh',
+              onPressed: () {
+                ref.read(telegramForumProvider(widget.chatId).notifier).refreshTopics();
+              },
+            ),
           const SizedBox(width: 8),
           const WindowControls(),
           const SizedBox(width: 8),
@@ -96,7 +149,7 @@ class TelegramTopicsScreen extends ConsumerWidget {
                   ElevatedButton.icon(
                     onPressed: () {
                       ref
-                          .read(telegramForumProvider(chatId).notifier)
+                          .read(telegramForumProvider(widget.chatId).notifier)
                           .refreshTopics();
                     },
                     icon: const Icon(LucideIcons.refreshCw),
@@ -112,7 +165,7 @@ class TelegramTopicsScreen extends ConsumerWidget {
                     !state.isLoadingMore &&
                     state.hasMore) {
                   ref
-                      .read(telegramForumProvider(chatId).notifier)
+                      .read(telegramForumProvider(widget.chatId).notifier)
                       .loadMoreTopics();
                 }
                 return false;
@@ -229,7 +282,7 @@ class TelegramTopicsScreen extends ConsumerWidget {
                       trailing: const Icon(LucideIcons.chevronRight, size: 20),
                       onTap: () {
                         TelegramChatRoute(
-                          chatId: chatId,
+                          chatId: widget.chatId,
                           title: topicName,
                           messageThreadId: forumTopicId,
                         ).push(context);

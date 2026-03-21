@@ -9,6 +9,7 @@ class TelegramForumState {
   final bool isLoading;
   final bool isLoadingMore;
   final bool hasMore;
+  final String searchQuery;
   final String? error;
 
   const TelegramForumState({
@@ -16,6 +17,7 @@ class TelegramForumState {
     this.isLoading = false,
     this.isLoadingMore = false,
     this.hasMore = true,
+    this.searchQuery = '',
     this.error,
   });
 
@@ -24,6 +26,7 @@ class TelegramForumState {
     bool? isLoading,
     bool? isLoadingMore,
     bool? hasMore,
+    String? searchQuery,
     String? error,
   }) {
     return TelegramForumState(
@@ -31,6 +34,7 @@ class TelegramForumState {
       isLoading: isLoading ?? this.isLoading,
       isLoadingMore: isLoadingMore ?? this.isLoadingMore,
       hasMore: hasMore ?? this.hasMore,
+      searchQuery: searchQuery ?? this.searchQuery,
       error: error,
     );
   }
@@ -266,7 +270,7 @@ class TelegramForum extends _$TelegramForum {
       _service.send({
         '@type': 'getForumTopics',
         'chat_id': chatId,
-        'query': '',
+        'query': state.searchQuery,
         'offset_date': 0,
         'offset_message_id': 0,
         'offset_message_thread_id': 0,
@@ -290,8 +294,15 @@ class TelegramForum extends _$TelegramForum {
   }
 
   Future<void> refreshTopics() async {
-    state = const TelegramForumState(isLoading: true);
+    state = state.copyWith(isLoading: true);
     await loadTopics();
+  }
+
+  Future<void> setSearchQuery(String query) async {
+    if (state.searchQuery == query) return;
+    state = state.copyWith(searchQuery: query);
+    // Reload topics based on the new query
+    await refreshTopics();
   }
 
   Future<void> loadMoreTopics() async {
@@ -305,7 +316,7 @@ class TelegramForum extends _$TelegramForum {
     _service.send({
       '@type': 'getForumTopics',
       'chat_id': chatId,
-      'query': '',
+      'query': state.searchQuery,
       'offset_date': _lastOffsetDate,
       'offset_message_id': _lastOffsetMessageId,
       'offset_message_thread_id': _lastOffsetMessageThreadId,
