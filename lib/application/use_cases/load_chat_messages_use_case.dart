@@ -98,8 +98,25 @@ class LoadChatMessagesUseCase
       allMsgs.addAll(batch);
     }
 
-    final validMsgs = allMsgs.where(_isVideoMessage).toList();
-
+    final validMsgs = allMsgs.where((msg) {
+      if (!_isVideoMessage(msg)) return false;
+      if (params.messageThreadId != null && params.messageThreadId != 0) {
+        int? msgThreadId = msg['message_thread_id'] as int?;
+        if (msgThreadId == null && msg.containsKey('topic_id')) {
+          final topicObj = msg['topic_id'];
+          if (topicObj is Map) {
+            msgThreadId = topicObj['forum_topic_id'] as int?;
+          } else if (topicObj is int) {
+            msgThreadId = topicObj;
+          }
+        }
+        final finalThreadId = msgThreadId ?? 0;
+        if (finalThreadId != params.messageThreadId) {
+          return false;
+        }
+      }
+      return true;
+    }).toList();
     return LoadChatMessagesResult(
       messages: validMsgs,
       nextVideoFromId: currentNextVideoFromId,
