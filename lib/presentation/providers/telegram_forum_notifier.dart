@@ -71,90 +71,7 @@ class TelegramForum extends _$TelegramForum {
     // Guard against disposed provider
     if (!ref.mounted) return;
     try {
-      if (update['@type'] == 'forumTopics') {
-        final topicsData = update['topics'] as List? ?? [];
-        final totalCount = update['total_count'] as int? ?? 0;
-
-        debugPrint(
-          'TelegramForum: Received ${topicsData.length} topics (total: $totalCount)',
-        );
-
-        if (topicsData.isEmpty) {
-          if (state.isLoadingMore) {
-            state = state.copyWith(isLoadingMore: false, hasMore: false);
-          } else if (state.isLoading) {
-            state = state.copyWith(isLoading: false, hasMore: false);
-          }
-          return;
-        }
-
-        // UPDATE CURSORS from the LAST received topic (Server Order)
-        final lastTopicInBatch = topicsData.last as Map<String, dynamic>;
-        final lastInfo = lastTopicInBatch['info'] as Map<String, dynamic>?;
-        final lastMsg =
-            lastTopicInBatch['last_message'] as Map<String, dynamic>?;
-
-        _lastOffsetDate = lastMsg?['date'] as int? ?? 0;
-        _lastOffsetMessageId = lastMsg?['id'] as int? ?? 0;
-        _lastOffsetMessageThreadId =
-            lastInfo?['message_thread_id'] as int? ?? 0;
-
-        final topics = topicsData
-            .map((t) => t as Map<String, dynamic>)
-            .toList();
-
-        // Merge topics - handle both direct and nested info structures
-        final currentTopics = List<Map<String, dynamic>>.from(state.topics);
-
-        for (final topic in topics) {
-          // TDLib forumTopic structure: { info: {...}, last_message: {...}, ... }
-          final topicInfo = topic['info'] as Map<String, dynamic>?;
-          if (topicInfo == null) {
-            continue;
-          }
-
-          // TDLib uses 'forum_topic_id' as the thread identifier
-          final topicId = topicInfo['forum_topic_id'];
-          if (topicId == null) {
-            continue;
-          }
-
-          final index = currentTopics.indexWhere((t) {
-            final info = t['info'] as Map<String, dynamic>?;
-            return info?['forum_topic_id'] == topicId;
-          });
-
-          if (index == -1) {
-            currentTopics.add(topic);
-          } else {
-            currentTopics[index] = topic;
-          }
-        }
-
-        debugPrint('TelegramForum: Loaded ${currentTopics.length} topics');
-
-        // Sort by order (descending - higher order first)
-        currentTopics.sort((a, b) {
-          // Pinned topics first
-          final aPinned = a['is_pinned'] == true ? 1 : 0;
-          final bPinned = b['is_pinned'] == true ? 1 : 0;
-          if (aPinned != bPinned) return bPinned - aPinned;
-
-          // Then by order
-          final aOrder =
-              BigInt.tryParse(a['order']?.toString() ?? '0') ?? BigInt.zero;
-          final bOrder =
-              BigInt.tryParse(b['order']?.toString() ?? '0') ?? BigInt.zero;
-          return bOrder.compareTo(aOrder);
-        });
-
-        state = state.copyWith(
-          topics: currentTopics,
-          isLoading: false,
-          isLoadingMore: false,
-          hasMore: topics.length >= 50,
-        );
-      } else if (update['@type'] == 'updateForumTopicInfo') {
+      if (update['@type'] == 'updateForumTopicInfo') {
         final chatIdUpdate = update['chat_id'];
         if (chatIdUpdate != chatId) return;
 
@@ -254,6 +171,86 @@ class TelegramForum extends _$TelegramForum {
     }
   }
 
+  void _processForumTopics(Map<String, dynamic> result) {
+    if (!ref.mounted) return;
+    try {
+      if (result['@type'] == 'error') {
+        debugPrint('TelegramForum: TDLib error getting topics: ${result['message']}');
+        state = state.copyWith(isLoading: false, isLoadingMore: false, error: result['message']);
+        return;
+      }
+
+      final topicsData = result['topics'] as List? ?? [];
+      final totalCount = result['total_count'] as int? ?? 0;
+
+      debugPrint('TelegramForum: Received ${topicsData.length} topics (total: $totalCount)');
+
+      if (topicsData.isEmpty) {
+        if (state.isLoadingMore) {
+          state = state.copyWith(isLoadingMore: false, hasMore: false);
+        } else if (state.isLoading) {
+          state = state.copyWith(isLoading: false, hasMore: false);
+        }
+        return;
+      }
+
+      // UPDATE CURSORS from the LAST received topic (Server Order)
+      final lastTopicInBatch = topicsData.last as Map<String, dynamic>;
+      final lastInfo = lastTopicInBatch['info'] as Map<String, dynamic>?;
+      final lastMsg = lastTopicInBatch['last_message'] as Map<String, dynamic>?;
+
+      _lastOffsetDate = lastMsg?['date'] as int? ?? 0;
+      _lastOffsetMessageId = lastMsg?['id'] as int? ?? 0;
+      _lastOffsetMessageThreadId = lastInfo?['message_thread_id'] as int? ?? lastInfo?['forum_topic_id'] as int? ?? 0;
+
+      final topics = topicsData.map((t) => t as Map<String, dynamic>).toList();
+
+      // Merge topics
+      final currentTopics = List<Map<String, dynamic>>.from(state.topics);
+
+      for (final topic in topics) {
+        final topicInfo = topic['info'] as Map<String, dynamic>?;
+        if (topicInfo == null) continue;
+
+        final topicId = topicInfo['forum_topic_id'];
+        if (topicId == null) continue;
+
+        final index = currentTopics.indexWhere((t) {
+          final info = t['info'] as Map<String, dynamic>?;
+          return info?['forum_topic_id'] == topicId;
+        });
+
+        if (index == -1) {
+          currentTopics.add(topic);
+        } else {
+          currentTopics[index] = topic;
+        }
+      }
+
+      debugPrint('TelegramForum: Loaded ${currentTopics.length} topics');
+
+      // Sort by order 
+      currentTopics.sort((a, b) {
+        final aPinned = a['is_pinned'] == true ? 1 : 0;
+        final bPinned = b['is_pinned'] == true ? 1 : 0;
+        if (aPinned != bPinned) return bPinned - aPinned;
+
+        final aOrder = BigInt.tryParse(a['order']?.toString() ?? '0') ?? BigInt.zero;
+        final bOrder = BigInt.tryParse(b['order']?.toString() ?? '0') ?? BigInt.zero;
+        return bOrder.compareTo(aOrder);
+      });
+
+      state = state.copyWith(
+        topics: currentTopics,
+        isLoading: false,
+        isLoadingMore: false,
+        hasMore: topics.length >= 50,
+      );
+    } catch (e, st) {
+      debugPrint('TelegramForum Processing Error: $e\n$st');
+    }
+  }
+
   Future<void> loadTopics() async {
     try {
       // Reset cursors
@@ -264,10 +261,10 @@ class TelegramForum extends _$TelegramForum {
       state = state.copyWith(
         isLoading: true,
         topics: [],
-      ); // Clear prev topics on fresh load
+      ); 
       debugPrint('TelegramForum: Loading topics for chat $chatId');
 
-      _service.send({
+      final result = await _service.sendWithResult({
         '@type': 'getForumTopics',
         'chat_id': chatId,
         'query': state.searchQuery,
@@ -277,16 +274,7 @@ class TelegramForum extends _$TelegramForum {
         'limit': 50,
       });
 
-      // Safety timeout
-      Future.delayed(const Duration(seconds: 10), () {
-        try {
-          if (state.isLoading) {
-            state = state.copyWith(isLoading: false, hasMore: false);
-          }
-        } catch (_) {
-          // Notifier disposed
-        }
-      });
+      _processForumTopics(result);
     } catch (e) {
       debugPrint('TelegramForum: Error loading topics: $e');
       state = state.copyWith(isLoading: false, error: e.toString());
@@ -313,7 +301,7 @@ class TelegramForum extends _$TelegramForum {
     state = state.copyWith(isLoadingMore: true);
     debugPrint('TelegramForum: Loading more topics...');
 
-    _service.send({
+    final result = await _service.sendWithResult({
       '@type': 'getForumTopics',
       'chat_id': chatId,
       'query': state.searchQuery,
@@ -322,5 +310,7 @@ class TelegramForum extends _$TelegramForum {
       'offset_message_thread_id': _lastOffsetMessageThreadId,
       'limit': 50,
     });
+    
+    _processForumTopics(result);
   }
 }
