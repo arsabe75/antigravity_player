@@ -60,3 +60,5 @@ linux/tdlib_libs/
 .svn/
 .swiftpm/
 migrate_working_dir/
+
+architecture_review_report.md   
