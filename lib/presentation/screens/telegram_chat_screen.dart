@@ -367,6 +367,30 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                             ),
                                           ),
                                         ),
+                                        if (size != null && size > 0)
+                                          Positioned(
+                                            bottom: 8,
+                                            left: 8,
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                horizontal: 4,
+                                                vertical: 2,
+                                              ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.black54,
+                                                borderRadius:
+                                                    BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                _formatFileSize(size),
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.bold,
+                                                ),
+                                              ),
+                                            ),
+                                          ),
                                         if (duration > 0)
                                           Positioned(
                                             bottom: 8,
@@ -638,5 +662,21 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
     final min = d.inMinutes;
     final sec = d.inSeconds % 60;
     return '$min:${sec.toString().padLeft(2, '0')}';
+  }
+
+  String _formatFileSize(int bytes) {
+    if (bytes <= 0) return '0 B';
+    const suffixes = ['B', 'KB', 'MB', 'GB', 'TB'];
+    int i = 0;
+    double s = bytes.toDouble();
+    while (s >= 1024 && i < suffixes.length - 1) {
+      s /= 1024;
+      i++;
+    }
+    String result = s.toStringAsFixed(1);
+    if (result.endsWith('.0')) {
+      result = result.substring(0, result.length - 2);
+    }
+    return '$result ${suffixes[i]}';
   }
 }
