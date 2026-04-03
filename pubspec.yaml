@@ -41,7 +41,8 @@ dependencies:
   window_manager: ^0.5.1
   freezed_annotation: ^3.1.0
   file_picker: ^10.3.7
-  shared_preferences: ^2.5.3
+  drift: ^2.14.0
+  sqlite3_flutter_libs: ^0.5.17
   ffi: ^2.1.0
   flutter_dotenv: ^5.2.1
   mpris_service:
@@ -70,7 +71,6 @@ dependencies:
   path: ^1.8.3
   disk_space_2: ^1.0.5
   flutter_secure_storage: ^10.0.0
-  encrypt_shared_preferences: ^0.9.10
   flutter_single_instance: ^1.7.0
   windows_single_instance: ^1.1.0
 
@@ -112,6 +112,7 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
   build_runner: ^2.10.4
+  drift_dev: ^2.14.0
   riverpod_generator: ^3.0.3
   freezed: ^3.2.3
   go_router_builder: ^4.1.3

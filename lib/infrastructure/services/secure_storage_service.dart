@@ -1,75 +1,116 @@
-import 'package:encrypt_shared_preferences/provider.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import '../database/app_database.dart';
 
-/// Centralized wrapper for encrypted SharedPreferences.
-/// Provides a singleton pattern for consistent access across the app.
+/// Facade to maintain the synchronous read / async write interface 
+/// for the app's key-value configurations, now backed by Drift.
+class StorageFacade {
+  final AppDatabase _db;
+  final Map<String, String> _cache;
+
+  StorageFacade(this._db, this._cache);
+
+  Future<bool> _save(String key, String value) async {
+    _cache[key] = value;
+    try {
+      await _db.into(_db.appSettings).insertOnConflictUpdate(
+            AppSetting(key: key, value: value),
+          );
+      return true;
+    } catch (e) {
+      debugPrint('StorageFacade error: $e');
+      return false;
+    }
+  }
+
+  String? getString(String key) => _cache[key];
+
+  Future<bool> setString(String key, String value) => _save(key, value);
+
+  int? getInt(String key) {
+    var val = _cache[key];
+    return val == null ? null : int.tryParse(val);
+  }
+
+  Future<bool> setInt(String key, int value) => _save(key, value.toString());
+
+  bool? getBool(String key) {
+    var val = _cache[key];
+    if (val == 'true') return true;
+    if (val == 'false') return false;
+    return null;
+  }
+
+  Future<bool> setBool(String key, bool value) => _save(key, value.toString());
+
+  List<String>? getStringList(String key) {
+    var val = _cache[key];
+    if (val == null) return null;
+    try {
+      final List<dynamic> decoded = jsonDecode(val);
+      return decoded.map((e) => e.toString()).toList();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<bool> setStringList(String key, List<String> value) =>
+      _save(key, jsonEncode(value));
+
+  Iterable<String> getKeys() => _cache.keys;
+
+  Future<bool> remove(String key) async {
+    _cache.remove(key);
+    try {
+      await (_db.delete(_db.appSettings)..where((tbl) => tbl.key.equals(key)))
+          .go();
+      return true;
+    } catch (e) {
+      debugPrint('StorageFacade error deleting $key: $e');
+      return false;
+    }
+  }
+
+  Future<bool> clear() async {
+    _cache.clear();
+    try {
+      await _db.delete(_db.appSettings).go();
+      return true;
+    } catch (e) {
+      debugPrint('StorageFacade error clearing: $e');
+      return false;
+    }
+  }
+}
+
+/// Centralized wrapper for app settings, previously encrypted SharedPreferences.
+/// Now using Drift for ACID-compliant, robust local storage that prevents corruption.
 class SecureStorageService {
-  static EncryptedSharedPreferences? _instance;
-  static bool _legacyCleanupDone = false;
+  static StorageFacade? _instance;
 
-  // Encryption key - must be exactly 16 characters for AES-128
-  static const String _encryptionKey = 'AnT1gR4v1ty_2026';
-
-  // Keys used by the app that need cleanup from legacy unencrypted storage
-  static const List<String> _legacyKeys = [
-    'recent_videos',
-    'recent_urls',
-    'playback_position_',
-    'is_dark_mode',
-    'player_engine',
-    'telegram_favorites',
-    'telegram_keep_media_duration',
-    'telegram_video_cache_size_limit',
-  ];
-
-  /// Initialize and get the encrypted preferences instance.
+  /// Initialize and get the database backed preferences instance.
   /// Must be called once at app startup before any storage operations.
   static Future<void> initialize() async {
     if (_instance != null) return;
 
-    // Clean up legacy unencrypted data (one-time)
-    await _cleanupLegacyData();
+    final db = AppDatabase();
+    final allSettings = await db.select(db.appSettings).get();
 
-    await EncryptedSharedPreferences.initialize(_encryptionKey);
-    _instance = EncryptedSharedPreferences.getInstance();
+    final cache = <String, String>{};
+    for (var setting in allSettings) {
+      cache[setting.key] = setting.value;
+    }
+
+    _instance = StorageFacade(db, cache);
   }
 
-  /// Clean up old unencrypted SharedPreferences data.
-  /// This runs once to remove data that was stored before encryption was enabled.
-  static Future<void> _cleanupLegacyData() async {
-    if (_legacyCleanupDone) return;
-    _legacyCleanupDone = true;
-
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final allKeys = prefs.getKeys();
-      int cleanedCount = 0;
-
-      for (final key in allKeys) {
-        // Check if this key matches any of our legacy keys
-        final shouldClean = _legacyKeys.any(
-          (legacyKey) => key == legacyKey || key.startsWith(legacyKey),
-        );
-
-        if (shouldClean) {
-          await prefs.remove(key);
-          cleanedCount++;
-        }
-      }
-
-      if (cleanedCount > 0) {
-        debugPrint(
-          'SecureStorageService: Cleaned up $cleanedCount legacy unencrypted keys',
-        );
-      }
-    } catch (e) {
-      debugPrint('SecureStorageService: Legacy cleanup error: $e');
-    }
+  @visibleForTesting
+  static Future<void> initializeForTest(AppDatabase testDb) async {
+    _instance = StorageFacade(testDb, {});
   }
 
   /// Get the singleton instance. Throws if not initialized.
-  static EncryptedSharedPreferences get instance {
+  static StorageFacade get instance {
     if (_instance == null) {
       throw StateError(
         'SecureStorageService not initialized. Call initialize() first.',
@@ -81,9 +122,8 @@ class SecureStorageService {
   /// Check if the service is initialized.
   static bool get isInitialized => _instance != null;
 
-  @visibleForTesting
+    @visibleForTesting
   static void reset() {
     _instance = null;
-    _legacyCleanupDone = false;
   }
 }

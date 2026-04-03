@@ -1,18 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:video_player_app/presentation/providers/theme_provider.dart';
 import 'package:riverpod/riverpod.dart';
 import 'package:video_player_app/infrastructure/services/secure_storage_service.dart';
+import 'package:video_player_app/infrastructure/database/app_database.dart';
+import 'package:drift/native.dart';
 
 void main() {
   group('ThemeNotifier', () {
     setUp(() async {
-      SharedPreferences.setMockInitialValues({});
       SecureStorageService.reset();
-      await SecureStorageService.initialize();
-      // Wait for any async initialization if needed, though for individual tests we might need to handle it per test
-      // or just ensure we wait after creating the container/notifier
+      await SecureStorageService.initializeForTest(
+          AppDatabase(e: NativeDatabase.memory()));
     });
 
     test('initial state is dark mode', () async {
