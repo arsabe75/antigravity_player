@@ -192,22 +192,33 @@ class PlayerNotifier extends _$PlayerNotifier {
           now.difference(_lastPositionUpdate) >= _positionUpdateThrottle;
 
       if (shouldUpdateState) {
-        // FIX K: Ignorar resets de posición a 0 durante un seek activo.
-        // media_kit/mpv puede emitir posición 0 brevemente al re-abrir
-        // la conexión HTTP durante un seek, causando que el video
-        // "vuelva al segundo 0" visualmente.
-        if (_lastSeekTarget != null &&
-            _lastSeekTime != null &&
-            _lastSeekTarget!.inSeconds > 5 &&
-            pos.inMilliseconds < 1000 &&
-            now.difference(_lastSeekTime!).inSeconds < 10) {
-          debugPrint(
-            'PlayerNotifier: Ignoring position reset to ${pos.inMilliseconds}ms '
-            '(active seek to ${_lastSeekTarget!.inSeconds}s)',
-          );
-          return;
+        // Ignorar posiciones "viejas" o reseteos a 0 emitidos por el reproductor 
+        // mientras procesa un seek asincrónicamente (por buffering de red).
+        if (_lastSeekTarget != null && _lastSeekTime != null) {
+          final timeSinceSeek = now.difference(_lastSeekTime!);
+          // Durante una ventana de 4 segundos posterior al inicio de un seek
+          if (timeSinceSeek < const Duration(seconds: 4)) {
+            final delta = (pos - _lastSeekTarget!).abs();
+            // Si la posición enviada difiere en más de 2 segundos del target, 
+            // asumimos que es vieja (el salto aún no ocurre). La ignoramos.
+            if (delta > const Duration(seconds: 2)) {
+               debugPrint(
+                 'PlayerNotifier: Ignoring stale position ${pos.inSeconds}s '
+                 '(target: ${_lastSeekTarget!.inSeconds}s, delta: ${delta.inSeconds}s) during seek cooldown.',
+               );
+               return;
+            } else {
+               // El reproductor ya llegó o está muy cerca del target.
+               // Podemos dar por superado el salto.
+               _lastSeekTarget = null;
+               _lastSeekTime = null;
+            }
+          } else {
+            // Ya expiró el cooldown
+            _lastSeekTarget = null;
+            _lastSeekTime = null;
+          }
         }
-
 
         _lastPositionUpdate = now;
         state = state.copyWith(position: pos);
