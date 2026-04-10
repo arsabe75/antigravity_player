@@ -723,6 +723,32 @@ class LocalStreamingProxy {
     // Sin esto, el proxy depende de heurísticas que pueden fallar.
     _getOrCreateState(fileId).userSeekInProgress = true;
 
+    // FIX 5: Clear pre-seek stall state. The stall timer uses waitingForOffset
+    // to decide where to restart downloads. If this still points to the pre-seek
+    // offset, the stall timer will call _startDownloadAtOffset for the OLD offset,
+    // canceling the new download at the seek target. Also reset the rate limiter
+    // timestamp so the first downloadFile for the new seek target isn't blocked.
+    _getOrCreateState(fileId).waitingForOffset = null;
+    _getOrCreateState(fileId).lastDownloadFileCallTime = null;
+
+    // FIX 5b: Release the MOOV download lock. The proactive MOOV download sets
+    // forcedMoovOffset, which causes the streaming loop to skip ALL calls to
+    // _startDownloadAtOffset. Since _startDownloadAtOffset is the only place
+    // that can release forcedMoovOffset, a deadlock forms:
+    //   streaming loop won't call _startDownloadAtOffset → lock never released
+    //   → TDLib never redirected to seek target → player starves → reload from 0
+    // On user seek, the MOOV download is no longer the priority — the seek target is.
+    final moovState = _getOrCreateState(fileId);
+    if (moovState.forcedMoovOffset != null) {
+      _debugLog(
+        'Proxy: FIX 5b - Releasing MOOV lock for $fileId '
+        '(was at offset ${moovState.forcedMoovOffset}) due to user seek',
+      );
+      moovState.forcedMoovOffset = null;
+      moovState.forcedMoovStartTime = null;
+      moovState.forcedMoovLastProgress = 0;
+    }
+
     // FIX R2: Increment seek generation to force all existing connections to close.
     // Each stream loop captures the generation at start. When it changes, loops break.
     // This replaces the Set-based approach which had a race condition: new connections
@@ -1915,7 +1941,12 @@ class LocalStreamingProxy {
               // wasting async work on every chunk read.
               if (remainingToSend > 0 &&
                   _getOrCreateState(fileId).forcedMoovOffset == null) {
-                _startDownloadAtOffset(fileId, currentReadOffset);
+                _startDownloadAtOffset(
+                  fileId,
+                  currentReadOffset,
+                  isSeekRequest: isSeekRequest,
+                  seekGeneration: mySeekGeneration,
+                );
 
                 // POST-SEEK PRELOAD: Trigger proactive preload if we recently seeked
                 final lastSeek = _getOrCreateState(fileId).lastSeekTime;
@@ -2071,6 +2102,8 @@ class LocalStreamingProxy {
                     fileId,
                     currentReadOffset,
                     isBlocking: true,
+                    isSeekRequest: isSeekRequest,
+                    seekGeneration: mySeekGeneration,
                   );
                 }
 
@@ -2211,6 +2244,8 @@ class LocalStreamingProxy {
                   fileId,
                   currentReadOffset,
                   isBlocking: true,
+                  isSeekRequest: isSeekRequest,
+                  seekGeneration: mySeekGeneration,
                 );
               }
 
@@ -2605,6 +2640,8 @@ class LocalStreamingProxy {
     int requestedOffset, {
     bool isBlocking = false,
     bool forceRestart = false,
+    bool isSeekRequest = false,
+    int? seekGeneration,
   }) async {
     // DISK SAFETY CHECK: Prevent crash if disk is full (<50MB)
     // Uses cached result for 5 seconds to avoid redundant disk queries
@@ -2627,6 +2664,20 @@ class LocalStreamingProxy {
     if (totalSize > 0 && requestedOffset >= totalSize) {
       _debugLog(
         'Proxy: Ignoring request at EOF ($requestedOffset >= $totalSize) for $fileId',
+      );
+      return;
+    }
+
+    // FIX 7: Early exit if this call comes from a stale connection whose
+    // seek generation doesn't match the current one. This prevents pre-seek
+    // connections (in the middle of async _getDownloadedPrefixSize) from
+    // issuing downloadFile calls that cancel the new seek target's download.
+    if (seekGeneration != null &&
+        seekGeneration != (_seekGeneration[fileId] ?? 0)) {
+      _logTrace(
+        'Stale seekGen download ignored for $fileId '
+        '(gen $seekGeneration→${_seekGeneration[fileId]})',
+        fileId: fileId,
       );
       return;
     }
@@ -2821,8 +2872,9 @@ class LocalStreamingProxy {
     {
       final fs = _getOrCreateState(fileId);
       final lastCall = fs.lastDownloadFileCallTime;
-      // SKIP RATE LIMIT for blocking requests (e.g. initial load or stall recovery)
-      if (lastCall != null && !isBlocking && !forceRestart) {
+      // SKIP RATE LIMIT for blocking requests, forced restarts, and seek
+      // requests (the first downloadFile after a seek must not be delayed).
+      if (lastCall != null && !isBlocking && !forceRestart && !isSeekRequest) {
         final elapsed = DateTime.now().difference(lastCall).inMilliseconds;
         if (elapsed < ProxyConfig.minDownloadCallIntervalMs) {
           _logTrace(
@@ -2968,13 +3020,16 @@ class LocalStreamingProxy {
     // The general cooldown (500-1000ms) and distance threshold (2-5MB) provide
     // sufficient protection against rapid offset changes.
 
-    // Determine if this is a Seek Request (jump > 1MB from last served offset)
-    bool isSeekRequest = false;
+    // Determine if this is a Seek Request (jump > 1MB from last served offset).
+    // Merge with the parameter from the caller: either explicit caller signal
+    // (from _handleRequest seek detection) OR local heuristic detects a jump.
+    // We shadow-assign to a new local that combines both signals.
+    bool effectiveSeekRequest = isSeekRequest;
     final lastServedForCheck = _getOrCreateState(fileId).lastServedOffset;
-    if (lastServedForCheck != null) {
+    if (!effectiveSeekRequest && lastServedForCheck != null) {
       final jump = (requestedOffset - lastServedForCheck).abs();
       if (jump > localSeekThreshold) {
-        isSeekRequest = true;
+        effectiveSeekRequest = true;
       }
     }
 
@@ -3214,7 +3269,7 @@ class LocalStreamingProxy {
         now.difference(lastStart).inMilliseconds <
             ProxyConfig.rapidSwitchDebounceMs &&
         !isBlocking &&
-        !isSeekRequest) {
+        !effectiveSeekRequest) {
       final activeOffset = _getOrCreateState(fileId).activeDownloadOffset ?? -1;
       // Allow if sequential (reading forward within 2MB)
       if (requestedOffset >= activeOffset &&

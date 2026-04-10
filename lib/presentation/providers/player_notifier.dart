@@ -307,13 +307,29 @@ class PlayerNotifier extends _$PlayerNotifier {
         _seekRecoveryTimer = null;
       }
 
-      // UX FIX: Ignore ALL buffering state changes during initial load
+      // UX FIX: Ignore buffering TRUE flickers during initial load.
       // The player flickers buffering=true/false while loading metadata,
-      // but we want to keep the spinner until real playback starts (position > 200ms).
-      // The isInitialLoading flag is only cleared in the position listener.
+      // but we want to keep the spinner until real playback starts.
+      //
+      // FIX 3: However, when buffering transitions to FALSE and the player
+      // is actively playing, this is the strongest signal that playback has
+      // genuinely started (mpv has data and is decoding). Clear isInitialLoading
+      // here to prevent the loading spinner from persisting over active video.
+      // The position-based check in the position listener remains as a fallback.
       if (state.isInitialLoading) {
-        // During initial load, only update moov optimization status, not buffering
-        if (isNotOptimized && !state.isVideoNotOptimizedForStreaming) {
+        if (!buffering && state.isPlaying) {
+          // Player is playing and not buffering — real playback has started
+          debugPrint(
+            'PlayerNotifier: FIX 3 - Clearing isInitialLoading '
+            '(buffering=false, isPlaying=true)',
+          );
+          state = state.copyWith(
+            isInitialLoading: false,
+            isBuffering: false,
+            isVideoNotOptimizedForStreaming: isNotOptimized,
+          );
+        } else if (isNotOptimized && !state.isVideoNotOptimizedForStreaming) {
+          // During initial load, only update moov optimization status
           state = state.copyWith(isVideoNotOptimizedForStreaming: true);
         }
         return;

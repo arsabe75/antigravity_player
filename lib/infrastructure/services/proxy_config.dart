@@ -77,7 +77,11 @@ class ProxyConfig {
   static const int updateThrottleMs = 100;
 
   /// Debounce rapid seeks to prevent TDLib flooding (milliseconds).
-  static const int seekDebounceMs = 500;
+  /// Reduced from 500ms to 150ms: still coalesces rapid scrubbing (~60fps drag
+  /// events at 16ms apart) but removes 350ms of latency for single seeks.
+  /// The user-level signalUserSeek() already handles rapid seeks via generation
+  /// counters, so the proxy-level debounce only needs to catch scrubbing.
+  static const int seekDebounceMs = 150;
 
   /// Minimum interval between downloadFile TDLib calls for the same file (ms).
   static const int minDownloadCallIntervalMs = 300;
@@ -355,8 +359,9 @@ class ProxyConfig {
   static const int previewPreloadBytes = 2 * 1024 * 1024; // 2MB
 
   /// Retardo después de cancelar descarga TDLib para garantizar procesamiento (ms).
-  /// En Windows, el bus de mensajes FFI necesita más tiempo que 50ms.
-  static const int cancelToDownloadDelayMs = 200;
+  /// Reduced from 200ms to 100ms: Windows FFI bus processes cancellations
+  /// faster than originally estimated, and 100ms provides sufficient margin.
+  static const int cancelToDownloadDelayMs = 100;
 
   /// Retardo adicional si la cancelación no fue confirmada (ms).
   static const int cancelRetryDelayMs = 100;
