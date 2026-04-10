@@ -243,15 +243,21 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: video.isNetwork
+                  color: video.isTelegramVideo
                       ? Colors.blue.withValues(alpha: 0.2)
-                      : Colors.green.withValues(alpha: 0.2),
+                      : video.isNetwork
+                          ? Colors.blue.withValues(alpha: 0.2)
+                          : Colors.green.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Icon(
-                  video.isNetwork ? LucideIcons.globe : LucideIcons.file,
+                  video.isTelegramVideo
+                      ? LucideIcons.send
+                      : video.isNetwork ? LucideIcons.globe : LucideIcons.file,
                   size: 14,
-                  color: video.isNetwork ? Colors.blue : Colors.green,
+                  color: video.isTelegramVideo
+                      ? Colors.blue
+                      : video.isNetwork ? Colors.blue : Colors.green,
                 ),
               ),
               const SizedBox(width: 10),

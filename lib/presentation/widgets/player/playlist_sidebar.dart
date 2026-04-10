@@ -349,13 +349,17 @@ class _PlaylistItemTile extends StatelessWidget {
         subtitle: Row(
           children: [
             Icon(
-              item.isNetwork ? LucideIcons.globe : LucideIcons.file,
+              (item.extras != null && item.extras!.containsKey('telegramChatId'))
+                  ? LucideIcons.send
+                  : (item.isNetwork ? LucideIcons.globe : LucideIcons.file),
               size: 12,
               color: Colors.grey[600],
             ),
             const SizedBox(width: 4),
             Text(
-              item.isNetwork ? 'Network' : 'Local',
+              (item.extras != null && item.extras!.containsKey('telegramChatId'))
+                  ? 'Telegram'
+                  : (item.isNetwork ? 'Network' : 'Local'),
               style: TextStyle(fontSize: 10, color: Colors.grey[600]),
             ),
           ],
