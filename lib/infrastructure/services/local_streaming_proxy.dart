@@ -1969,7 +1969,13 @@ class LocalStreamingProxy {
               // Logic:
               // 1. Only allow Primary to advance by MAX_SPEED (e.g. 5MB/s) relative to elapsed time.
               // 2. Seeks (handled in _handleRequest) break this limit instantly.
-              if (data.isNotEmpty) {
+              //
+              // FIX 6: Removed `if (data.isNotEmpty)` guard — it was always true here
+              // because `data.isEmpty` already does `continue` above (line 1895).
+              // The `else` branch was an unreachable inner wait block, duplicating
+              // the outer wait block but missing _ensureStallTimer,
+              // _ensurePrefetchTimer, and waitingForOffset tracking.
+              {
                 final streamState = _getOrCreateState(fileId);
                 final lastPrimary = streamState.primaryPlaybackOffset ?? 0;
                 final lastUpdateTime = streamState.lastPrimaryUpdateTime;
@@ -2072,145 +2078,6 @@ class LocalStreamingProxy {
                     );
                     streamState.primaryPlaybackOffset = currentReadOffset;
                     streamState.lastPrimaryUpdateTime = DateTime.now();
-                  }
-                }
-              } else {
-                // NO DATA AVAILABLE -> BLOCKING WAIT (EVENT-DRIVEN)
-                // Nota: FIX G (_isInMoovGap) fue removido aquí. El mecanismo FIX F
-                // (moovGapConsecutiveTimeouts) es suficiente para detectar conexiones
-                // genuinamente estancadas. _isInMoovGap cortaba streams prematuramente
-                // en archivos grandes (~1.7GB) donde el gap entre el frontier y MOOV
-                // es legítimamente grande pero se está llenando activamente.
-                // Throttled log: only print every 2 seconds per file to reduce CPU overhead
-                final now = DateTime.now();
-                final lastLog = _lastWaitingLogTime[fileId];
-                if (lastLog == null ||
-                    now.difference(lastLog) >= _waitingLogThrottle) {
-                  _lastWaitingLogTime[fileId] = now;
-                  final cached = _filePaths[fileId];
-                  _debugLog(
-                    'Proxy: Waiting for data at $currentReadOffset for $fileId '
-                    '(CachedOffset: ${cached?.downloadOffset}, CachedPrefix: ${cached?.downloadedPrefixSize})...',
-                  );
-                }
-
-                // Ensure download is started at the exact offset the player needs
-                // MOOV LOCK: Skip if MOOV download is in progress — the MOOV
-                // lock would reject this call anyway, avoid async overhead.
-                if (_getOrCreateState(fileId).forcedMoovOffset == null) {
-                  _startDownloadAtOffset(
-                    fileId,
-                    currentReadOffset,
-                    isBlocking: true,
-                    isSeekRequest: isSeekRequest,
-                    seekGeneration: mySeekGeneration,
-                  );
-                }
-
-                // EXTENDED TIMEOUT FOR MOOV ATOM: Requests near end of file need more time
-                // because TDLib must start a new download from a distant offset
-                final fileInfo = _filePaths[fileId];
-                final totalFileSize = fileInfo?.totalSize ?? 0;
-                final distanceFromEnd = totalFileSize > 0
-                    ? totalFileSize - currentReadOffset
-                    : 0;
-                final moovWaitThreshold = ProxyConfig.scaled(
-                  totalFileSize,
-                  ProxyConfig.moovRegionThresholdPercent,
-                  ProxyConfig.moovRegionMinBytes,
-                  ProxyConfig.moovRegionMaxBytes,
-                );
-                final isMoovRequest =
-                    distanceFromEnd > 0 && distanceFromEnd < moovWaitThreshold;
-
-                // ADAPTIVE TIMEOUT: grows with retry count via exponential backoff
-                final timeout = _getAdaptiveTimeout(fileId, isMoovRequest);
-
-                // EVENT-DRIVEN WAIT: Register a Completer and wait for _onUpdate to wake us
-                final completer = Completer<void>();
-                _byteAvailabilityWaiters.putIfAbsent(fileId, () => []);
-                _byteAvailabilityWaiters[fileId]!.add(
-                  MapEntry(currentReadOffset, completer),
-                );
-
-                // Doble verificación post-registro para prevenir wakeups perdidos.
-                // Si updateFile llegó entre el check de datos y el registro del waiter,
-                // los datos ya están disponibles pero nadie despertará al completer.
-                if (!completer.isCompleted) {
-                  final postCheck = _filePaths[fileId];
-                  if (postCheck != null &&
-                      postCheck.availableBytesFrom(currentReadOffset) > 0) {
-                    completer.complete();
-                  }
-                }
-
-                try {
-                  // Wait for data to become available, timeout, or client disconnect
-                  final waitResult = await Future.any([
-                    completer.future
-                        .timeout(
-                          timeout,
-                          onTimeout: () {
-                            // Timeout - remove our waiter and check manually
-                            _byteAvailabilityWaiters[fileId]?.removeWhere(
-                              (e) => e.value == completer,
-                            );
-                            if (_byteAvailabilityWaiters[fileId]?.isEmpty ??
-                                false) {
-                              _byteAvailabilityWaiters.remove(fileId);
-                            }
-                          },
-                        )
-                        .then((_) => false),
-                    disconnectCompleter.future,
-                  ]);
-
-                  if (waitResult == true) {
-                    _debugLog(
-                      'Proxy: Client disconnected during wait ($fileId).',
-                    );
-                    _byteAvailabilityWaiters[fileId]?.removeWhere(
-                      (e) => e.value == completer,
-                    );
-                    return;
-                  }
-
-                  // Check if aborted during wait
-                  if (_abortedRequests.contains(fileId)) {
-                    _debugLog('Proxy: Wait aborted for $fileId');
-                    return;
-                  }
-                } catch (_) {
-                  // Timeout or error - check data availability manually on next loop
-                }
-
-                // CIRCUIT BREAKER: Check if file entered terminal error state
-                final currentLoadState = _getOrCreateState(fileId).loadState;
-                if (currentLoadState == FileLoadState.error ||
-                    currentLoadState == FileLoadState.timeout ||
-                    currentLoadState == FileLoadState.unsupported) {
-                  _debugLog(
-                    'Proxy: CIRCUIT BREAKER - killing stream for $fileId at offset '
-                    '$currentReadOffset (loadState: $currentLoadState)',
-                  );
-                  break;
-                }
-
-                // FIX F: MOOV gap timeout - detectar conexiones atrapadas en gap inllenable
-                if (_getOrCreateState(fileId).isMoovAtEnd) {
-                  final gapRanges = _downloadedRanges[fileId];
-                  if (gapRanges != null &&
-                      gapRanges.availableBytesFrom(currentReadOffset) == 0) {
-                    moovGapConsecutiveTimeouts++;
-                    if (moovGapConsecutiveTimeouts >= moovGapMaxTimeouts) {
-                      _debugLog(
-                        'Proxy: MOOV gap timeout at $currentReadOffset for $fileId '
-                        '($moovGapConsecutiveTimeouts timeouts) - breaking wait',
-                      );
-                      break;
-                    }
-                  } else {
-                    moovGapConsecutiveTimeouts = 0;
                   }
                 }
               }
