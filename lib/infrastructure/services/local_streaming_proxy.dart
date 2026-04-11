@@ -2104,17 +2104,15 @@ class LocalStreamingProxy {
               }
 
               // Ensure download is started at the exact offset the player needs
-              // MOOV LOCK: Skip if MOOV download is in progress — the MOOV
-              // lock would reject this call anyway, avoid async overhead.
-              if (_getOrCreateState(fileId).forcedMoovOffset == null) {
-                _startDownloadAtOffset(
-                  fileId,
-                  currentReadOffset,
-                  isBlocking: true,
-                  isSeekRequest: isSeekRequest,
-                  seekGeneration: mySeekGeneration,
-                );
-              }
+              // _startDownloadAtOffset will evaluate if a MOOV lock is active
+              // and automatically release it when the moov download completes.
+              _startDownloadAtOffset(
+                fileId,
+                currentReadOffset,
+                isBlocking: true,
+                isSeekRequest: isSeekRequest,
+                seekGeneration: mySeekGeneration,
+              );
 
               // EXTENDED TIMEOUT FOR MOOV ATOM: Requests near end of file need more time
               final fileInfo = _filePaths[fileId];
@@ -2216,7 +2214,11 @@ class LocalStreamingProxy {
               }
 
               // FIX F: MOOV gap timeout - detectar conexiones atrapadas en gap inllenable
-              if (_getOrCreateState(fileId).isMoovAtEnd) {
+              // We DO NOT break connections if forcedMoovOffset is active! If it's active,
+              // TDLib is busy downloading the MOOV atom, and we WANT other connections to wait
+              // for it to finish! Only trigger timeout if there is NO forced download active.
+              if (_getOrCreateState(fileId).isMoovAtEnd &&
+                  _getOrCreateState(fileId).forcedMoovOffset == null) {
                 final gapRanges = _downloadedRanges[fileId];
                 if (gapRanges != null &&
                     gapRanges.availableBytesFrom(currentReadOffset) == 0) {
@@ -2572,8 +2574,9 @@ class LocalStreamingProxy {
     // This allows the moov download to complete without being intercepted by start-of-file requests
     final forcedOffset = _getOrCreateState(fileId).forcedMoovOffset;
     if (forcedOffset != null) {
-      // Check if we have enough data at the forced offset now
-      final availableAtForced = cached?.availableBytesFrom(forcedOffset) ?? 0;
+      // Check if we have enough data at the forced offset now. Use getDownloadedPrefix
+      // instead of availableBytesFrom to properly check globally cached disjoint chunks.
+      final availableAtForced = await _getDownloadedPrefixSize(fileId, forcedOffset);
       // MOOV FIX: Wait for the ENTIRE moov atom to be downloaded (or a reasonable cap)
       // The previous 512KB threshold was too small (moov often > 2MB), causing early release
       // of the lock and subsequent cancellation of the incomplete moov download.
@@ -3622,34 +3625,41 @@ class LocalStreamingProxy {
   /// hasta que MOOV termine. Los bytes ya descargados desde offset 0 se
   /// preservan vía DownloadedRanges (P2).
   void _startProactiveMoovDownload(int fileId, int totalSize) {
-    // Evitar descarga duplicada (forcedMoovOffset activo o ya completada)
+    if (totalSize <= 0) return;
+
     final state = _getOrCreateState(fileId);
-    if (state.forcedMoovOffset != null) return;
+    if (state.forcedMoovOffset != null) return; // Ya en progreso
     if (state.loadState == FileLoadState.moovReady ||
         state.loadState == FileLoadState.playing) {
       return;
     }
-    if (totalSize <= 0) return;
     if (_abortedRequests.contains(fileId)) return;
 
-    // Calcular offset estimado del MOOV usando constantes existentes
-    final moovPreloadBytes = ProxyConfig.scaled(
-      totalSize,
-      ProxyConfig.moovPreloadThresholdPercent,
-      ProxyConfig.moovPreloadMinBytes,
-      ProxyConfig.moovPreloadMaxBytes,
-    );
-    final moovOffset = totalSize - moovPreloadBytes;
+    // Si ya detectamos offset exacto de MOOV, usarlo directamente para
+    // ahorrar megabytes. Si no, calculamos el porcentaje máximo.
+    int moovOffset;
+    if (state.exactMoovOffset != null && state.exactMoovOffset! > 0 && state.exactMoovOffset! < totalSize) {
+      moovOffset = state.exactMoovOffset!;
+      _debugLog('Proxy: P1 PROACTIVE MOOV - Using exact MDAT bounding offset $moovOffset');
+    } else {
+      final moovPreloadBytes = ProxyConfig.scaled(
+        totalSize,
+        ProxyConfig.moovPreloadThresholdPercent,
+        ProxyConfig.moovPreloadMinBytes,
+        ProxyConfig.moovPreloadMaxBytes,
+      );
+      moovOffset = totalSize - moovPreloadBytes;
+    }
 
     // Activar lock: bloquea otras descargas hasta que MOOV termine
-    _getOrCreateState(fileId).forcedMoovOffset = moovOffset;
-    _getOrCreateState(fileId).forcedMoovStartTime = DateTime.now();
-    _getOrCreateState(fileId).forcedMoovLastProgress = 0;
-    _getOrCreateState(fileId).loadState = FileLoadState.loadingMoov;
+    state.forcedMoovOffset = moovOffset;
+    state.forcedMoovStartTime = DateTime.now();
+    state.forcedMoovLastProgress = 0;
+    state.loadState = FileLoadState.loadingMoov;
 
     _debugLog(
       'Proxy: P1 PROACTIVE MOOV - Starting download at offset $moovOffset '
-      '(last ${moovPreloadBytes ~/ 1024}KB) for file $fileId',
+      '(last ${(totalSize - moovOffset) ~/ 1024}KB) for file $fileId',
     );
 
     // Iniciar descarga - cancela la descarga secuencial desde 0.
@@ -3762,10 +3772,18 @@ class LocalStreamingProxy {
         // Walk top-level atoms within the buffer
         var offset = 0;
         while (offset + 8 <= header.length) {
-          final atomSize = _readMoovUint32BE(header, offset);
+          int atomSize = _readMoovUint32BE(header, offset);
           final atomType = String.fromCharCodes(
             header.sublist(offset + 4, offset + 8),
           );
+
+          int headerBytes = 8;
+          // Handle 64-bit atom sizes (atomSize == 1 means 64-bit size is at offset+8)
+          if (atomSize == 1) {
+            if (offset + 16 > header.length) break;
+            atomSize = _readMoovUint64BE(header, offset + 8);
+            headerBytes = 16;
+          }
 
           // moov found near start → streaming-optimized
           if (atomType == 'moov') {
@@ -3780,15 +3798,26 @@ class LocalStreamingProxy {
           if (atomType == 'mdat') {
             _getOrCreateState(fileId).moovPosition = MoovPosition.end;
             _getOrCreateState(fileId).isMoovAtEnd = true;
-            _debugLog(
-              'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at END (mdat found at offset $offset)',
-            );
+            
+            // Calculate EXACT offset of MOOV atom which naturally follows MDAT chunks
+            // By doing this we can download just the exact MOOV bytes instead of a crude larger chunk
+            if (atomSize > 0) {
+              final exactMoov = offset + atomSize;
+              _getOrCreateState(fileId).exactMoovOffset = exactMoov;
+              _debugLog(
+                'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at END (mdat implies MOOV at exact offset $exactMoov)',
+              );
+            } else {
+              _debugLog(
+                'Proxy: MOOV PRE-DETECT - File $fileId has MOOV at END (mdat found at offset $offset, unknown size)',
+              );
+            }
             return MoovPosition.end;
           }
 
           // Skip known non-media atoms and keep walking
           if (_skipAtomTypes.contains(atomType)) {
-            if (atomSize < 8) break; // Malformed atom, stop
+            if (atomSize < headerBytes) break; // Malformed atom, stop
             offset += atomSize;
             continue;
           }
@@ -3825,6 +3854,15 @@ class LocalStreamingProxy {
         (data[offset + 1] << 16) |
         (data[offset + 2] << 8) |
         data[offset + 3];
+  }
+
+  /// Read uint64 big-endian from byte list
+  int _readMoovUint64BE(List<int> data, int offset) {
+    if (data.length < offset + 8) return 0;
+    int high = _readMoovUint32BE(data, offset);
+    int low = _readMoovUint32BE(data, offset + 4);
+    // Unsigned 64-bit combination within Dart's int max value bounds
+    return (high * 4294967296) + low;
   }
 
   /// Triggers proactive preload after a seek has completed.

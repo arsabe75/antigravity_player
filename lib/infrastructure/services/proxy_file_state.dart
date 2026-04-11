@@ -94,6 +94,9 @@ class ProxyFileState {
   // ignore: unused_field
   MoovPosition? moovPosition;
 
+  /// Exact byte offset where the MOOV atom starts, if known
+  int? exactMoovOffset;
+
   /// Forced MOOV download offset (while downloading MOOV)
   int? forcedMoovOffset;
 
@@ -174,6 +177,7 @@ class ProxyFileState {
     // MOOV detection
     isMoovAtEnd = false;
     moovPosition = null;
+    exactMoovOffset = null;
     forcedMoovOffset = null;
     forcedMoovStartTime = null;
     forcedMoovLastProgress = 0;
