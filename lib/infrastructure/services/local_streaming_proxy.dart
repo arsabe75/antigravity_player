@@ -1219,6 +1219,22 @@ class LocalStreamingProxy {
               }
             }
           }
+          final newDist = start < primary ? primary - start : 0;
+          if (maxDist != -1 && newDist > maxDist) {
+            // Un-evictable constraint: the incoming connection is FURTHER behind
+            // the primary playback than ANY of our active connections.
+            // Do not evict a healthier connection for a worse one.
+            _debugLog(
+              'Proxy: CONNECTION LIMIT for $fileId. Rejecting exceptionally stale '
+              'connection at ${start ~/ 1024}KB (worse than ${mostStale! ~/ 1024}KB)',
+            );
+            // FIX Tarpit: wait 500ms before returning 503 to throttle ffmpeg reconnect loop
+            await Future.delayed(const Duration(milliseconds: 500));
+            request.response.statusCode = HttpStatus.serviceUnavailable;
+            await request.response.close();
+            return;
+          }
+
           // If no connection is behind primary, evict the oldest (smallest offset)
           mostStale ??= offsets.reduce((a, b) => a < b ? a : b);
           _evictedConnectionOffsets.putIfAbsent(fileId, () => {}).add(mostStale);
@@ -1262,17 +1278,31 @@ class LocalStreamingProxy {
                 if (!entry.value.isCompleted) entry.value.complete();
               }
             }
+            await Future.delayed(const Duration(milliseconds: 500));
             request.response.statusCode = HttpStatus.serviceUnavailable;
             await request.response.close();
             return;
           }
           // Allow the new connection through — counter already adjusted
+
+          // Complete the waiter for the evicted connection so its loop exits immediately
+          final completers = _byteAvailabilityWaiters[fileId];
+          if (completers != null) {
+            final toRemove =
+                completers.where((e) => e.key == mostStale).toList();
+            for (final entry in toRemove) {
+              if (!entry.value.isCompleted) {
+                entry.value.complete(); // WAKE UP STALE REQUEST
+              }
+            }
+          }
         } else {
           // No evictable connections, reject as last resort
           _debugLog(
             'Proxy: CONNECTION LIMIT for $fileId, no evictable connections, '
             'rejecting at offset ${start ~/ 1024}KB',
           );
+          await Future.delayed(const Duration(milliseconds: 500));
           request.response.statusCode = HttpStatus.serviceUnavailable;
           await request.response.close();
           return;
@@ -1823,10 +1853,6 @@ class LocalStreamingProxy {
             _fileUpdateNotifiers[fileId] = StreamController.broadcast();
           }
 
-          // FIX F: Contador de timeouts consecutivos en gap MOOV inllenable
-          int moovGapConsecutiveTimeouts = 0;
-          const int moovGapMaxTimeouts = 5; // ~50s total
-
           while (remainingToSend > 0) {
             if (_abortedRequests.contains(fileId)) {
               _debugLog('Proxy: Request aborted for $fileId');
@@ -2213,27 +2239,7 @@ class LocalStreamingProxy {
                 }
               }
 
-              // FIX F: MOOV gap timeout - detectar conexiones atrapadas en gap inllenable
-              // We DO NOT break connections if forcedMoovOffset is active! If it's active,
-              // TDLib is busy downloading the MOOV atom, and we WANT other connections to wait
-              // for it to finish! Only trigger timeout if there is NO forced download active.
-              if (_getOrCreateState(fileId).isMoovAtEnd &&
-                  _getOrCreateState(fileId).forcedMoovOffset == null) {
-                final gapRanges = _downloadedRanges[fileId];
-                if (gapRanges != null &&
-                    gapRanges.availableBytesFrom(currentReadOffset) == 0) {
-                  moovGapConsecutiveTimeouts++;
-                  if (moovGapConsecutiveTimeouts >= moovGapMaxTimeouts) {
-                    _debugLog(
-                      'Proxy: MOOV gap timeout at $currentReadOffset for $fileId '
-                      '($moovGapConsecutiveTimeouts timeouts) - breaking wait',
-                    );
-                    break;
-                  }
-                } else {
-                  moovGapConsecutiveTimeouts = 0;
-                }
-              }
+
             }
           }
 
@@ -2554,8 +2560,6 @@ class LocalStreamingProxy {
     // Nota: FIX H (_isInMoovGap) fue removido aquí. Bloquear la redirección
     // de TDLib al gap impedía que el gap se llenara, creando una profecía
     // autocumplida. Ahora TDLib se redirige al gap y lo llena normalmente.
-    // FIX F (moovGapConsecutiveTimeouts) maneja descargas genuinamente estancadas.
-
     // Proportional thresholds for correct small-file behavior
     final localSeekThreshold = ProxyConfig.scaled(
       totalSize,
