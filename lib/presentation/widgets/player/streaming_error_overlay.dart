@@ -27,6 +27,7 @@ class StreamingErrorOverlay extends StatelessWidget {
       StreamingErrorType.diskFull => LucideIcons.hardDrive,
       StreamingErrorType.fileNotFound => LucideIcons.searchX,
       StreamingErrorType.maxRetriesExceeded => LucideIcons.alertOctagon,
+      StreamingErrorType.playbackStall => LucideIcons.alertTriangle,
       StreamingErrorType.unknown => LucideIcons.alertCircle,
     };
   }
@@ -40,6 +41,7 @@ class StreamingErrorOverlay extends StatelessWidget {
       StreamingErrorType.diskFull => Colors.red,
       StreamingErrorType.fileNotFound => Colors.red,
       StreamingErrorType.maxRetriesExceeded => Colors.amber,
+      StreamingErrorType.playbackStall => Colors.deepOrange,
       StreamingErrorType.unknown => Colors.grey,
     };
   }
@@ -53,6 +55,7 @@ class StreamingErrorOverlay extends StatelessWidget {
       StreamingErrorType.diskFull => 'Disco lleno',
       StreamingErrorType.fileNotFound => 'Video no disponible',
       StreamingErrorType.maxRetriesExceeded => 'No se pudo reproducir el video',
+      StreamingErrorType.playbackStall => 'Problema de reproducción',
       StreamingErrorType.unknown => 'Error de reproducción',
     };
   }
@@ -73,6 +76,8 @@ class StreamingErrorOverlay extends StatelessWidget {
         'El video ya no está disponible en Telegram. Puede haber sido eliminado.',
       StreamingErrorType.maxRetriesExceeded =>
         'Se agotaron los intentos de descarga. El video puede tener problemas de transmisión o estar temporalmente inaccesible.',
+      StreamingErrorType.playbackStall =>
+        'Este video presenta interrupciones persistentes que bloquean la interfaz. Puede estar dañado o tener un formato de transmisión incompatible.',
       StreamingErrorType.unknown =>
         'Ocurrió un error inesperado al reproducir el video.',
     };

@@ -94,6 +94,19 @@ class ProxyConfig {
   /// EOF → playback stops at ~61s. 12 allows 4 streams × 3 connections each.
   static const int maxConnectionsPerFile = 12;
 
+  /// Number of early exits from the streaming loop at the same offset
+  /// before declaring the video as problematic. This detects videos
+  /// that cause repeated connection thrashing and UI freezes.
+  static const int earlyExitThreshold = 10;
+
+  /// Time window (seconds) for counting early exits. Only exits within
+  /// this window are counted toward the threshold.
+  static const int earlyExitWindowSeconds = 30;
+
+  /// Tolerance in bytes for considering two read offsets as "the same point".
+  /// Exits within this distance of each other are grouped together.
+  static const int earlyExitOffsetTolerance = 10 * 1024 * 1024; // 10MB
+
   /// "Waiting for data" log throttle duration.
   static const Duration waitingLogThrottle = Duration(seconds: 2);
 

@@ -296,7 +296,7 @@ class LocalStreamingProxy {
   // Tracks eviction timestamps per file. If evictions exceed threshold
   // in a time window, the video is marked as corrupt and rejected.
   final Map<int, List<DateTime>> _evictionTimestamps = {};
-  static const int _floodEvictionThreshold = 30;
+  static const int _floodEvictionThreshold = 15;
   static const Duration _floodTimeWindow = Duration(seconds: 10);
 
   // ============================================================
@@ -1848,6 +1848,15 @@ class LocalStreamingProxy {
           int currentReadOffset = start;
           int remainingToSend = contentLength;
 
+          // PER-CONNECTION STALL TRACKING:
+          // Track cumulative time this connection spends waiting for data
+          // at the same offset. The stall timer may not fire because TDLib
+          // is making progress elsewhere. This is the last-resort safety net.
+          DateTime? connectionWaitStart;
+          int connectionWaitOffsetRegion = -1;
+          int connectionCumulativeWaitMs = 0;
+          const int maxConnectionWaitMs = 60000; // 60 seconds
+
           // Ensure notifier exists
           if (!_fileUpdateNotifiers.containsKey(fileId)) {
             _fileUpdateNotifiers[fileId] = StreamController.broadcast();
@@ -2182,6 +2191,9 @@ class LocalStreamingProxy {
               _ensureStallTimer(fileId);
               _ensurePrefetchTimer(fileId);
 
+              // Track when this wait cycle started
+              connectionWaitStart = DateTime.now();
+
               try {
                 // Wait for data to become available, timeout, or client disconnect
                 final waitResult = await Future.any([
@@ -2239,6 +2251,48 @@ class LocalStreamingProxy {
                 }
               }
 
+              // PER-CONNECTION MAX WAIT: Track cumulative wait time at same offset region.
+              // If this connection has been waiting for >60s without serving data,
+              // the video is genuinely stuck and we should stop before freezing the UI.
+              {
+                final offsetRegion = currentReadOffset ~/ ProxyConfig.earlyExitOffsetTolerance;
+                if (offsetRegion == connectionWaitOffsetRegion) {
+                  connectionCumulativeWaitMs += DateTime.now().difference(connectionWaitStart).inMilliseconds;
+                } else {
+                  // New region — reset
+                  connectionWaitOffsetRegion = offsetRegion;
+                  connectionCumulativeWaitMs = 0;
+                }
+                connectionWaitStart = null; // Reset for next wait cycle
+
+                if (connectionCumulativeWaitMs >= maxConnectionWaitMs &&
+                    !_abortedRequests.contains(fileId)) {
+                  _logError(
+                    'PER-CONNECTION STALL for $fileId: connection at offset '
+                    '${start ~/ 1024}KB waited ${connectionCumulativeWaitMs ~/ 1000}s '
+                    'at readOffset ${currentReadOffset ~/ 1024}KB. Triggering playback error.',
+                    fileId: fileId,
+                  );
+                  final error = StreamingError.playbackStall(
+                    fileId,
+                    connectionCumulativeWaitMs ~/ 1000,
+                  );
+                  _notifyErrorIfNew(fileId, error);
+                  _abortedRequests.add(fileId);
+
+                  // Wake up ALL waiters so they exit cleanly
+                  final waiters = _byteAvailabilityWaiters.remove(fileId);
+                  if (waiters != null) {
+                    for (final entry in waiters) {
+                      if (!entry.value.isCompleted) entry.value.complete();
+                    }
+                  }
+                  _cancelStallTimer(fileId);
+                  _cancelPrefetchTimer(fileId);
+                  break;
+                }
+              }
+
 
             }
           }
@@ -2255,6 +2309,67 @@ class LocalStreamingProxy {
               '(served ${(contentLength - remainingToSend) ~/ 1024}KB of '
               '${contentLength ~/ 1024}KB, readOffset: $currentReadOffset)',
             );
+
+            // CONNECTION THRASHING DETECTOR:
+            // Detect videos that cause repeated early exits at the same offset.
+            // This pattern causes UI freezes because mpv opens new connections
+            // as fast as old ones die, saturating the Dart event loop.
+            if (!_abortedRequests.contains(fileId)) {
+              final thrashState = _getOrCreateState(fileId);
+              final now = DateTime.now();
+              final lastOffset = thrashState.lastEarlyExitReadOffset;
+              final isSameOffset = lastOffset != null &&
+                  (currentReadOffset - lastOffset).abs() <
+                      ProxyConfig.earlyExitOffsetTolerance;
+
+              if (isSameOffset) {
+                // Same offset region — increment counter
+                thrashState.earlyExitCount++;
+              } else {
+                // Different offset — reset window
+                thrashState.earlyExitCount = 1;
+                thrashState.firstEarlyExitTime = now;
+              }
+              thrashState.lastEarlyExitReadOffset = currentReadOffset;
+
+              // Check if within the time window
+              final windowStart = thrashState.firstEarlyExitTime ?? now;
+              final elapsed = now.difference(windowStart).inSeconds;
+
+              if (elapsed > ProxyConfig.earlyExitWindowSeconds) {
+                // Window expired — reset
+                thrashState.earlyExitCount = 1;
+                thrashState.firstEarlyExitTime = now;
+              } else if (thrashState.earlyExitCount >=
+                  ProxyConfig.earlyExitThreshold) {
+                // THRESHOLD REACHED — video is problematic
+                _logError(
+                  'CONNECTION THRASHING DETECTED for $fileId: '
+                  '${thrashState.earlyExitCount} early exits at offset '
+                  '${currentReadOffset ~/ 1024}KB within ${elapsed}s. '
+                  'Marking as playback error.',
+                  fileId: fileId,
+                );
+                final error = StreamingError.playbackStall(
+                  fileId,
+                  thrashState.earlyExitCount,
+                );
+                _notifyErrorIfNew(fileId, error);
+                _abortedRequests.add(fileId);
+
+                // Wake up ALL waiters so they exit cleanly
+                final waiters = _byteAvailabilityWaiters.remove(fileId);
+                if (waiters != null) {
+                  for (final entry in waiters) {
+                    if (!entry.value.isCompleted) entry.value.complete();
+                  }
+                }
+
+                // Cancel stall/prefetch timers
+                _cancelStallTimer(fileId);
+                _cancelPrefetchTimer(fileId);
+              }
+            }
           }
         } catch (e) {
           if (e is! SocketException && e is! HttpException) {

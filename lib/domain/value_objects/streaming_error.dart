@@ -22,6 +22,9 @@ enum StreamingErrorType {
   /// Maximum retry attempts exceeded
   maxRetriesExceeded,
 
+  /// Playback stall: video causes repeated connection thrashing
+  playbackStall,
+
   /// Unknown/unspecified error
   unknown,
 }
@@ -112,6 +115,18 @@ class StreamingError {
       message: 'El archivo de video parece estar dañado o es inválido',
       fileId: fileId,
       isRecoverable: false,
+    );
+  }
+
+  /// Create a playback stall error (video causes repeated UI-blocking thrashing)
+  factory StreamingError.playbackStall(int fileId, int earlyExits) {
+    return StreamingError(
+      type: StreamingErrorType.playbackStall,
+      message: 'El video presenta problemas de reproducción persistentes '
+          '($earlyExits interrupciones detectadas)',
+      fileId: fileId,
+      isRecoverable: false,
+      retryAttempts: earlyExits,
     );
   }
 

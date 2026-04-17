@@ -132,6 +132,22 @@ class ProxyFileState {
   int? waitingForOffset;
 
   // ============================================================
+  // CONNECTION THRASHING DETECTION
+  // ============================================================
+
+  /// Number of consecutive early exits from the streaming loop.
+  /// When this exceeds the threshold within the time window,
+  /// the video is marked as problematic.
+  int earlyExitCount = 0;
+
+  /// Timestamp of the first early exit in the current detection window.
+  DateTime? firstEarlyExitTime;
+
+  /// Read offset of the last early exit.
+  /// Used to detect if exits are stuck at the same point.
+  int? lastEarlyExitReadOffset;
+
+  // ============================================================
   // PREFETCH BUFFER
   // ============================================================
 
@@ -189,6 +205,11 @@ class ProxyFileState {
     hasStalePlaybackPosition = false;
     userSeekInProgress = false;
     waitingForOffset = null;
+
+    // Connection thrashing detection
+    earlyExitCount = 0;
+    firstEarlyExitTime = null;
+    lastEarlyExitReadOffset = null;
 
     // Prefetch
     prefetchActive = false;
