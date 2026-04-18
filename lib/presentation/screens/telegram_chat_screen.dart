@@ -264,13 +264,14 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                       if (caption != null && caption['text'] != null) {
                         final text = caption['text'].toString().trim();
                         if (text.isNotEmpty) {
-                          // Take first line of caption as title
-                          captionText = text.split('\n').first;
+                          // Take up to two lines of caption as title
+                          final lines = text.split('\n');
+                          captionText = lines.take(2).join('\n');
                           // Safe truncation using Runes to prevent splitting UTF-16 surrogate pairs (like emojis)
                           final runes = captionText.runes.toList();
-                          if (runes.length > 100) {
+                          if (runes.length > 150) {
                             captionText =
-                                '${String.fromCharCodes(runes.take(97))}...';
+                                '${String.fromCharCodes(runes.take(147))}...';
                           }
                         }
                       }
@@ -418,6 +419,8 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                     ),
                                   ),
                                   Container(
+                                    height: 64, // Altura fija para garantizar 3 líneas y que el video ocupe lo mismo en todas las tarjetas
+                                    alignment: Alignment.topLeft,
                                     padding: const EdgeInsets.all(8),
                                     color: isSelected
                                         ? Theme.of(
@@ -426,7 +429,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                         : Theme.of(context).cardColor,
                                     child: Text(
                                       fileName,
-                                      maxLines: 2,
+                                      maxLines: 3,
                                       overflow: TextOverflow.ellipsis,
                                       style: TextStyle(
                                         fontSize: 12,
@@ -591,9 +594,11 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
       if (caption != null && caption['text'] != null) {
         final text = caption['text'].toString().trim();
         if (text.isNotEmpty) {
-          captionText = text.split('\n').first;
-          if (captionText.length > 100) {
-            captionText = '${captionText.substring(0, 97)}...';
+          final lines = text.split('\n');
+          captionText = lines.take(2).join('\n');
+          final runes = captionText.runes.toList();
+          if (runes.length > 150) {
+            captionText = '${String.fromCharCodes(runes.take(147))}...';
           }
         }
       }
