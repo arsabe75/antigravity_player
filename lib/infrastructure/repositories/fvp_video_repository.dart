@@ -27,6 +27,7 @@ class FvpVideoRepository implements VideoRepository {
   final _durationController = StreamController<Duration>.broadcast();
   final _isPlayingController = StreamController<bool>.broadcast();
   final _isBufferingController = StreamController<bool>.broadcast();
+  final _errorController = StreamController<String>.broadcast();
 
   Timer? _poller;
   Duration _currentPosition = Duration.zero;
@@ -34,6 +35,7 @@ class FvpVideoRepository implements VideoRepository {
   bool _isPlaying = false;
   bool _isBuffering = false;
   String? _videoUrl; // Track URL for proxy abort/seek signaling
+  bool _hasReportedError = false;
 
   int _initId = 0;
 
@@ -86,6 +88,7 @@ class FvpVideoRepository implements VideoRepository {
     await _durationController.close();
     await _isPlayingController.close();
     await _isBufferingController.close();
+    await _errorController.close();
   }
 
   void _startPoller() {
@@ -94,6 +97,26 @@ class FvpVideoRepository implements VideoRepository {
       if (_controller == null || !_controller!.value.isInitialized) return;
 
       final value = _controller!.value;
+
+      if (value.hasError && !_hasReportedError) {
+        _hasReportedError = true;
+        _errorController.add(value.errorDescription ?? 'Unknown FVP error');
+      }
+
+      // FIX: Detect spurious EOF triggered by proxy/network issues
+      if (_isPlaying && !value.isPlaying) {
+        if (value.position >= value.duration && value.duration > Duration.zero) {
+          final diff = value.duration.inSeconds - _currentPosition.inSeconds;
+          if (diff > 5) {
+            debugPrint('FVP: Premature completion detected! Throwing spurious_eof error.');
+            _isPlaying = false;
+            _isPlayingController.add(false);
+            _errorController.add('spurious_eof: Premature end of file detected at ${_currentPosition.inSeconds}s / ${value.duration.inSeconds}s (FVP jump)');
+            _stopPoller(); // Stop polling so _currentPosition is NEVER updated to duration.
+            return; // Skip position update to prevent UI from treating this as normal completion
+          }
+        }
+      }
 
       // Position
       if (value.position != _currentPosition) {
@@ -303,7 +326,7 @@ class FvpVideoRepository implements VideoRepository {
   @override
   Stream<void> get tracksChangedStream => const Stream.empty();
 
-  // FVP doesn't have a built-in error stream mechanism
+  // Return FVP errors and simulated spurious_eof errors
   @override
-  Stream<String> get errorStream => const Stream.empty();
+  Stream<String> get errorStream => _errorController.stream;
 }
