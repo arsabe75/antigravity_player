@@ -395,7 +395,9 @@ class PlayerNotifier extends _$PlayerNotifier {
         lower.contains('failed to open') ||
         lower.contains('could not open') ||
         lower.contains('error reading') ||
-        lower.contains('invalid stream')) {
+        lower.contains('invalid stream') ||
+        lower.contains('spurious_eof') ||
+        lower.contains('premature end')) {
       return StreamingError.corruptFile(fileId);
     }
     return null;

@@ -207,6 +207,17 @@ class MediaKitVideoRepository implements VideoRepository {
     // DIAG: Log completed events to detect spurious EOF
     player.stream.completed.listen((completed) {
       debugPrint('MediaKit: completed=$completed (pos: ${_currentPosition.inSeconds}s, dur: ${_totalDuration.inSeconds}s)');
+      
+      // FIX: Detect premature completion (spurious EOF due to proxy/network errors)
+      if (completed) {
+        final posSeconds = _currentPosition.inSeconds;
+        final durSeconds = _totalDuration.inSeconds;
+        // If duration is known and we are more than 5 seconds away from the end
+        if (durSeconds > 0 && (durSeconds - posSeconds) > 5) {
+          debugPrint('MediaKit: Premature completion detected! Throwing spurious_eof error.');
+          _errorController.add('spurious_eof: Premature end of file detected at ${posSeconds}s / ${durSeconds}s');
+        }
+      }
     });
 
     // Track selection logic
