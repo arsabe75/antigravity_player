@@ -330,10 +330,31 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                                 icon: const Icon(LucideIcons.trash2, size: 20),
                                 tooltip: 'Remove',
                                 onPressed: () {
-                                  setState(() {
-                                    _favorites.removeAt(index);
-                                    _saveFavorites();
-                                  });
+                                  showDialog(
+                                    context: context,
+                                    builder: (context) => AlertDialog(
+                                      title: const Text('Remove Favorite'),
+                                      content: Text(
+                                        'Are you sure you want to remove "$title" from your favorites?',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.of(context).pop(),
+                                          child: const Text('Cancel'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () {
+                                            Navigator.of(context).pop();
+                                            setState(() {
+                                              _favorites.removeAt(index);
+                                              _saveFavorites();
+                                            });
+                                          },
+                                          child: const Text('Remove'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
                                 },
                               ),
                             ),
