@@ -239,8 +239,8 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          // Calculate 30% of screen width with min/max bounds
-          final panelWidth = (constraints.maxWidth * 0.30).clamp(250.0, 450.0);
+          // Calculate 40% of screen width with min bounds
+          final panelWidth = (constraints.maxWidth * 0.40).clamp(250.0, double.infinity);
 
           return Row(
             children: [
