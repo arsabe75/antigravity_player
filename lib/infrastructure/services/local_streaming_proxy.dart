@@ -1194,6 +1194,18 @@ class LocalStreamingProxy {
         return;
       }
 
+      // EARLY RANGE PARSING: Parse the Range header before connection limit
+      // check so `start` has the correct offset value for eviction decisions.
+      // Without this, `start` is always 0 and all connections appear to be at
+      // offset 0, causing incorrect eviction choices and false flood detection.
+      {
+        final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
+        if (rangeHeader != null) {
+          final parts = rangeHeader.replaceFirst('bytes=', '').split('-');
+          start = int.parse(parts[0]);
+        }
+      }
+
       // CONNECTION LIMITER with EVICTION (FIX O/O2):
       // mpv/ffmpeg opens new HTTP connections for each seek and track switch
       // but never closes old ones. Without management, connections accumulate
