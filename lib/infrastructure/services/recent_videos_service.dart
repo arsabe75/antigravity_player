@@ -1,6 +1,9 @@
 import 'dart:convert';
+import 'package:drift/drift.dart';
 import 'package:path/path.dart' as p;
+import 'package:flutter/foundation.dart';
 import 'secure_storage_service.dart';
+import '../database/app_database.dart' as db;
 
 /// Representa un video en el historial
 class RecentVideo {
@@ -11,7 +14,6 @@ class RecentVideo {
   final Duration? lastPosition;
 
   /// Telegram-specific stable identifiers (survive cache clears)
-  /// These are used to reconstruct proxy URLs and persist progress.
   final int? telegramChatId;
   final int? telegramMessageId;
   final int? telegramFileSize;
@@ -34,8 +36,6 @@ class RecentVideo {
   });
 
   /// Returns a stable key for progress storage.
-  /// For Telegram videos, uses chatId:messageId which survives cache clears.
-  /// For local files, uses the file path.
   String get stableProgressKey {
     if (telegramChatId != null && telegramMessageId != null) {
       return 'telegram_${telegramChatId}_$telegramMessageId';
@@ -52,7 +52,7 @@ class RecentVideo {
     if (title != null && title!.isNotEmpty) {
       return title!;
     }
-    if (isNetwork) {
+    if (isNetwork && !isTelegramVideo) {
       try {
         final uri = Uri.parse(path);
         return uri.host;
@@ -60,7 +60,6 @@ class RecentVideo {
         return path;
       }
     }
-    // Use path package for cross-platform support (Windows uses \, Linux uses /)
     return p.basename(path);
   }
 
@@ -91,35 +90,82 @@ class RecentVideo {
     telegramTopicId: json['telegramTopicId'] as int?,
     telegramTopicName: json['telegramTopicName'] as String?,
   );
+
+  factory RecentVideo.fromDb(db.RecentVideo dbVideo) {
+    return RecentVideo(
+      path: dbVideo.path,
+      title: dbVideo.title,
+      isNetwork: dbVideo.isNetwork,
+      playedAt: dbVideo.playedAt,
+      lastPosition: dbVideo.lastPosition != null
+          ? Duration(milliseconds: dbVideo.lastPosition!)
+          : null,
+      telegramChatId: dbVideo.telegramChatId,
+      telegramMessageId: dbVideo.telegramMessageId,
+      telegramFileSize: dbVideo.telegramFileSize,
+      telegramTopicId: dbVideo.telegramTopicId,
+      telegramTopicName: dbVideo.telegramTopicName,
+    );
+  }
 }
 
 /// Servicio para guardar y obtener videos recientes
 class RecentVideosService {
-  static const _key = 'recent_videos';
   static const _maxVideos = 50;
+  static bool _migrated = false;
 
-  /// Obtiene los videos recientes
-  Future<List<RecentVideo>> getRecentVideos() async {
-    final prefs = SecureStorageService.instance;
-    final jsonList = prefs.getStringList(_key) ?? [];
+  db.AppDatabase get _db => SecureStorageService.instance.database;
 
-    return jsonList
-        .map((json) {
+  Future<void> _migrateIfNeeded() async {
+    if (_migrated) return;
+    try {
+      final prefs = SecureStorageService.instance;
+      final oldList = prefs.getStringList('recent_videos');
+      if (oldList != null && oldList.isNotEmpty) {
+        debugPrint('Migrating ${oldList.length} recent videos to Drift...');
+        for (final jsonStr in oldList.reversed) {
           try {
-            return RecentVideo.fromJson(jsonDecode(json));
-          } catch (_) {
-            return null;
+            final Map<String, dynamic> map = jsonDecode(jsonStr);
+            final video = RecentVideo.fromJson(map);
+            await _db.into(_db.recentVideos).insertOnConflictUpdate(
+              db.RecentVideosCompanion.insert(
+                path: video.path,
+                title: Value(video.title),
+                isNetwork: Value(video.isNetwork),
+                isTelegram: Value(video.isTelegramVideo),
+                playedAt: video.playedAt,
+                lastPosition: Value(video.lastPosition?.inMilliseconds),
+                telegramChatId: Value(video.telegramChatId),
+                telegramMessageId: Value(video.telegramMessageId),
+                telegramFileSize: Value(video.telegramFileSize),
+                telegramTopicId: Value(video.telegramTopicId),
+                telegramTopicName: Value(video.telegramTopicName),
+              ),
+            );
+          } catch (e) {
+            debugPrint('Error migrating single video: $e');
           }
-        })
-        .whereType<RecentVideo>()
-        .toList();
+        }
+        await prefs.remove('recent_videos');
+        debugPrint('Migration complete.');
+      }
+      _migrated = true;
+    } catch (e) {
+      debugPrint('Error migrating recent videos: $e');
+    }
+  }
+
+  /// Obtiene los videos recientes (todos combinados)
+  Future<List<RecentVideo>> getRecentVideos() async {
+    await _migrateIfNeeded();
+    final query = _db.select(_db.recentVideos)
+      ..orderBy([(t) => OrderingTerm(expression: t.playedAt, mode: OrderingMode.desc)]);
+    
+    final dbVideos = await query.get();
+    return dbVideos.map((v) => RecentVideo.fromDb(v)).toList();
   }
 
   /// Añade o actualiza un video en el historial
-  ///
-  /// For Telegram videos, provide [telegramChatId], [telegramMessageId], and
-  /// [telegramFileSize] for stable identification that survives cache clears.
-  /// For forum topics, provide [telegramTopicId] and [telegramTopicName].
   Future<void> addVideo(
     String path, {
     String? title,
@@ -131,131 +177,80 @@ class RecentVideosService {
     int? telegramTopicId,
     String? telegramTopicName,
   }) async {
-    final prefs = SecureStorageService.instance;
-    final videos = await getRecentVideos();
+    await _migrateIfNeeded();
+    final isTelegram = telegramChatId != null && telegramMessageId != null;
 
-    // Remove if already exists to update it (move to top)
-    // Match by stable Telegram ID when available, otherwise by path
-    String? existingTitle;
-    int? existingChatId;
-    int? existingMessageId;
-    int? existingFileSize;
-    int? existingTopicId;
-    String? existingTopicName;
-
-    int existingIndex = -1;
-    if (telegramChatId != null && telegramMessageId != null) {
-      // Match by stable Telegram message ID (survives cache clears)
-      existingIndex = videos.indexWhere(
-        (v) =>
-            v.telegramChatId == telegramChatId &&
-            v.telegramMessageId == telegramMessageId,
-      );
-    }
-    if (existingIndex == -1) {
-      // Fallback to path match
-      existingIndex = videos.indexWhere((v) => v.path == path);
+    // First delete old entries with same telegram stable id if telegram
+    if (isTelegram) {
+      await (_db.delete(_db.recentVideos)
+            ..where((t) => t.telegramChatId.equals(telegramChatId) &
+                           t.telegramMessageId.equals(telegramMessageId)))
+          .go();
     }
 
-    if (existingIndex != -1) {
-      final existing = videos[existingIndex];
-      existingTitle = existing.title;
-      existingChatId = existing.telegramChatId;
-      existingMessageId = existing.telegramMessageId;
-      existingFileSize = existing.telegramFileSize;
-      existingTopicId = existing.telegramTopicId;
-      existingTopicName = existing.telegramTopicName;
-      videos.removeAt(existingIndex);
-    }
-
-    // Add to beginning
-    videos.insert(
-      0,
-      RecentVideo(
+    // Insert new entry (conflict update by path)
+    await _db.into(_db.recentVideos).insertOnConflictUpdate(
+      db.RecentVideosCompanion.insert(
         path: path,
-        title: title ?? existingTitle,
-        isNetwork: isNetwork,
+        title: Value(title),
+        isNetwork: Value(isNetwork),
+        isTelegram: Value(isTelegram),
         playedAt: DateTime.now(),
-        lastPosition: position,
-        telegramChatId: telegramChatId ?? existingChatId,
-        telegramMessageId: telegramMessageId ?? existingMessageId,
-        telegramFileSize: telegramFileSize ?? existingFileSize,
-        telegramTopicId: telegramTopicId ?? existingTopicId,
-        telegramTopicName: telegramTopicName ?? existingTopicName,
+        lastPosition: Value(position?.inMilliseconds),
+        telegramChatId: Value(telegramChatId),
+        telegramMessageId: Value(telegramMessageId),
+        telegramFileSize: Value(telegramFileSize),
+        telegramTopicId: Value(telegramTopicId),
+        telegramTopicName: Value(telegramTopicName),
       ),
     );
 
-    // Keep only max videos
-    if (videos.length > _maxVideos) {
-      videos.removeRange(_maxVideos, videos.length);
-    }
+    // Enforce limits per category
+    await _enforceLimits(isTelegram: isTelegram);
+  }
 
-    // Save
-    final jsonList = videos.map((v) => jsonEncode(v.toJson())).toList();
-    await prefs.setStringList(_key, jsonList);
+  Future<void> _enforceLimits({required bool isTelegram}) async {
+    final query = _db.select(_db.recentVideos)
+      ..where((t) => t.isTelegram.equals(isTelegram))
+      ..orderBy([(t) => OrderingTerm(expression: t.playedAt, mode: OrderingMode.desc)]);
+    
+    final videos = await query.get();
+    if (videos.length > _maxVideos) {
+      final videosToDelete = videos.sublist(_maxVideos);
+      for (final v in videosToDelete) {
+        await (_db.delete(_db.recentVideos)..where((t) => t.path.equals(v.path))).go();
+      }
+    }
   }
 
   /// Actualiza la posición de un video
   Future<void> updatePosition(String path, Duration position) async {
-    final prefs = SecureStorageService.instance;
-    final videos = await getRecentVideos();
-
-    final index = videos.indexWhere((v) => v.path == path);
-    if (index != -1) {
-      final video = videos[index];
-      videos[index] = RecentVideo(
-        path: video.path,
-        title: video.title,
-        isNetwork: video.isNetwork,
-        playedAt: video.playedAt,
-        lastPosition: position,
-        telegramChatId: video.telegramChatId,
-        telegramMessageId: video.telegramMessageId,
-        telegramFileSize: video.telegramFileSize,
-        telegramTopicId: video.telegramTopicId,
-        telegramTopicName: video.telegramTopicName,
-      );
-
-      final jsonList = videos.map((v) => jsonEncode(v.toJson())).toList();
-      await prefs.setStringList(_key, jsonList);
-    }
+    await _migrateIfNeeded();
+    await (_db.update(_db.recentVideos)..where((t) => t.path.equals(path)))
+        .write(db.RecentVideosCompanion(lastPosition: Value(position.inMilliseconds)));
   }
 
   /// Elimina un video del historial
   Future<void> removeVideo(String path) async {
-    final prefs = SecureStorageService.instance;
-    final videos = await getRecentVideos();
-    videos.removeWhere((v) => v.path == path);
-
-    final jsonList = videos.map((v) => jsonEncode(v.toJson())).toList();
-    await prefs.setStringList(_key, jsonList);
+    await _migrateIfNeeded();
+    await (_db.delete(_db.recentVideos)..where((t) => t.path.equals(path))).go();
   }
 
   /// Limpia todo el historial
   Future<void> clearAll() async {
-    final prefs = SecureStorageService.instance;
-    await prefs.remove(_key);
+    await _migrateIfNeeded();
+    await _db.delete(_db.recentVideos).go();
   }
 
   /// Limpia solo los videos de Telegram
   Future<void> clearTelegramVideos() async {
-    final prefs = SecureStorageService.instance;
-    final videos = await getRecentVideos();
-    // Keep only non-Telegram videos
-    videos.removeWhere((v) => v.isTelegramVideo);
-
-    final jsonList = videos.map((v) => jsonEncode(v.toJson())).toList();
-    await prefs.setStringList(_key, jsonList);
+    await _migrateIfNeeded();
+    await (_db.delete(_db.recentVideos)..where((t) => t.isTelegram.equals(true))).go();
   }
 
   /// Limpia solo los videos locales y de red (no Telegram)
   Future<void> clearLocalVideos() async {
-    final prefs = SecureStorageService.instance;
-    final videos = await getRecentVideos();
-    // Keep only Telegram videos
-    videos.removeWhere((v) => !v.isTelegramVideo);
-
-    final jsonList = videos.map((v) => jsonEncode(v.toJson())).toList();
-    await prefs.setStringList(_key, jsonList);
+    await _migrateIfNeeded();
+    await (_db.delete(_db.recentVideos)..where((t) => t.isTelegram.equals(false))).go();
   }
 }

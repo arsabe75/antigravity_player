@@ -10,6 +10,8 @@ class StorageFacade {
 
   StorageFacade(this._db, this._cache);
 
+  AppDatabase get database => _db;
+
   Future<bool> _save(String key, String value) async {
     _cache[key] = value;
     try {

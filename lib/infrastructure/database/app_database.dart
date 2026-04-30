@@ -15,12 +15,46 @@ class AppSettings extends Table {
   Set<Column> get primaryKey => {key};
 }
 
-@DriftDatabase(tables: [AppSettings])
+/// Tabla para el historial de videos recientes
+class RecentVideos extends Table {
+  TextColumn get path => text()();
+  TextColumn get title => text().nullable()();
+  BoolColumn get isNetwork => boolean().withDefault(const Constant(false))();
+  BoolColumn get isTelegram => boolean().withDefault(const Constant(false))();
+  DateTimeColumn get playedAt => dateTime()();
+  IntColumn get lastPosition => integer().nullable()();
+
+  // Telegram-specific identifiers
+  IntColumn get telegramChatId => integer().nullable()();
+  IntColumn get telegramMessageId => integer().nullable()();
+  IntColumn get telegramFileSize => integer().nullable()();
+  IntColumn get telegramTopicId => integer().nullable()();
+  TextColumn get telegramTopicName => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {path};
+}
+
+@DriftDatabase(tables: [AppSettings, RecentVideos])
 class AppDatabase extends _$AppDatabase {
   AppDatabase({QueryExecutor? e}) : super(e ?? _openConnection());
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration {
+    return MigrationStrategy(
+      onCreate: (Migrator m) async {
+        await m.createAll();
+      },
+      onUpgrade: (Migrator m, int from, int to) async {
+        if (from < 2) {
+          await m.createTable(recentVideos);
+        }
+      },
+    );
+  }
 }
 
 LazyDatabase _openConnection() {
