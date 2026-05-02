@@ -180,33 +180,58 @@ class RecentVideosService {
     await _migrateIfNeeded();
     final isTelegram = telegramChatId != null && telegramMessageId != null;
 
-    // First delete old entries with same telegram stable id if telegram
+    db.RecentVideo? existing;
+
+    // Find existing entry by Telegram stable ID
     if (isTelegram) {
-      await (_db.delete(_db.recentVideos)
+      existing = await (_db.select(_db.recentVideos)
             ..where((t) => t.telegramChatId.equals(telegramChatId) &
                            t.telegramMessageId.equals(telegramMessageId)))
+          .getSingleOrNull();
+    }
+    
+    // Fallback: find existing entry by path
+    existing ??= await (_db.select(_db.recentVideos)
+          ..where((t) => t.path.equals(path)))
+        .getSingleOrNull();
+
+    // Always delete the existing one to allow path updates or move to top cleanly
+    if (existing != null) {
+      await (_db.delete(_db.recentVideos)
+            ..where((t) => t.path.equals(existing!.path)))
           .go();
     }
+
+    // For Telegram videos, if we play them again from recent list, they might not 
+    // have telegramTopicId/Name in the LoadVideoParams, so we must preserve them.
+    final finalTitle = title ?? existing?.title;
+    final finalIsTelegram = isTelegram || (existing?.isTelegram ?? false);
+    final finalPos = position?.inMilliseconds ?? existing?.lastPosition;
+    final finalChatId = telegramChatId ?? existing?.telegramChatId;
+    final finalMsgId = telegramMessageId ?? existing?.telegramMessageId;
+    final finalFileSize = telegramFileSize ?? existing?.telegramFileSize;
+    final finalTopicId = telegramTopicId ?? existing?.telegramTopicId;
+    final finalTopicName = telegramTopicName ?? existing?.telegramTopicName;
 
     // Insert new entry (conflict update by path)
     await _db.into(_db.recentVideos).insertOnConflictUpdate(
       db.RecentVideosCompanion.insert(
         path: path,
-        title: Value(title),
+        title: Value(finalTitle),
         isNetwork: Value(isNetwork),
-        isTelegram: Value(isTelegram),
+        isTelegram: Value(finalIsTelegram),
         playedAt: DateTime.now(),
-        lastPosition: Value(position?.inMilliseconds),
-        telegramChatId: Value(telegramChatId),
-        telegramMessageId: Value(telegramMessageId),
-        telegramFileSize: Value(telegramFileSize),
-        telegramTopicId: Value(telegramTopicId),
-        telegramTopicName: Value(telegramTopicName),
+        lastPosition: Value(finalPos),
+        telegramChatId: Value(finalChatId),
+        telegramMessageId: Value(finalMsgId),
+        telegramFileSize: Value(finalFileSize),
+        telegramTopicId: Value(finalTopicId),
+        telegramTopicName: Value(finalTopicName),
       ),
     );
 
     // Enforce limits per category
-    await _enforceLimits(isTelegram: isTelegram);
+    await _enforceLimits(isTelegram: finalIsTelegram);
   }
 
   Future<void> _enforceLimits({required bool isTelegram}) async {
