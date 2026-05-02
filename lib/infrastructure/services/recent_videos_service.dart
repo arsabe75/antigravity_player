@@ -182,24 +182,37 @@ class RecentVideosService {
 
     db.RecentVideo? existing;
 
-    // Find existing entry by Telegram stable ID
+    // Find existing entries by Telegram stable ID
     if (isTelegram) {
-      existing = await (_db.select(_db.recentVideos)
+      final existingRows = await (_db.select(_db.recentVideos)
             ..where((t) => t.telegramChatId.equals(telegramChatId) &
                            t.telegramMessageId.equals(telegramMessageId)))
-          .getSingleOrNull();
+          .get();
+      if (existingRows.isNotEmpty) {
+        existing = existingRows.first;
+        // Always delete ALL existing duplicates to clean up corruption
+        for (var row in existingRows) {
+          await (_db.delete(_db.recentVideos)
+                ..where((t) => t.path.equals(row.path)))
+              .go();
+        }
+      }
     }
     
-    // Fallback: find existing entry by path
-    existing ??= await (_db.select(_db.recentVideos)
-          ..where((t) => t.path.equals(path)))
-        .getSingleOrNull();
-
-    // Always delete the existing one to allow path updates or move to top cleanly
-    if (existing != null) {
-      await (_db.delete(_db.recentVideos)
-            ..where((t) => t.path.equals(existing!.path)))
-          .go();
+    // Fallback: find existing entries by path
+    if (existing == null) {
+      final existingRows = await (_db.select(_db.recentVideos)
+            ..where((t) => t.path.equals(path)))
+          .get();
+      if (existingRows.isNotEmpty) {
+        existing = existingRows.first;
+        // Always delete ALL existing duplicates to clean up corruption
+        for (var row in existingRows) {
+          await (_db.delete(_db.recentVideos)
+                ..where((t) => t.path.equals(row.path)))
+              .go();
+        }
+      }
     }
 
     // For Telegram videos, if we play them again from recent list, they might not 

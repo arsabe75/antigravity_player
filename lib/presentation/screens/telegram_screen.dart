@@ -445,13 +445,13 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                           'chat_id': video.telegramChatId,
                         });
 
-                        // Load some chat history to hydrate file information
+                        // Load chat history to hydrate file information, explicitly asking for the video message
                         await TelegramService().sendWithResult({
                           '@type': 'getChatHistory',
                           'chat_id': video.telegramChatId,
-                          'from_message_id': 0,
-                          'offset': 0,
-                          'limit': 50,
+                          'from_message_id': video.telegramMessageId ?? 0,
+                          'offset': video.telegramMessageId != null ? -1 : 0, // offset -1 includes the target message itself
+                          'limit': 20,
                           'only_local': false,
                         });
 
