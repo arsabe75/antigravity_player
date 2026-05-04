@@ -1243,12 +1243,12 @@ class LocalStreamingProxy {
 
         // ============================================================
         // P0/P1 FIX: MOOV-FIRST STATE MACHINE LOGIC
-        final moovResult = _handleMoovFirstRedirect(fileId, start, seekThreshold);
+        final moovResult = handleMoovFirstRedirect(fileId, start, seekThreshold);
         final moovFirstRedirect = moovResult.moovFirstRedirect;
         start = moovResult.adjustedStart;
 
         // SEEK DETECTION
-        bool isSeekRequest = _detectSeek(fileId, start, totalSize,
+        bool isSeekRequest = detectSeek(fileId, start, totalSize,
             seekThreshold, scrubThreshold, moovFirstRedirect);
 
         // PRIMARY PLAYBACK TRACKING (STABILIZED)
@@ -2067,7 +2067,8 @@ class LocalStreamingProxy {
   /// Handles MOOV-first redirect when a file has a stale playback position
   /// (after cache clear). For MOOV-at-end files the pending seek is stored
   /// without redirecting; for others start is redirected to 0.
-  ({int adjustedStart, bool moovFirstRedirect}) _handleMoovFirstRedirect(
+  @visibleForTesting
+  ({int adjustedStart, bool moovFirstRedirect}) handleMoovFirstRedirect(
     int fileId,
     int start,
     int seekThreshold,
@@ -2117,7 +2118,8 @@ class LocalStreamingProxy {
   /// Detects if the current request is a seek (jump > configured threshold
   /// from the last served offset). Only sets [_lastSeekTime] for true
   /// scrubbing (user dragging seek bar).
-  bool _detectSeek(
+  @visibleForTesting
+  bool detectSeek(
     int fileId,
     int start,
     int totalSize,
@@ -2518,9 +2520,9 @@ class LocalStreamingProxy {
     if (!await _checkDiskSafetyCached()) return;
 
     final cached = _filePaths[fileId];
-    if (_isFileComplete(cached)) return;
-    if (_isEofRequest(requestedOffset, cached)) return;
-    if (_isStaleSeekGeneration(seekGeneration, fileId)) return;
+    if (isFileComplete(cached)) return;
+    if (isEofRequest(requestedOffset, cached)) return;
+    if (isStaleSeekGeneration(seekGeneration, fileId)) return;
 
     final totalSize = cached?.totalSize ?? 0;
     final localSeekThreshold = _computeLocalSeekThreshold(totalSize);
@@ -2555,11 +2557,11 @@ class LocalStreamingProxy {
     }
 
     final isMoovDownload = _isMoovDownloadRequest(fileId, requestedOffset, totalSize);
-    final shouldForcePriority = _evaluateBlockingPriority(
+    final shouldForcePriority = evaluateBlockingPriority(
         fileId, requestedOffset, totalSize, primaryOffset,
         isMoovDownload, isBlocking);
 
-    final priority = _resolvePriority(
+    final priority = resolvePriority(
         fileId, requestedOffset, totalSize, primaryOffset,
         distanceToPlayback, shouldForcePriority, isMoovDownload);
 
@@ -2639,7 +2641,8 @@ class LocalStreamingProxy {
                 );
   }
 
-  bool _evaluateBlockingPriority(
+  @visibleForTesting
+  bool evaluateBlockingPriority(
     int fileId,
     int requestedOffset,
     int totalSize,
@@ -2706,7 +2709,8 @@ class LocalStreamingProxy {
     return false;
   }
 
-  int _resolvePriority(
+  @visibleForTesting
+  int resolvePriority(
     int fileId,
     int requestedOffset,
     int totalSize,
@@ -2893,16 +2897,19 @@ class LocalStreamingProxy {
   // GUARD CLAUSES for _startDownloadAtOffset
   // ============================================================
 
-  bool _isFileComplete(ProxyFileInfo? cached) {
+  @visibleForTesting
+  bool isFileComplete(ProxyFileInfo? cached) {
     return cached != null && cached.isCompleted;
   }
 
-  bool _isEofRequest(int requestedOffset, ProxyFileInfo? cached) {
+  @visibleForTesting
+  bool isEofRequest(int requestedOffset, ProxyFileInfo? cached) {
     final totalSize = cached?.totalSize ?? 0;
     return totalSize > 0 && requestedOffset >= totalSize;
   }
 
-  bool _isStaleSeekGeneration(int? seekGeneration, int fileId) {
+  @visibleForTesting
+  bool isStaleSeekGeneration(int? seekGeneration, int fileId) {
     return seekGeneration != null &&
         seekGeneration != (_seekGeneration[fileId] ?? 0);
   }
