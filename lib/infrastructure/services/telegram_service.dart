@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:ffi' as ffi;
+import 'tdlib_client.dart';
 import 'dart:io';
 import 'dart:isolate';
 import 'dart:async';
@@ -108,7 +109,7 @@ typedef TdJsonClientExecuteC =
 ///   print('Received: ${update['@type']}');
 /// });
 /// ```
-class TelegramService {
+class TelegramService implements TdlibClient {
   static final TelegramService _instance = TelegramService._internal();
   factory TelegramService() => _instance;
   TelegramService._internal();
@@ -116,6 +117,7 @@ class TelegramService {
   final StreamController<Map<String, dynamic>> _updateController =
       StreamController.broadcast();
 
+  @override
   Stream<Map<String, dynamic>> get updates => _updateController.stream;
 
   // Request-Response correlation
@@ -131,6 +133,7 @@ class TelegramService {
   bool _initialized = false;
 
   /// Returns true if the TDLib client is initialized and ready to accept requests
+  @override
   bool get isClientReady => _client != null && _initialized;
 
   bool _bindingsInitialized = false;
@@ -218,6 +221,7 @@ class TelegramService {
     }
   }
 
+  @override
   void send(Map<String, dynamic> request) {
     if (_client == null) return;
     // debugPrint('TDLib Send: $request'); // Too verbose
@@ -229,6 +233,7 @@ class TelegramService {
   }
 
   /// Sends a request and waits for the response using @extra for correlation
+  @override
   Future<Map<String, dynamic>> sendWithResult(Map<String, dynamic> request) {
     if (_client == null) return Future.error('Client not initialized');
 

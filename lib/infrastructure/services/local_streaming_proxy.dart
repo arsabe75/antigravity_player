@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'tdlib_client.dart';
+import 'cache_service.dart';
 import 'telegram_service.dart';
 import 'mp4_sample_table.dart';
 import 'telegram_cache_service.dart';
@@ -133,7 +135,20 @@ class ProxyFileInfo {
 class LocalStreamingProxy {
   static final LocalStreamingProxy _instance = LocalStreamingProxy._internal();
   factory LocalStreamingProxy() => _instance;
-  LocalStreamingProxy._internal();
+
+  LocalStreamingProxy._internal()
+      : _tdlib = TelegramService(),
+        _cacheService = TelegramCacheService();
+
+  /// Constructor for testing — accepts fake implementations.
+  LocalStreamingProxy.testing({
+    required TdlibClient tdlib,
+    required CacheService cacheService,
+  })  : _tdlib = tdlib,
+        _cacheService = cacheService;
+
+  final TdlibClient _tdlib;
+  final CacheService _cacheService;
 
   // ============================================================
   // STRUCTURED LOGGING with ProxyLogger
@@ -243,7 +258,7 @@ class LocalStreamingProxy {
       return _lastDiskCheckResult!;
     }
 
-    _lastDiskCheckResult = await TelegramCacheService().checkDiskSafety();
+    _lastDiskCheckResult = await _cacheService.checkDiskSafety();
     _lastDiskCheckTime = now;
     return _lastDiskCheckResult!;
   }
@@ -568,7 +583,7 @@ class LocalStreamingProxy {
     // Cancel TDLib download to free bandwidth for the next video.
     // Without this, TDLib continues downloading the aborted file in background,
     // competing for bandwidth with the new file's download.
-    TelegramService().send({
+    _tdlib.send({
       '@type': 'cancelDownloadFile',
       'file_id': fileId,
       'only_if_pending': false,
@@ -778,7 +793,7 @@ class LocalStreamingProxy {
 
     _server!.listen(_handleRequest);
 
-    TelegramService().updates.listen(_onUpdate);
+    _tdlib.updates.listen(_onUpdate);
   }
 
   void _onUpdate(Map<String, dynamic> update) {
@@ -976,7 +991,7 @@ class LocalStreamingProxy {
     _lastEnforcementTime = DateTime.now();
     _totalBytesDownloadedSinceEnforcement = 0; // Reset counter
     _logTrace('Running cache limit enforcement');
-    await TelegramCacheService().enforceVideoSizeLimit();
+    await _cacheService.enforceVideoSizeLimit();
   }
 
   /// Enforce global RAM budget for LRU caches + sample tables.
@@ -1070,7 +1085,7 @@ class LocalStreamingProxy {
 
     // 2. If no cached data available, query TDLib
     try {
-      final result = await TelegramService().sendWithResult({
+      final result = await _tdlib.sendWithResult({
         '@type': 'getFileDownloadedPrefixSize',
         'file_id': fileId,
         'offset': offset,
@@ -1336,17 +1351,17 @@ class LocalStreamingProxy {
       try {
         // Wait for TDLib client to be ready (max 10 seconds)
         // This is crucial on app start when TDLib might still be initializing
-        if (!TelegramService().isClientReady) {
+        if (!_tdlib.isClientReady) {
           _debugLog('Proxy: Waiting for TDLib client to initialize...');
           int attempts = 0;
-          while (!TelegramService().isClientReady &&
+          while (!_tdlib.isClientReady &&
               attempts < ProxyConfig.tdlibInitMaxAttempts) {
             await Future.delayed(
               const Duration(milliseconds: ProxyConfig.tdlibInitWaitMs),
             );
             attempts++;
           }
-          if (!TelegramService().isClientReady) {
+          if (!_tdlib.isClientReady) {
             _debugLog(
               'Proxy: TDLib client failed to initialize after 10 seconds',
             );
@@ -1746,7 +1761,7 @@ class LocalStreamingProxy {
           _debugLog(
             'Proxy: File missing on disk, forcing TDLib delete for $fileId',
           );
-          await TelegramService().sendWithResult({
+          await _tdlib.sendWithResult({
             '@type': 'deleteFile',
             'file_id': fileId,
           });
@@ -2426,7 +2441,7 @@ class LocalStreamingProxy {
 
   Future<void> _fetchFileInfo(int fileId) async {
     try {
-      final fileJson = await TelegramService().sendWithResult({
+      final fileJson = await _tdlib.sendWithResult({
         '@type': 'getFile',
         'file_id': fileId,
       });
@@ -2477,7 +2492,7 @@ class LocalStreamingProxy {
           );
 
           // Delete the local file to reset TDLib's state
-          final deleteResult = await TelegramService().sendWithResult({
+          final deleteResult = await _tdlib.sendWithResult({
             '@type': 'deleteFile',
             'file_id': fileId,
           });
@@ -2498,7 +2513,7 @@ class LocalStreamingProxy {
           );
 
           // Re-fetch file info after deletion
-          final newFileJson = await TelegramService().sendWithResult({
+          final newFileJson = await _tdlib.sendWithResult({
             '@type': 'getFile',
             'file_id': fileId,
           });
@@ -2564,7 +2579,7 @@ class LocalStreamingProxy {
           // to download sequentially and avoid PartsManager issues
           _getOrCreateState(fileId).downloadStartTime =
               DateTime.now(); // Track when download started
-          TelegramService().send({
+          _tdlib.send({
             '@type': 'downloadFile',
             'file_id': fileId,
             'priority': DownloadPriority.critical,
@@ -2724,7 +2739,7 @@ class LocalStreamingProxy {
           );
           _getOrCreateState(fileId).activeDownloadOffset = primaryOffset;
           _getOrCreateState(fileId).lastOffsetChangeTime = DateTime.now();
-          TelegramService().send({
+          _tdlib.send({
             '@type': 'downloadFile',
             'file_id': fileId,
             'priority': DownloadPriority.critical,
@@ -3324,7 +3339,7 @@ class LocalStreamingProxy {
         'Processing force restart for $fileId: sending cancelDownloadFile first',
         fileId: fileId,
       );
-      TelegramService().send({
+      _tdlib.send({
         '@type': 'cancelDownloadFile',
         'file_id': fileId,
         'only_if_pending': false,
@@ -3343,7 +3358,7 @@ class LocalStreamingProxy {
           '${ProxyConfig.cancelToDownloadDelayMs}ms, enviando segundo cancel',
           fileId: fileId,
         );
-        TelegramService().send({
+        _tdlib.send({
           '@type': 'cancelDownloadFile',
           'file_id': fileId,
           'only_if_pending': false,
@@ -3354,7 +3369,7 @@ class LocalStreamingProxy {
       }
     }
 
-    TelegramService().send({
+    _tdlib.send({
       '@type': 'downloadFile',
       'file_id': fileId,
       'priority': priority,
@@ -4006,7 +4021,7 @@ class LocalStreamingProxy {
     );
 
     // Trigger preload with high but not critical priority
-    TelegramService().send({
+    _tdlib.send({
       '@type': 'downloadFile',
       'file_id': fileId,
       'priority': DownloadPriority.highFloor, // High but below critical
@@ -4177,7 +4192,7 @@ class LocalStreamingProxy {
 
     _lastPreviewTime[fileId] = now;
 
-    TelegramService().send({
+    _tdlib.send({
       '@type': 'downloadFile',
       'file_id': fileId,
       'priority': DownloadPriority.highFloor, // High priority for seek preview

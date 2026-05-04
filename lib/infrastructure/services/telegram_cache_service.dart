@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'cache_service.dart';
 import 'secure_storage_service.dart';
 import 'package:disk_space_2/disk_space_2.dart';
 import '../../domain/entities/storage_statistics.dart';
@@ -30,7 +31,7 @@ enum KeepMediaDuration {
 /// - optimizeStorage() for cleanup with configurable TTL and size limits
 /// - Manual cache clearing
 /// - NVR-style video cache limit (delete oldest videos when limit reached)
-class TelegramCacheService {
+class TelegramCacheService implements CacheService {
   static const String _keepMediaKey = 'telegram_keep_media_duration';
   static const String _cacheSizeLimitKey = 'telegram_video_cache_size_limit';
 
@@ -124,6 +125,7 @@ class TelegramCacheService {
   ///
   /// Deletes oldest video files until cache is within the limit.
   /// Also enforces a "Safety Buffer" - ensures at least 500MB of disk space remains free.
+  @override
   Future<bool> enforceVideoSizeLimit() async {
     try {
       final userLimit = await getCacheSizeLimit();
@@ -216,6 +218,7 @@ class TelegramCacheService {
   ///
   /// Returns `false` if disk space is CRITICALLY low (< 50MB) and writing should stop immediately.
   /// Triggers [enforceVideoSizeLimit] if space is in the warning zone (< 500MB).
+  @override
   Future<bool> checkDiskSafety() async {
     // Throttle checks to avoid overhead
     final now = DateTime.now();
