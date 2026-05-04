@@ -45,14 +45,6 @@ class LocalStreamingRepository implements StreamingRepository {
     return _proxy.isVideoNotOptimizedForStreaming(fileId);
   }
 
-  @Deprecated(
-    'Preloading disabled due to TDLib limitations. Remove calls to this method.',
-  )
-  @override
-  void preloadVideoStart(int fileId, int? totalSize, {bool isVisible = false}) {
-    _proxy.preloadVideoStart(fileId, totalSize, isVisible: isVisible);
-  }
-
   @override
   LoadingProgress? getLoadingProgress(int fileId) {
     return _proxy.getLoadingProgress(fileId);

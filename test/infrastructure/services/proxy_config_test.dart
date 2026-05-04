@@ -3,27 +3,6 @@ import 'package:video_player_app/infrastructure/services/proxy_config.dart';
 
 void main() {
   group('ProxyConfig', () {
-    group('buffer sizes', () {
-      test('minPreloadBytes is 2MB', () {
-        expect(ProxyConfig.minPreloadBytes, equals(2 * 1024 * 1024));
-      });
-
-      test('fastNetworkPreload is 1MB', () {
-        expect(ProxyConfig.fastNetworkPreload, equals(1 * 1024 * 1024));
-      });
-
-      test('slowNetworkPreload is 4MB', () {
-        expect(ProxyConfig.slowNetworkPreload, equals(4 * 1024 * 1024));
-      });
-
-      test('slow network has larger preload than fast', () {
-        expect(
-          ProxyConfig.slowNetworkPreload,
-          greaterThan(ProxyConfig.fastNetworkPreload),
-        );
-      });
-    });
-
     group('timeouts', () {
       test('initializationGracePeriod is 30 seconds', () {
         expect(

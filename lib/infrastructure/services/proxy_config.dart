@@ -4,19 +4,6 @@ class ProxyConfig {
   ProxyConfig._();
 
   // ============================================================
-  // BUFFER SIZES
-  // ============================================================
-
-  /// Minimum bytes to preload before serving to player (default).
-  static const int minPreloadBytes = 2 * 1024 * 1024; // 2MB
-
-  /// Preload size for fast network connections (>5MB/s).
-  static const int fastNetworkPreload = 1 * 1024 * 1024; // 1MB
-
-  /// Preload size for slow network connections (<1MB/s).
-  static const int slowNetworkPreload = 4 * 1024 * 1024; // 4MB
-
-  // ============================================================
   // TIMEOUTS
   // ============================================================
 

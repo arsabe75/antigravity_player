@@ -308,6 +308,8 @@ class LocalStreamingProxy {
 
   // IN-MEMORY LRU CACHE: Cache recently read data for instant backward seeks
   final Map<int, StreamingLRUCache> _streamingCaches = {};
+  // Cache for parsed MP4 sample tables (used by getByteOffsetForTime and MOOV detection)
+  final Map<int, Mp4SampleTable?> _sampleTableCache = {};
   // GLOBAL RAM LIMIT: LRU order of file IDs by cache access (most recent at end).
   // Used to evict oldest file's cache when global budget is exceeded.
   final List<int> _cacheLruOrder = [];
@@ -551,15 +553,6 @@ class LocalStreamingProxy {
       bytesPerSecond: metrics?.bytesPerSecond ?? 0,
       loadState: loadState,
     );
-  }
-
-  /// Preload video start - no-op stub maintained for API compatibility.
-  /// Actual preloading was disabled as it interfered with TDLib download management.
-  @Deprecated(
-    'Preloading disabled due to TDLib limitations. Remove calls to this method.',
-  )
-  void preloadVideoStart(int fileId, int? totalSize, {bool isVisible = false}) {
-    // No-op: preloading disabled
   }
 
   void abortRequest(int fileId) {
@@ -1091,15 +1084,9 @@ class LocalStreamingProxy {
       }
 
       if (result['@type'] == 'fileDownloadedPrefixSize') {
-        // TDLib returns 'size' not 'count' in this response
         final size = result['size'];
         if (size is int) {
           return size;
-        }
-        // Fallback: some versions might use 'count'
-        final count = result['count'];
-        if (count is int) {
-          return count;
         }
         return 0;
       }
@@ -4160,9 +4147,6 @@ class LocalStreamingProxy {
   // ============================================================
   // SEEK PREVIEW PRELOADING
   // ============================================================
-
-  // Cache for parsed MP4 sample tables
-  final Map<int, Mp4SampleTable?> _sampleTableCache = {};
 
   // Track last preview time to avoid spamming
   final Map<int, DateTime> _lastPreviewTime = {};
