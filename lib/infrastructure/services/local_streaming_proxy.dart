@@ -2514,448 +2514,121 @@ class LocalStreamingProxy {
     bool isSeekRequest = false,
     int? seekGeneration,
   }) async {
-    // DISK SAFETY CHECK: Prevent crash if disk is full (<50MB)
-    // Uses cached result for 5 seconds to avoid redundant disk queries
-    if (!await _checkDiskSafetyCached()) {
-      _debugLog(
-        'Proxy: CRITICAL DISK SPACE - Aborting new download request for $fileId',
-      );
-      return;
-    }
+    // Guard pipeline — each returns if the request should be aborted
+    if (!await _checkDiskSafetyCached()) return;
 
-    // Check if file is already complete - no download needed
     final cached = _filePaths[fileId];
-    if (cached != null && cached.isCompleted) {
-      return;
-    }
+    if (_isFileComplete(cached)) return;
+    if (_isEofRequest(requestedOffset, cached)) return;
+    if (_isStaleSeekGeneration(seekGeneration, fileId)) return;
 
-    // CRITICAL FIX: Prevent requests beyond EOF which crash TDLib
-    // This happens if currentReadOffset reaches totalSize in the streaming loop
     final totalSize = cached?.totalSize ?? 0;
-    if (totalSize > 0 && requestedOffset >= totalSize) {
-      _debugLog(
-        'Proxy: Ignoring request at EOF ($requestedOffset >= $totalSize) for $fileId',
-      );
-      return;
-    }
+    final localSeekThreshold = _computeLocalSeekThreshold(totalSize);
+    final sequentialWindow = _computeSequentialWindow(totalSize);
 
-    // FIX 7: Early exit if this call comes from a stale connection whose
-    // seek generation doesn't match the current one. This prevents pre-seek
-    // connections (in the middle of async _getDownloadedPrefixSize) from
-    // issuing downloadFile calls that cancel the new seek target's download.
-    if (seekGeneration != null &&
-        seekGeneration != (_seekGeneration[fileId] ?? 0)) {
-      _logTrace(
-        'Stale seekGen download ignored for $fileId '
-        '(gen $seekGeneration→${_seekGeneration[fileId]})',
-        fileId: fileId,
-      );
-      return;
-    }
+    if (await _handleForcedMoov(fileId, requestedOffset, cached)) return;
 
-    // Nota: FIX H (_isInMoovGap) fue removido aquí. Bloquear la redirección
-    // de TDLib al gap impedía que el gap se llenara, creando una profecía
-    // autocumplida. Ahora TDLib se redirige al gap y lo llena normalmente.
-    // Proportional thresholds for correct small-file behavior
-    final localSeekThreshold = ProxyConfig.scaled(
-      totalSize,
-      ProxyConfig.seekDetectionThresholdPercent,
-      ProxyConfig.seekDetectionMinBytes,
-      ProxyConfig.seekDetectionMaxBytes,
-    );
-    final sequentialWindow = ProxyConfig.scaled(
-      totalSize,
-      ProxyConfig.sequentialReadThresholdPercent,
-      ProxyConfig.sequentialReadMinBytes,
-      ProxyConfig.sequentialReadMaxBytes,
-    );
+    // Guard pipeline continued
+    if (_isScrubbingDebounced(fileId, requestedOffset, totalSize)) return;
+    if (await _isDataAvailableNow(fileId, requestedOffset)) return;
+    if (_isRateLimited(fileId, isBlocking: isBlocking, forceRestart: forceRestart, isSeekRequest: isSeekRequest)) return;
 
-    // CHECK FORCED MOOV: If we are forcing a moov download, ignore requests for other offsets
-    // This allows the moov download to complete without being intercepted by start-of-file requests
-    final forcedOffset = _getOrCreateState(fileId).forcedMoovOffset;
-    if (forcedOffset != null) {
-      // Check if we have enough data at the forced offset now. Use getDownloadedPrefix
-      // instead of availableBytesFrom to properly check globally cached disjoint chunks.
-      final availableAtForced = await _getDownloadedPrefixSize(fileId, forcedOffset);
-      // MOOV FIX: Wait for the ENTIRE moov atom to be downloaded (or a reasonable cap)
-      // The previous 512KB threshold was too small (moov often > 2MB), causing early release
-      // of the lock and subsequent cancellation of the incomplete moov download.
-      final totalSize = cached?.totalSize ?? 0;
-      final neededSize = totalSize > forcedOffset
-          ? totalSize - forcedOffset
-          : 0;
-
-      // Use the exact needed size if known, capped at 20MB to prevent blocking forever on weird files
-      final targetSize = neededSize > 0
-          ? min(neededSize, ProxyConfig.moovDownloadMaxBytes)
-          : ProxyConfig.scaled(
-              totalSize,
-              ProxyConfig.moovPreloadThresholdPercent,
-              ProxyConfig.moovPreloadMinBytes,
-              ProxyConfig.moovPreloadMaxBytes,
-            ); // Scaled default when total size unknown
-
-      if (availableAtForced >= targetSize) {
-        // Got enough moov data - clear MOOV lock AND reset active priority
-        // This allows normal priority calculation for subsequent requests
-        _debugLog(
-          'Proxy: Forced moov download satisfied ($availableAtForced bytes >= $targetSize), releasing lock for $fileId',
-        );
-        _getOrCreateState(fileId).forcedMoovOffset = null;
-        _getOrCreateState(fileId).activePriority =
-            0; // CRITICAL: Reset priority to avoid deadlock
-
-        // POST-MOOV: Reiniciar descarga desde offset primario inmediatamente.
-        // TDLib queda en el offset del MOOV (final); si el near-end stream
-        // necesita datos, los toma del cache (el preload cubre el read-ahead
-        // de mpv gracias a moovPreloadMaxBytes ≥ 10MB). Así no hay competencia
-        // entre near-end y main stream por el slot de descarga de TDLib.
-        if (!_abortedRequests.contains(fileId)) {
-          final primaryOffset =
-              _getOrCreateState(fileId).primaryPlaybackOffset ?? 0;
-          _debugLog(
-            'Proxy: POST-MOOV resuming download from offset $primaryOffset for $fileId',
-          );
-          _getOrCreateState(fileId).activeDownloadOffset = primaryOffset;
-          _getOrCreateState(fileId).lastOffsetChangeTime = DateTime.now();
-          _tdlib.send({
-            '@type': 'downloadFile',
-            'file_id': fileId,
-            'priority': DownloadPriority.critical,
-            'offset': primaryOffset,
-            'limit': 0,
-            'synchronous': false,
-          });
-        }
-      } else if (requestedOffset != forcedOffset) {
-        // FIX U: Check if MOOV download is stuck (no progress for 30 seconds).
-        // This catches damaged files where TDLib can't deliver data at the MOOV offset,
-        // creating a deadlock where all connections are blocked waiting for MOOV.
-        final moovState = _getOrCreateState(fileId);
-        final moovStartTime = moovState.forcedMoovStartTime;
-        if (moovStartTime != null) {
-          final moovElapsed = DateTime.now().difference(moovStartTime);
-          if (availableAtForced > moovState.forcedMoovLastProgress) {
-            // Progress detected - reset the timer
-            moovState.forcedMoovStartTime = DateTime.now();
-            moovState.forcedMoovLastProgress = availableAtForced;
-          } else if (moovElapsed.inSeconds >= ProxyConfig.moovDownloadTimeoutSeconds) {
-            // No progress for too long - file is likely damaged or MOOV is unreachable
-            _logError(
-              'MOOV DOWNLOAD TIMEOUT for $fileId: no progress for ${moovElapsed.inSeconds}s '
-              '(have $availableAtForced/$targetSize bytes at offset $forcedOffset). '
-              'File appears damaged — blocking further requests.',
-              fileId: fileId,
-            );
-            // Clear the MOOV lock and emit error
-            moovState.forcedMoovOffset = null;
-            moovState.forcedMoovStartTime = null;
-            moovState.forcedMoovLastProgress = 0;
-            final error = StreamingError.corruptFile(fileId);
-            _notifyErrorIfNew(fileId, error);
-            _abortedRequests.add(fileId);
-            final waiters = _byteAvailabilityWaiters.remove(fileId);
-            if (waiters != null) {
-              for (final entry in waiters) {
-                if (!entry.value.isCompleted) entry.value.complete();
-              }
-            }
-            return;
-          }
-        }
-        // Throttled log: only print every 2 seconds per file to reduce log spam
-        // during MOOV download (streaming loops call this on every chunk read)
-        final moovLogNow = DateTime.now();
-        final lastMoovLog = _lastMoovIgnoreLogTime[fileId];
-        if (lastMoovLog == null ||
-            moovLogNow.difference(lastMoovLog) >= _waitingLogThrottle) {
-          _lastMoovIgnoreLogTime[fileId] = moovLogNow;
-          _debugLog(
-            'Proxy: Ignoring request for $requestedOffset while forcing moov download at $forcedOffset for $fileId (have $availableAtForced/$targetSize)',
-          );
-        }
-        return;
-      }
-    }
-
-    // SCRUBBING DETECTION: If multiple seeks detected within 500ms, use debounce
-    // to reduce TDLib download cancellations during rapid scrubbing.
-    // IMPORTANT: Only debounce during ACTIVE PLAYBACK, not during initial load.
-    // We detect active playback by checking if we've served at least 10MB of data.
-    final lastServed = _getOrCreateState(fileId).lastServedOffset ?? 0;
-    final isActivePlayback =
-        lastServed >
-        ProxyConfig.scaled(
-          totalSize,
-          ProxyConfig.activePlaybackThresholdPercent,
-          ProxyConfig.activePlaybackMinBytes,
-          ProxyConfig.activePlaybackMaxBytes,
-        );
-
-    final debounceLastSeek = _getOrCreateState(fileId).lastSeekTime;
-    final debounceNow = DateTime.now();
-    final isRapidSeek =
-        isActivePlayback &&
-        debounceLastSeek != null &&
-        debounceNow.difference(debounceLastSeek).inMilliseconds <
-            ProxyConfig.seekDebounceMs;
-
-    // Check if there's already a pending debounced seek - if so, let it handle this
-    if (isActivePlayback && _pendingSeekOffsets.containsKey(fileId)) {
-      // Update the pending offset to the latest request
-      _handleDebouncedSeek(fileId, requestedOffset);
-      return;
-    }
-
-    // If this is a rapid seek (second+ seek within 500ms), use debounce
-    if (isRapidSeek) {
-      _logTrace(
-        'Rapid seek detected for $fileId, debouncing to ${requestedOffset ~/ 1024}KB',
-        fileId: fileId,
-      );
-      _handleDebouncedSeek(fileId, requestedOffset);
-      return;
-    }
-
-    // Check if we're already downloading from this offset (or very close)
-    final currentActiveOffset = _getOrCreateState(fileId).activeDownloadOffset;
     final currentDownloadOffset = cached?.downloadOffset ?? 0;
     final currentPrefix = cached?.downloadedPrefixSize ?? 0;
+    final currentActiveOffset = _getOrCreateState(fileId).activeDownloadOffset;
+    if (_isAtFrontier(fileId, requestedOffset, currentDownloadOffset, currentPrefix, totalSize, forceRestart: forceRestart)) return;
+    if (_isAlreadyTargeting(fileId, requestedOffset, cached, currentActiveOffset: currentActiveOffset, forceRestart: forceRestart)) return;
 
-    // UNIGRAM PATTERN: Check if data is already available at the requested offset.
-    // Uses getFileDownloadedPrefixSize which checks ALL downloaded ranges in TDLib's
-    // temp file, not just the current downloadOffset+prefix range. This is critical
-    // for MOOV-at-end files where data at earlier offsets persists after TDLib
-    // switches to download the MOOV at the end.
-    final availableAtOffset = await _getDownloadedPrefixSize(
-      fileId,
-      requestedOffset,
-    );
-    if (availableAtOffset > 0) {
-      return;
-    }
-
-    // RATE LIMITER: Prevent flooding TDLib with downloadFile calls.
-    // Multiple HTTP connections and stall timers can independently call this
-    // method, generating cascading TDLib events that overflow the Windows
-    // message queue. Max 1 downloadFile call per file per second.
-    {
-      final fs = _getOrCreateState(fileId);
-      final lastCall = fs.lastDownloadFileCallTime;
-      // SKIP RATE LIMIT for blocking requests, forced restarts, and seek
-      // requests (the first downloadFile after a seek must not be delayed).
-      if (lastCall != null && !isBlocking && !forceRestart && !isSeekRequest) {
-        final elapsed = DateTime.now().difference(lastCall).inMilliseconds;
-        if (elapsed < ProxyConfig.minDownloadCallIntervalMs) {
-          _logTrace(
-            'Rate limited downloadFile for $fileId '
-            '(${elapsed}ms since last call)',
-            fileId: fileId,
-          );
-          return;
-        }
-      }
-    }
-
-    // RESUME FIX: Cache-gap detection
-    // When resuming far ahead, we need to fill the gap from cache edge first.
-    // Otherwise the player stalls waiting for data that never comes.
-    // Detect: requestedOffset is way ahead of cached data (>50MB gap)
-    final cacheEnd = currentDownloadOffset + currentPrefix;
-    final gapFromCache = requestedOffset - cacheEnd;
-    final localSignificantJump = ProxyConfig.scaled(
-      totalSize,
-      ProxyConfig.significantJumpThresholdPercent,
-      ProxyConfig.significantJumpMinBytes,
-      ProxyConfig.significantJumpMaxBytes,
-    );
-    if (gapFromCache > localSignificantJump && cacheEnd > 0 && !isBlocking) {
-      // Large gap detected - this is likely a resume scenario
-      // Start downloading from cache edge instead of creating a gap
-      _debugLog(
-        'Proxy: RESUME GAP DETECTED for $fileId. '
-        'Requested: ${requestedOffset ~/ 1024}KB, CacheEnd: ${cacheEnd ~/ 1024}KB, '
-        'Gap: ${gapFromCache ~/ 1024}KB. Redirecting to cache edge.',
-      );
-      // Note: We don't redirect here, but when isBlocking is true,
-      // we'll allow the cache-edge request through instead of denying it.
-    }
-
-    // Check if current download will soon provide the data we need
-    // Scaled: 70MB→3.5MB, 500MB+→5MB
-    final downloadFrontier = currentDownloadOffset + currentPrefix;
-    final distanceFromFrontier = requestedOffset - downloadFrontier;
-    final isDownloading = cached?.isDownloadingActive ?? false;
-    final frontierProximity = ProxyConfig.scaled(
-      totalSize,
-      ProxyConfig.frontierProximityThresholdPercent,
-      ProxyConfig.frontierProximityMinBytes,
-      ProxyConfig.frontierProximityMaxBytes,
-    );
-
-    // CRITICAL: Don't cancel a download that's at or near the frontier.
-    // TDLib may briefly report isDownloadingActive=false between chunks,
-    // causing a spurious downloadFile that cancels the ongoing sequential
-    // download. Use a time-based guard: if download started recently (<10s),
-    // trust that TDLib is still producing data even if isDownloadingActive
-    // is momentarily false.
-    final recentDownload = _getOrCreateState(
-      fileId,
-    ).isRecentDownload(const Duration(seconds: 10));
-    final atFrontier =
-        distanceFromFrontier >= 0 && distanceFromFrontier < frontierProximity;
-
-    if (!forceRestart && atFrontier && (isDownloading || recentDownload)) {
-      // Current download will reach our offset soon, don't restart
-      return;
-    }
-
-    // Check if already targeting this offset
-    // CRITICAL STALL FIX: Only return if download is ACTUALLY active in TDLib.
-    // If we think we are downloading X, but TDLib stopped (isDownloadingActive=false),
-    // we MUST fall through to restart the download. Also bypass if forcing restart.
-    final isDownloadingCached = cached?.isDownloadingActive ?? false;
-    if (!forceRestart &&
-        currentActiveOffset == requestedOffset &&
-        isDownloadingCached) {
-      return;
-    }
-
-    // SMART MOOV ATOM DETECTION
-    // Instead of blocking all requests near end of file, distinguish:
-    // 1. Actual moov atom requests (metadata, no sample table entry)
-    // 2. Legitimate seeks to end of video (has sample table entry)
-    // variable 'totalSize' is already defined above, reuse it or use cached?.totalSize
-    final fileSize = cached?.totalSize ?? 0;
-    if (fileSize > 0) {
-      final distanceFromEnd = fileSize - requestedOffset;
-
-      // Use percentage-based threshold for large files
-      // For 2GB file: 0.5% = 10MB, for 500MB file: 0.5% = 2.5MB
-      final moovThresholdBytes = ProxyConfig.scaled(
-        fileSize,
-        ProxyConfig.moovRegionThresholdPercent,
-        ProxyConfig.moovRegionMinBytes,
-        ProxyConfig.moovRegionMaxBytes,
-      );
-
-      final mightBeMoovRequest = distanceFromEnd < moovThresholdBytes;
-
-      // PHASE 4: If we have sample table, check if this offset is video data
-      // If it's valid video data, it's NOT a moov request
-      final sampleTable = _sampleTableCache[fileId];
-      bool isConfirmedVideoData = false;
-      if (sampleTable != null && sampleTable.samples.isNotEmpty) {
-        // Check if requestedOffset falls within known sample ranges
-        final lastSample = sampleTable.samples.last;
-        final lastVideoByteOffset = lastSample.byteOffset + lastSample.size;
-        isConfirmedVideoData = requestedOffset < lastVideoByteOffset;
-
-        if (mightBeMoovRequest && isConfirmedVideoData) {
-          // This looks like moov position but sample table says it's video data
-          // This is a legitimate seek to end of video, allow it!
-          _debugLog(
-            'Proxy: Offset $requestedOffset is near end but confirmed as video data '
-            '(last sample ends at $lastVideoByteOffset)',
-          );
-        }
-      }
-
-      // PHASE2: SIMPLIFIED MOOV DETECTION
-      // Only mark file as moov-at-end for informational purposes
-      // No blocking or stabilization - let TDLib and player handle naturally
-      final isMoovAtomRequest = mightBeMoovRequest && !isConfirmedVideoData;
-
-      if (isMoovAtomRequest && !_getOrCreateState(fileId).isMoovAtEnd) {
-        _getOrCreateState(fileId).isMoovAtEnd = true;
-        _debugLog(
-          'Proxy: File $fileId has moov atom at end (not optimized for streaming)',
-        );
-      }
-    }
+    _detectMoovAtEnd(fileId, requestedOffset, cached?.totalSize ?? 0);
 
     final now = DateTime.now();
-
-    // Calculate distance to CURRENT download offset
-    final activeDownloadTarget =
-        _getOrCreateState(fileId).activeDownloadOffset ?? 0;
+    final activeDownloadTarget = currentActiveOffset ?? 0;
     final distanceFromCurrent = (requestedOffset - activeDownloadTarget).abs();
-
-    // Calculate distance to primary offset for priority calculation
     final primaryOffset = _getOrCreateState(fileId).primaryPlaybackOffset ?? 0;
     final distanceToPlayback = (requestedOffset - primaryOffset).abs();
 
-    // NOTE: POST-SEEK BLOCK has been DISABLED after testing showed it was
-    // blocking legitimate resume requests and causing videos to not start.
-    // The general cooldown (500-1000ms) and distance threshold (2-5MB) provide
-    // sufficient protection against rapid offset changes.
-
-    // Determine if this is a Seek Request (jump > 1MB from last served offset).
-    // Merge with the parameter from the caller: either explicit caller signal
-    // (from _handleRequest seek detection) OR local heuristic detects a jump.
-    // We shadow-assign to a new local that combines both signals.
-    bool effectiveSeekRequest = isSeekRequest;
-    final lastServedForCheck = _getOrCreateState(fileId).lastServedOffset;
-    if (!effectiveSeekRequest && lastServedForCheck != null) {
-      final jump = (requestedOffset - lastServedForCheck).abs();
-      if (jump > localSeekThreshold) {
-        effectiveSeekRequest = true;
-      }
+    bool effectiveSeekRequest = isSeekRequest ||
+        _detectLocalSeek(fileId, requestedOffset, localSeekThreshold);
+    if (_isCooldownBlocked(fileId, requestedOffset, cached, activeDownloadTarget,
+        distanceFromCurrent, sequentialWindow, now, isBlocking: isBlocking)) {
+      return;
     }
 
-    // PARTSMANAGER FIX: Increased cooldown to prevent TDLib crashes
-    // TDLib's PartsManager can crash if offset changes happen too rapidly
+    final isMoovDownload = _isMoovDownloadRequest(fileId, requestedOffset, totalSize);
+    final shouldForcePriority = _evaluateBlockingPriority(
+        fileId, requestedOffset, totalSize, primaryOffset,
+        isMoovDownload, isBlocking);
+
+    final priority = _resolvePriority(
+        fileId, requestedOffset, totalSize, primaryOffset,
+        distanceToPlayback, shouldForcePriority, isMoovDownload);
+
+    if (_isDisplacementBlocked(fileId, requestedOffset, priority,
+        activeDownloadTarget, sequentialWindow, now,
+        isBlocking: isBlocking, forceRestart: forceRestart,
+        isSeekRequest: effectiveSeekRequest)) {
+      return;
+    }
+
+    await _executeDownload(fileId, requestedOffset, priority, isMoovDownload,
+        forceRestart: forceRestart);
+  }
+
+  // ============================================================
+  // PRIORITY & EXECUTION helpers for _startDownloadAtOffset
+  // ============================================================
+
+  bool _detectLocalSeek(int fileId, int requestedOffset, int localSeekThreshold) {
+    final lastServed = _getOrCreateState(fileId).lastServedOffset;
+    if (lastServed == null) return false;
+    return (requestedOffset - lastServed).abs() > localSeekThreshold;
+  }
+
+  bool _isCooldownBlocked(
+    int fileId,
+    int requestedOffset,
+    ProxyFileInfo? cached,
+    int activeDownloadTarget,
+    int distanceFromCurrent,
+    int sequentialWindow,
+    DateTime now, {
+    required bool isBlocking,
+  }) {
     final lastChange = _getOrCreateState(fileId).lastOffsetChangeTime;
+    if (lastChange == null) return false;
+
     final isSequentialRead =
         requestedOffset > activeDownloadTarget &&
-        distanceFromCurrent < sequentialWindow; // Within sequential window
+        distanceFromCurrent < sequentialWindow;
 
-    // PHASE1 OPTIMIZATION: Reduced cooldown for faster seek response
-    // TDLib handles rapid changes better than previously assumed
     final cooldownMs = isSequentialRead
         ? ProxyConfig.cooldownSequentialMs
         : ProxyConfig.cooldownNonSequentialMs;
+    final minDistance = isSequentialRead
+        ? ProxyConfig.minDistanceSequentialBytes
+        : ProxyConfig.minDistanceNonSequentialBytes;
 
-    if (lastChange != null) {
-      final timeSinceLastChange = now.difference(lastChange).inMilliseconds;
-      // PHASE1 OPTIMIZATION: Reduced distance threshold for more responsive seeks
-      final minDistance = isSequentialRead
-          ? ProxyConfig.minDistanceSequentialBytes
-          : ProxyConfig.minDistanceNonSequentialBytes;
+    final timeSinceLastChange = now.difference(lastChange).inMilliseconds;
 
-      // DEADLOCK PREVENTION:
-      // If we think we are downloading at offset X, but cache says we are inactive
-      // or at a totally different offset (e.g. Moov), then our "active" status is phantom.
-      // We should not let this phantom status block new requests.
-      bool isEffectiveActive = true;
-      if (timeSinceLastChange > ProxyConfig.deadlockCheckMs) {
-        // Only check after 1s to allow initial setup
-        if (cached == null ||
-            (!cached.isDownloadingActive && !cached.isCompleted)) {
-          // Not active according to TDLib (and not complete) triggers reset
-          isEffectiveActive = false;
-        } else if ((cached.downloadOffset - activeDownloadTarget).abs() >
-            sequentialWindow) {
-          // TDLib is downloading something completely different (>2MB away)
-          isEffectiveActive = false;
-        }
-      }
-
-      // Only apply blocking logic if the active download is effectively real
-      // EXCEPTION: If isBlocking is true (player starving), we MUST recover immediately
-      if (!isBlocking &&
-          isEffectiveActive &&
-          (timeSinceLastChange < cooldownMs ||
-              distanceFromCurrent < minDistance)) {
-        return; // Too soon or too close
+    bool isEffectiveActive = true;
+    if (timeSinceLastChange > ProxyConfig.deadlockCheckMs) {
+      if (cached == null ||
+          (!cached.isDownloadingActive && !cached.isCompleted)) {
+        isEffectiveActive = false;
+      } else if ((cached.downloadOffset - activeDownloadTarget).abs() >
+          sequentialWindow) {
+        isEffectiveActive = false;
       }
     }
 
-    // PHASE2: MOOV DOWNLOAD LOCK REMOVED
-    // The lock was blocking video data requests and causing stalls.
-    // TDLib handles priority naturally - let it manage MOOV vs video data.
-    final isMoovDownload =
-        _getOrCreateState(fileId).isMoovAtEnd &&
+    return !isBlocking &&
+        isEffectiveActive &&
+        (timeSinceLastChange < cooldownMs ||
+            distanceFromCurrent < minDistance);
+  }
+
+  bool _isMoovDownloadRequest(int fileId, int requestedOffset, int totalSize) {
+    return _getOrCreateState(fileId).isMoovAtEnd &&
         totalSize > 0 &&
         (totalSize - requestedOffset) <
             (totalSize * ProxyConfig.moovDownloadThresholdPercent)
@@ -2964,106 +2637,84 @@ class LocalStreamingProxy {
                   ProxyConfig.moovRegionMinBytes,
                   ProxyConfig.moovDownloadRegionMaxBytes,
                 );
+  }
 
-    // TELEGRAM ANDROID-INSPIRED: Calculate dynamic priority based on distance
-    // to primary playback position. Closer = higher priority.
-    // FORCE PRIORITY 32 for Moov downloads AND Blocking waits.
-    // EXCEPTION: If "Blocking" request is extremely far (>50MB) from Primary Playback,
-    // it's likely a stalled zombie stream. IGNORE the blocking flag to prevent hijacking.
-    bool shouldForcePriority = isMoovDownload;
-    if (isBlocking) {
-      final primary = _getOrCreateState(fileId).primaryPlaybackOffset;
-      // Trust blocking if:
-      // 1. No primary set yet (start of playback)
-      // 2. Explicit Moov request (End of File)
-      // 3. We are close to primary (<50MB)
-      // 4. We are sequentially ahead of primary (normal playback)
-      // 5. NEW: Request is at cache edge (resume scenarios)
-      if (primary == null || isMoovDownload) {
-        shouldForcePriority = true;
-      } else {
-        final dist = requestedOffset - primary;
-        // Scaled thresholds for priority allow rules
-        // 70MB: forward=56MB(80%), backward=35MB(50%), early=35MB(50%)
-        // 500MB+: forward=500MB, backward=100MB, early=300MB (sin cambio)
-        final maxForwardBuffer = ProxyConfig.scaled(
-          totalSize,
-          ProxyConfig.maxForwardBufferPercent,
-          ProxyConfig.maxForwardBufferMinBytes,
-          ProxyConfig.maxForwardBufferMaxBytes,
+  bool _evaluateBlockingPriority(
+    int fileId,
+    int requestedOffset,
+    int totalSize,
+    int primaryOffset,
+    bool isMoovDownload,
+    bool isBlocking,
+  ) {
+    if (!isBlocking) return isMoovDownload;
+
+    final primary = _getOrCreateState(fileId).primaryPlaybackOffset;
+    if (primary == null || isMoovDownload) return true;
+
+    final dist = requestedOffset - primary;
+    final maxForwardBuffer = ProxyConfig.scaled(
+      totalSize,
+      ProxyConfig.maxForwardBufferPercent,
+      ProxyConfig.maxForwardBufferMinBytes,
+      ProxyConfig.maxForwardBufferMaxBytes,
+    );
+    final maxBackwardOverlap = ProxyConfig.scaled(
+      totalSize,
+      ProxyConfig.maxBackwardOverlapPercent,
+      ProxyConfig.maxBackwardOverlapMinBytes,
+      ProxyConfig.maxBackwardOverlapMaxBytes,
+    );
+    final earlyFileThreshold = ProxyConfig.scaled(
+      totalSize,
+      ProxyConfig.earlyFileThresholdPercent,
+      ProxyConfig.earlyFileThresholdMinBytes,
+      ProxyConfig.earlyFileThresholdMaxBytes,
+    );
+    final cacheEdgeProximity = ProxyConfig.scaled(
+      totalSize,
+      ProxyConfig.cacheEdgeProximityPercent,
+      ProxyConfig.cacheEdgeProximityMinBytes,
+      ProxyConfig.cacheEdgeProximityMaxBytes,
+    );
+
+    if (dist >= 0 && dist < maxForwardBuffer) return true;
+    if (dist < 0 && dist.abs() < maxBackwardOverlap) return true;
+
+    final cached = _filePaths[fileId];
+    if (cached != null) {
+      final cacheEnd = cached.downloadOffset + cached.downloadedPrefixSize;
+      final distToCacheEnd = (requestedOffset - cacheEnd).abs();
+      if (distToCacheEnd < cacheEdgeProximity) {
+        _logTrace(
+          'CACHE EDGE ALLOWED for $requestedOffset (CacheEnd: $cacheEnd, Dist: ${distToCacheEnd ~/ 1024}KB)',
+          fileId: fileId,
         );
-        final maxBackwardOverlap = ProxyConfig.scaled(
-          totalSize,
-          ProxyConfig.maxBackwardOverlapPercent,
-          ProxyConfig.maxBackwardOverlapMinBytes,
-          ProxyConfig.maxBackwardOverlapMaxBytes,
+        return true;
+      }
+      if (requestedOffset < earlyFileThreshold) {
+        _debugLog(
+          'Proxy: LOW OFFSET ALLOWED for $requestedOffset (early file data)',
         );
-        final earlyFileThreshold = ProxyConfig.scaled(
-          totalSize,
-          ProxyConfig.earlyFileThresholdPercent,
-          ProxyConfig.earlyFileThresholdMinBytes,
-          ProxyConfig.earlyFileThresholdMaxBytes,
-        );
-        final cacheEdgeProximity = ProxyConfig.scaled(
-          totalSize,
-          ProxyConfig.cacheEdgeProximityPercent,
-          ProxyConfig.cacheEdgeProximityMinBytes,
-          ProxyConfig.cacheEdgeProximityMaxBytes,
-        );
-        if (dist >= 0 && dist < maxForwardBuffer) {
-          shouldForcePriority = true; // Normal forward playback buffer
-        } else if (dist < 0 && dist.abs() < maxBackwardOverlap) {
-          // Resume playback scenarios need to load data from cached position
-          // to resume position, which can be quite far behind Primary.
-          shouldForcePriority = true; // Allow reasonable overlap behind
-        } else {
-          // CACHE EDGE DETECTION:
-          // If the request is near the edge of what's already downloaded,
-          // this is likely a legitimate request to continue buffering
-          // in a resume scenario. Allow it.
-          final cached = _filePaths[fileId];
-          if (cached != null) {
-            final cacheEnd =
-                cached.downloadOffset + cached.downloadedPrefixSize;
-            final distToCacheEnd = (requestedOffset - cacheEnd).abs();
-            if (distToCacheEnd < cacheEdgeProximity) {
-              // Request is near cache edge - this is buffering continuation
-              _logTrace(
-                'CACHE EDGE ALLOWED for $requestedOffset (CacheEnd: $cacheEnd, Dist: ${distToCacheEnd ~/ 1024}KB)',
-                fileId: fileId,
-              );
-              shouldForcePriority = true;
-            } else if (requestedOffset < earlyFileThreshold) {
-              // If request is for early part of file, it's likely trying
-              // to buffer contiguous data from the start. Allow it.
-              _debugLog(
-                'Proxy: LOW OFFSET ALLOWED for $requestedOffset (early file data)',
-              );
-              shouldForcePriority = true;
-            } else {
-              _debugLog(
-                'Proxy: DENIED Blocking Priority for $requestedOffset (Primary: $primary, Dist: ${dist ~/ 1024}KB). Treated as background.',
-              );
-              shouldForcePriority = false;
-            }
-          } else {
-            _debugLog(
-              'Proxy: DENIED Blocking Priority for $requestedOffset (Primary: $primary, Dist: ${dist ~/ 1024}KB). Treated as background.',
-            );
-            shouldForcePriority = false;
-          }
-        }
+        return true;
       }
     }
 
-    // PRIORITY HIERARCHY FIX:
-    // Split Blocking Priority into "Critical" and "Deep Buffering".
-    // This prevents a "Deep Buffer" request (e.g. 500MB ahead) from displacing an
-    // "Immediate Playback" request (e.g. 1MB ahead), which is also Critical.
-    // They used to fight and cancel each other. Now Critical wins.
-    //
-    // EXCEPTION: Low-offset requests (<150MB) always get critical priority because
-    // they represent contiguous cache data needed for playback.
+    _debugLog(
+      'Proxy: DENIED Blocking Priority for $requestedOffset (Primary: $primary, Dist: ${dist ~/ 1024}KB). Treated as background.',
+    );
+    return false;
+  }
+
+  int _resolvePriority(
+    int fileId,
+    int requestedOffset,
+    int totalSize,
+    int primaryOffset,
+    int distanceToPlayback,
+    bool shouldForcePriority,
+    bool isMoovDownload,
+  ) {
     int blockingPriority = DownloadPriority.critical;
     if (shouldForcePriority) {
       final distToPrimary = (requestedOffset - primaryOffset).abs();
@@ -3072,8 +2723,7 @@ class LocalStreamingProxy {
       if (distToPrimary > DownloadPriority.closestToPrimaryBytes &&
           !isMoovDownload &&
           !isLowOffsetRequest) {
-        blockingPriority = DownloadPriority
-            .deepBuffer; // Urgent, but interruptible by Critical
+        blockingPriority = DownloadPriority.deepBuffer;
       }
     }
 
@@ -3081,94 +2731,73 @@ class LocalStreamingProxy {
         ? blockingPriority
         : _calculateDynamicPriority(distanceToPlayback);
 
-    // LOW OFFSET PRIORITY FLOOR:
-    // Ensure requests for early file data (<300MB) get at least highFloor priority.
-    // BUT: To prevent ping-pong, only give CRITICAL priority to the request
-    // that is closest to the primary playback offset. Other low-offset requests
-    // get highFloor (high enough to interrupt background, but can be superseded
-    // by the truly critical request).
     final isLowOffsetRequest =
         requestedOffset < DownloadPriority.lowOffsetThresholdBytes;
     final distToPrimaryForFloor = (requestedOffset - primaryOffset).abs();
     final isClosestToPrimary =
         distToPrimaryForFloor < DownloadPriority.closestToPrimaryBytes;
 
-    int priority;
-    if (isLowOffsetRequest) {
-      // Simplified LOW OFFSET priority logic
-      // Use active download priority instead of removed lock mechanism
-      final hasActiveHighPriority =
-          _getOrCreateState(fileId).activePriority >=
-          DownloadPriority.deepBuffer;
+    if (!isLowOffsetRequest) return calculatedPriority;
 
-      if (hasActiveHighPriority) {
-        // When there's an active high-priority download, cap LOW OFFSET at highFloor
-        priority = (calculatedPriority > DownloadPriority.highFloor)
-            ? DownloadPriority.highFloor
-            : calculatedPriority;
-      } else if (calculatedPriority < DownloadPriority.highFloor) {
-        // Apply floor, but differentiate between closest-to-primary and others
-        priority = isClosestToPrimary
-            ? DownloadPriority.critical
-            : DownloadPriority.highFloor;
-      } else {
-        priority = calculatedPriority;
-      }
-    } else {
-      priority = calculatedPriority;
+    final hasActiveHighPriority =
+        _getOrCreateState(fileId).activePriority >= DownloadPriority.deepBuffer;
+
+    if (hasActiveHighPriority) {
+      return (calculatedPriority > DownloadPriority.highFloor)
+          ? DownloadPriority.highFloor
+          : calculatedPriority;
     }
+    if (calculatedPriority < DownloadPriority.highFloor) {
+      return isClosestToPrimary
+          ? DownloadPriority.critical
+          : DownloadPriority.highFloor;
+    }
+    return calculatedPriority;
+  }
 
-    // SAME-FILE DISPLACEMENT PROTECTION:
-    // TDLib cancels the current download for File X if a new request comes for File X.
-    // We must prevent a Low Priority request (e.g. background preload) from killing
-    // a High Priority Active Download (e.g. user watching video).
+  bool _isDisplacementBlocked(
+    int fileId,
+    int requestedOffset,
+    int priority,
+    int activeDownloadTarget,
+    int sequentialWindow,
+    DateTime now, {
+    required bool isBlocking,
+    required bool forceRestart,
+    required bool isSeekRequest,
+  }) {
     final activePriority = _getOrCreateState(fileId).activePriority;
     final isHighPriorityActive = activePriority >= DownloadPriority.highFloor;
 
-    // SIMPLIFIED SEEK DEBOUNCE
-    // Always allow seek requests through immediately - the player knows best where it needs data
     final lastStart = _getOrCreateState(fileId).lastOffsetChangeTime;
     if (lastStart != null &&
         now.difference(lastStart).inMilliseconds <
             ProxyConfig.rapidSwitchDebounceMs &&
         !isBlocking &&
-        !effectiveSeekRequest) {
+        !isSeekRequest) {
       final activeOffset = _getOrCreateState(fileId).activeDownloadOffset ?? -1;
-      // Allow if sequential (reading forward within 2MB)
-      if (requestedOffset >= activeOffset &&
-          requestedOffset < activeOffset + sequentialWindow) {
-        // Sequential: Allowed
-      } else {
+      if (!(requestedOffset >= activeOffset &&
+          requestedOffset < activeOffset + sequentialWindow)) {
         _debugLog(
           'Proxy: DEBOUNCED rapid switch from $activeOffset to $requestedOffset. Ignoring.',
         );
-        return;
+        return true;
       }
     }
 
-    // PHASE4: Zombie blacklist checking removed\n    // Was already disabled in Phase 1 and state variables removed
-
-    // PHASE3: HIGH-PRIORITY DOWNLOAD LOCK REMOVED
-    // The lock was causing stalls by blocking requests after seeks.
-    // Simple distance-based protection is sufficient.
-
-    // PHASE3: Simplified priority protection
-    // Only block if priority is significantly lower AND not blocking
-    // CRITICAL FIX: Never block low-offset requests (needed for MOOV/playback start)
     final isLowOffsetRequestForProtection =
         requestedOffset < DownloadPriority.lowOffsetThresholdBytes;
     if (!isBlocking &&
         !forceRestart &&
-        !isLowOffsetRequestForProtection && // NEVER block initial file data
+        !isLowOffsetRequestForProtection &&
         isHighPriorityActive &&
         priority < activePriority - DownloadPriority.priorityProtectionGap &&
         (requestedOffset - activeDownloadTarget).abs() >
             DownloadPriority.cacheEdgeDistanceBytes) {
-      // Throttled log: only print every 5 seconds per file to reduce CPU overhead
-      final now = DateTime.now();
+      final throttleNow = DateTime.now();
       final lastLog = _lastProtectedLogTime[fileId];
-      if (lastLog == null || now.difference(lastLog) >= _protectedLogThrottle) {
-        _lastProtectedLogTime[fileId] = now;
+      if (lastLog == null || throttleNow.difference(lastLog) >= _protectedLogThrottle) {
+        _lastProtectedLogTime[fileId] = throttleNow;
         _logWarning(
           'PROTECTED active download from lower-priority request',
           fileId: fileId,
@@ -3179,10 +2808,19 @@ class LocalStreamingProxy {
           },
         );
       }
-      return;
+      return true;
     }
 
-    // Start download at exactly the offset the player requested
+    return false;
+  }
+
+  Future<void> _executeDownload(
+    int fileId,
+    int requestedOffset,
+    int priority,
+    bool isMoovDownload, {
+    required bool forceRestart,
+  }) async {
     _logTrace(
       'Downloading from offset $requestedOffset for $fileId '
       '(priority: $priority, limit: unlimited)',
@@ -3191,28 +2829,13 @@ class LocalStreamingProxy {
 
     final state = _getOrCreateState(fileId);
     state.activeDownloadOffset = requestedOffset;
-    state.activePriority = priority; // Track priority
-    state.lastOffsetChangeTime = now;
-    state.downloadStartTime = now; // Track for stall cooldown protection
+    state.activePriority = priority;
+    state.lastOffsetChangeTime = DateTime.now();
+    state.downloadStartTime = DateTime.now();
+    state.lastDownloadFileCallTime = DateTime.now();
 
-    // PHASE3: HIGH-PRIORITY LOCK ACQUISITION REMOVED
-    // No longer tracking locks - TDLib handles priority naturally
-
-    // PARTSMANAGER FIX: Use synchronous mode for moov atom downloads
-    // This prevents parallel range conflicts that cause PartsManager crashes
-
-    // Use limit=0 (unlimited) so TDLib downloads continuously from offset
-    // to EOF. A finite limit causes stop-start patterns (TDLib stops every
-    // N bytes, proxy must re-request) and premature cancellation of MOOV
-    // downloads when new requests arrive for other offsets.
     const int downloadLimit = 0;
 
-    // Record call time for rate limiter before sending
-    _getOrCreateState(fileId).lastDownloadFileCallTime = DateTime.now();
-
-    // FORCE RESTART FIX: If TDLib is stuck but still considers the file
-    // actively downloading, sending a duplicate downloadFile command is a NO-OP.
-    // We must forcibly cancel the active download first to genuinely restart it.
     if (forceRestart) {
       _logTrace(
         'Processing force restart for $fileId: sending cancelDownloadFile first',
@@ -3223,13 +2846,10 @@ class LocalStreamingProxy {
         'file_id': fileId,
         'only_if_pending': false,
       });
-      // Retardo configurable para que TDLib procese la cancelación vía FFI.
-      // 50ms era insuficiente en Windows; 200ms da margen al message queue.
       await Future.delayed(
         const Duration(milliseconds: ProxyConfig.cancelToDownloadDelayMs),
       );
 
-      // Verificar si la cancelación fue procesada; si no, reintentar
       final cachedAfterCancel = _filePaths[fileId];
       if (cachedAfterCancel != null && cachedAfterCancel.isDownloadingActive) {
         _logTrace(
@@ -3254,7 +2874,6 @@ class LocalStreamingProxy {
       'priority': priority,
       'offset': requestedOffset,
       'limit': downloadLimit,
-      // Use synchronous mode for moov downloads to prevent PartsManager crashes
       'synchronous': isMoovDownload,
     });
   }
@@ -3268,6 +2887,280 @@ class LocalStreamingProxy {
   /// - 1-10: Low (>10MB ahead)
   int _calculateDynamicPriority(int distanceBytes) {
     return DownloadPriority.fromDistance(distanceBytes);
+  }
+
+  // ============================================================
+  // GUARD CLAUSES for _startDownloadAtOffset
+  // ============================================================
+
+  bool _isFileComplete(ProxyFileInfo? cached) {
+    return cached != null && cached.isCompleted;
+  }
+
+  bool _isEofRequest(int requestedOffset, ProxyFileInfo? cached) {
+    final totalSize = cached?.totalSize ?? 0;
+    return totalSize > 0 && requestedOffset >= totalSize;
+  }
+
+  bool _isStaleSeekGeneration(int? seekGeneration, int fileId) {
+    return seekGeneration != null &&
+        seekGeneration != (_seekGeneration[fileId] ?? 0);
+  }
+
+  int _computeLocalSeekThreshold(int totalSize) {
+    return ProxyConfig.scaled(
+      totalSize,
+      ProxyConfig.seekDetectionThresholdPercent,
+      ProxyConfig.seekDetectionMinBytes,
+      ProxyConfig.seekDetectionMaxBytes,
+    );
+  }
+
+  int _computeSequentialWindow(int totalSize) {
+    return ProxyConfig.scaled(
+      totalSize,
+      ProxyConfig.sequentialReadThresholdPercent,
+      ProxyConfig.sequentialReadMinBytes,
+      ProxyConfig.sequentialReadMaxBytes,
+    );
+  }
+
+  /// Handles the forced MOOV download lifecycle: release when complete,
+  /// timeout after no progress, or block non-MOOV requests while loading.
+  ///
+  /// Returns `true` if the request was handled (caller should return),
+  /// `false` if the caller should proceed with normal download logic.
+  Future<bool> _handleForcedMoov(
+    int fileId,
+    int requestedOffset,
+    ProxyFileInfo? cached,
+  ) async {
+    final forcedOffset = _getOrCreateState(fileId).forcedMoovOffset;
+    if (forcedOffset == null) return false;
+
+    final availableAtForced = await _getDownloadedPrefixSize(fileId, forcedOffset);
+    final totalSize = cached?.totalSize ?? 0;
+    final neededSize = totalSize > forcedOffset ? totalSize - forcedOffset : 0;
+
+    final targetSize = neededSize > 0
+        ? min(neededSize, ProxyConfig.moovDownloadMaxBytes)
+        : ProxyConfig.scaled(
+            totalSize,
+            ProxyConfig.moovPreloadThresholdPercent,
+            ProxyConfig.moovPreloadMinBytes,
+            ProxyConfig.moovPreloadMaxBytes,
+          );
+
+    if (availableAtForced >= targetSize) {
+      _debugLog(
+        'Proxy: Forced moov download satisfied ($availableAtForced bytes >= $targetSize), releasing lock for $fileId',
+      );
+      _getOrCreateState(fileId).forcedMoovOffset = null;
+      _getOrCreateState(fileId).activePriority = 0;
+
+      if (!_abortedRequests.contains(fileId)) {
+        final primaryOffset =
+            _getOrCreateState(fileId).primaryPlaybackOffset ?? 0;
+        _debugLog(
+          'Proxy: POST-MOOV resuming download from offset $primaryOffset for $fileId',
+        );
+        _getOrCreateState(fileId).activeDownloadOffset = primaryOffset;
+        _getOrCreateState(fileId).lastOffsetChangeTime = DateTime.now();
+        _tdlib.send({
+          '@type': 'downloadFile',
+          'file_id': fileId,
+          'priority': DownloadPriority.critical,
+          'offset': primaryOffset,
+          'limit': 0,
+          'synchronous': false,
+        });
+      }
+      return false;
+    }
+
+    if (requestedOffset != forcedOffset) {
+      final moovState = _getOrCreateState(fileId);
+      final moovStartTime = moovState.forcedMoovStartTime;
+      if (moovStartTime != null) {
+        final moovElapsed = DateTime.now().difference(moovStartTime);
+        if (availableAtForced > moovState.forcedMoovLastProgress) {
+          moovState.forcedMoovStartTime = DateTime.now();
+          moovState.forcedMoovLastProgress = availableAtForced;
+        } else if (moovElapsed.inSeconds >= ProxyConfig.moovDownloadTimeoutSeconds) {
+          _logError(
+            'MOOV DOWNLOAD TIMEOUT for $fileId: no progress for ${moovElapsed.inSeconds}s '
+            '(have $availableAtForced/$targetSize bytes at offset $forcedOffset). '
+            'File appears damaged — blocking further requests.',
+            fileId: fileId,
+          );
+          moovState.forcedMoovOffset = null;
+          moovState.forcedMoovStartTime = null;
+          moovState.forcedMoovLastProgress = 0;
+          final error = StreamingError.corruptFile(fileId);
+          _notifyErrorIfNew(fileId, error);
+          _abortedRequests.add(fileId);
+          final waiters = _byteAvailabilityWaiters.remove(fileId);
+          if (waiters != null) {
+            for (final entry in waiters) {
+              if (!entry.value.isCompleted) entry.value.complete();
+            }
+          }
+          return true;
+        }
+      }
+      final moovLogNow = DateTime.now();
+      final lastMoovLog = _lastMoovIgnoreLogTime[fileId];
+      if (lastMoovLog == null ||
+          moovLogNow.difference(lastMoovLog) >= _waitingLogThrottle) {
+        _lastMoovIgnoreLogTime[fileId] = moovLogNow;
+        _debugLog(
+          'Proxy: Ignoring request for $requestedOffset while forcing moov download at $forcedOffset for $fileId (have $availableAtForced/$targetSize)',
+        );
+      }
+      return true;
+    }
+
+    return false;
+  }
+
+  bool _isScrubbingDebounced(int fileId, int requestedOffset, int totalSize) {
+    final lastServed = _getOrCreateState(fileId).lastServedOffset ?? 0;
+    final isActivePlayback =
+        lastServed >
+        ProxyConfig.scaled(
+          totalSize,
+          ProxyConfig.activePlaybackThresholdPercent,
+          ProxyConfig.activePlaybackMinBytes,
+          ProxyConfig.activePlaybackMaxBytes,
+        );
+
+    if (isActivePlayback && _pendingSeekOffsets.containsKey(fileId)) {
+      _handleDebouncedSeek(fileId, requestedOffset);
+      return true;
+    }
+
+    final debounceLastSeek = _getOrCreateState(fileId).lastSeekTime;
+    final isRapidSeek =
+        isActivePlayback &&
+        debounceLastSeek != null &&
+        DateTime.now().difference(debounceLastSeek).inMilliseconds <
+            ProxyConfig.seekDebounceMs;
+
+    if (isRapidSeek) {
+      _logTrace(
+        'Rapid seek detected for $fileId, debouncing to ${requestedOffset ~/ 1024}KB',
+        fileId: fileId,
+      );
+      _handleDebouncedSeek(fileId, requestedOffset);
+      return true;
+    }
+
+    return false;
+  }
+
+  Future<bool> _isDataAvailableNow(int fileId, int requestedOffset) async {
+    final availableAtOffset = await _getDownloadedPrefixSize(
+      fileId,
+      requestedOffset,
+    );
+    return availableAtOffset > 0;
+  }
+
+  bool _isRateLimited(
+    int fileId, {
+    required bool isBlocking,
+    required bool forceRestart,
+    required bool isSeekRequest,
+  }) {
+    final fs = _getOrCreateState(fileId);
+    final lastCall = fs.lastDownloadFileCallTime;
+    if (lastCall != null && !isBlocking && !forceRestart && !isSeekRequest) {
+      final elapsed = DateTime.now().difference(lastCall).inMilliseconds;
+      if (elapsed < ProxyConfig.minDownloadCallIntervalMs) {
+        _logTrace(
+          'Rate limited downloadFile for $fileId '
+          '(${elapsed}ms since last call)',
+          fileId: fileId,
+        );
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool _isAtFrontier(
+    int fileId,
+    int requestedOffset,
+    int currentDownloadOffset,
+    int currentPrefix,
+    int totalSize, {
+    required bool forceRestart,
+  }) {
+    final downloadFrontier = currentDownloadOffset + currentPrefix;
+    final distanceFromFrontier = requestedOffset - downloadFrontier;
+    final isDownloading = _filePaths[fileId]?.isDownloadingActive ?? false;
+    final frontierProximity = ProxyConfig.scaled(
+      totalSize,
+      ProxyConfig.frontierProximityThresholdPercent,
+      ProxyConfig.frontierProximityMinBytes,
+      ProxyConfig.frontierProximityMaxBytes,
+    );
+    final recentDownload = _getOrCreateState(
+      fileId,
+    ).isRecentDownload(const Duration(seconds: 10));
+    final atFrontier =
+        distanceFromFrontier >= 0 && distanceFromFrontier < frontierProximity;
+
+    return !forceRestart && atFrontier && (isDownloading || recentDownload);
+  }
+
+  bool _isAlreadyTargeting(
+    int fileId,
+    int requestedOffset,
+    ProxyFileInfo? cached, {
+    int? currentActiveOffset,
+    required bool forceRestart,
+  }) {
+    final isDownloadingCached = cached?.isDownloadingActive ?? false;
+    return !forceRestart &&
+        currentActiveOffset == requestedOffset &&
+        isDownloadingCached;
+  }
+
+  void _detectMoovAtEnd(int fileId, int requestedOffset, int fileSize) {
+    if (fileSize <= 0) return;
+    final distanceFromEnd = fileSize - requestedOffset;
+    final moovThresholdBytes = ProxyConfig.scaled(
+      fileSize,
+      ProxyConfig.moovRegionThresholdPercent,
+      ProxyConfig.moovRegionMinBytes,
+      ProxyConfig.moovRegionMaxBytes,
+    );
+
+    final mightBeMoovRequest = distanceFromEnd < moovThresholdBytes;
+
+    final sampleTable = _sampleTableCache[fileId];
+    bool isConfirmedVideoData = false;
+    if (sampleTable != null && sampleTable.samples.isNotEmpty) {
+      final lastSample = sampleTable.samples.last;
+      final lastVideoByteOffset = lastSample.byteOffset + lastSample.size;
+      isConfirmedVideoData = requestedOffset < lastVideoByteOffset;
+
+      if (mightBeMoovRequest && isConfirmedVideoData) {
+        _debugLog(
+          'Proxy: Offset $requestedOffset is near end but confirmed as video data '
+          '(last sample ends at $lastVideoByteOffset)',
+        );
+      }
+    }
+
+    final isMoovAtomRequest = mightBeMoovRequest && !isConfirmedVideoData;
+    if (isMoovAtomRequest && !_getOrCreateState(fileId).isMoovAtEnd) {
+      _getOrCreateState(fileId).isMoovAtEnd = true;
+      _debugLog(
+        'Proxy: File $fileId has moov atom at end (not optimized for streaming)',
+      );
+    }
   }
 
   // NOTE: Read-ahead feature was removed because TDLib cancels ongoing downloads
