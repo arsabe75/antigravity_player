@@ -1,8 +1,7 @@
 import 'dart:async';
 
-// ignore: unused_import
-import '../../domain/value_objects/loading_progress.dart';
-import '../../domain/value_objects/streaming_error.dart'; // Used in StreamingError
+import '../../domain/value_objects/loading_progress.dart' show FileLoadState, MoovPosition;
+import '../../domain/value_objects/streaming_error.dart';
 
 /// Consolidated state for a single file being proxied.
 ///
@@ -91,7 +90,6 @@ class ProxyFileState {
   bool isMoovAtEnd = false;
 
   /// Detected MOOV position
-  // ignore: unused_field
   MoovPosition? moovPosition;
 
   /// Exact byte offset where the MOOV atom starts, if known

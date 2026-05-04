@@ -79,8 +79,8 @@ void main() {
         expect(ProxyConfig.updateThrottleMs, equals(100));
       });
 
-      test('seekDebounceMs is 500', () {
-        expect(ProxyConfig.seekDebounceMs, equals(500));
+      test('seekDebounceMs is 150', () {
+        expect(ProxyConfig.seekDebounceMs, equals(150));
       });
 
       test('waitingLogThrottle is 2 seconds', () {

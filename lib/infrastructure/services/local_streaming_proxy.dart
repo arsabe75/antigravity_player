@@ -1113,6 +1113,7 @@ class LocalStreamingProxy {
     String? fileIdStr;
     int? fileId;
     int start = 0;
+    int? end;
     try {
       _logTrace('Received request for ${request.uri}');
 
@@ -1198,11 +1199,15 @@ class LocalStreamingProxy {
       // check so `start` has the correct offset value for eviction decisions.
       // Without this, `start` is always 0 and all connections appear to be at
       // offset 0, causing incorrect eviction choices and false flood detection.
+      // Also extracts `end` to avoid a second parse later.
       {
         final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
         if (rangeHeader != null) {
           final parts = rangeHeader.replaceFirst('bytes=', '').split('-');
           start = int.parse(parts[0]);
+          if (parts.length > 1 && parts[1].isNotEmpty) {
+            end = int.parse(parts[1]);
+          }
         }
       }
 
@@ -1402,18 +1407,6 @@ class LocalStreamingProxy {
           }
         }
 
-        // 1. Parse Range Header
-        final rangeHeader = request.headers.value(HttpHeaders.rangeHeader);
-        int? end;
-
-        if (rangeHeader != null) {
-          final parts = rangeHeader.replaceFirst('bytes=', '').split('-');
-          start = int.parse(parts[0]);
-          if (parts.length > 1 && parts[1].isNotEmpty) {
-            end = int.parse(parts[1]);
-          }
-        }
-
         // Register this HTTP request offset for cleanup on close
         _activeHttpRequestOffsets.putIfAbsent(fileId, () => {});
         _activeHttpRequestOffsets[fileId]!.add(start);
@@ -1513,9 +1506,6 @@ class LocalStreamingProxy {
               _getOrCreateState(fileId).lastSeekTime = DateTime.now();
             }
 
-            // CRITICAL FIX: When a seek is detected, reset the primary offset to the seek target
-            // This prevents the primary from getting stuck at 0 when seeking forward
-            // _primaryPlaybackOffset[fileId] = start; // MOVED BELOW for centralized logic
             _logTrace(
               'Detected seek for $fileId: $lastOffset -> $start (jump: ${jump ~/ 1024}KB)',
               fileId: fileId,
@@ -2049,8 +2039,6 @@ class LocalStreamingProxy {
                     allowedProgress += timeBasedAllowance;
                   }
 
-                  // If the new offset is within the allowed progress window, update it.
-                  // Otherwise, hold the Primary back (it lags behind buffer).
                   // If the new offset is within the allowed progress window, update it.
                   // Otherwise, hold the Primary back (it lags behind buffer).
                   if ((currentReadOffset - lastPrimary) <= allowedProgress) {
@@ -3210,7 +3198,7 @@ class LocalStreamingProxy {
 
     final calculatedPriority = shouldForcePriority
         ? blockingPriority
-        : _calculateDynamicPriority(fileId, distanceToPlayback);
+        : _calculateDynamicPriority(distanceToPlayback);
 
     // LOW OFFSET PRIORITY FLOOR:
     // Ensure requests for early file data (<300MB) get at least highFloor priority.
@@ -3255,13 +3243,6 @@ class LocalStreamingProxy {
     // a High Priority Active Download (e.g. user watching video).
     final activePriority = _getOrCreateState(fileId).activePriority;
     final isHighPriorityActive = activePriority >= DownloadPriority.highFloor;
-
-    // PHASE3: Removed STICKY PRIORITY PROTECTION - was too conservative\n    // The simplified distance-based protection below is sufficient
-    // VIRTUAL ACTIVE STATE LOGIC REMOVED:
-    // Previously tracked _lastActiveDownloadEndTime and _lastActiveDownloadOffset
-    // but those maps were never written to, making this dead code.
-    // The simplified cooldown system provides sufficient protection.
-    // Original zombie blacklist code and related variables removed.
 
     // SIMPLIFIED SEEK DEBOUNCE
     // Always allow seek requests through immediately - the player knows best where it needs data
@@ -3404,7 +3385,7 @@ class LocalStreamingProxy {
   /// - 32: Critical (0-1MB ahead)
   /// - 20-31: High (1-10MB ahead)
   /// - 1-10: Low (>10MB ahead)
-  int _calculateDynamicPriority(int fileId, int distanceBytes) {
+  int _calculateDynamicPriority(int distanceBytes) {
     return DownloadPriority.fromDistance(distanceBytes);
   }
 
