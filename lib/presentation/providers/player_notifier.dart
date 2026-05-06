@@ -376,19 +376,44 @@ class PlayerNotifier extends _$PlayerNotifier {
 
   /// Classifies MediaKit/player error strings into StreamingError (codec/corrupt).
   /// Returns null if the error cannot be classified.
+  ///
+  /// Matching is case-insensitive and covers error messages from:
+  /// - mpv / libmpv (used by MediaKit)
+  /// - libvlc / VLC (used by FVP)
+  /// - ffmpeg (underlying demuxer/decoder)
   StreamingError? _classifyPlayerError(String errorMessage, int fileId) {
     final lower = errorMessage.toLowerCase();
-    // Unsupported codec / format patterns (mpv, libmpv, MediaKit)
+
+    // ============================================================
+    // UNSUPPORTED CODEC / FORMAT
+    // ============================================================
+    // mpv / libmpv / MediaKit patterns
     if (lower.contains('unsupported codec') ||
         lower.contains('codec not found') ||
         lower.contains('no decoder') ||
         lower.contains('decoder not found') ||
         lower.contains('format not supported') ||
         lower.contains('unknown format') ||
-        lower.contains('no suitable stream')) {
+        lower.contains('no suitable stream') ||
+        lower.contains('no video or audio') ||
+        lower.contains('could not find codec') ||
+        // libvlc / VLC / FVP patterns
+        lower.contains('codec not supported') ||
+        lower.contains('format not recognized') ||
+        lower.contains('no suitable decoder module') ||
+        lower.contains('vlc could not decode') ||
+        // ffmpeg patterns
+        lower.contains('invalid codec') ||
+        lower.contains('unsupported encoding') ||
+        lower.contains('pixel format') && lower.contains('unknown') ||
+        lower.contains('sample format') && lower.contains('unknown')) {
       return StreamingError.unsupportedCodec(fileId);
     }
-    // Corrupt / invalid data patterns
+
+    // ============================================================
+    // CORRUPT / INVALID FILE
+    // ============================================================
+    // mpv / libmpv / MediaKit patterns
     if (lower.contains('invalid data') ||
         lower.contains('corrupt') ||
         lower.contains('damaged') ||
@@ -397,9 +422,63 @@ class PlayerNotifier extends _$PlayerNotifier {
         lower.contains('error reading') ||
         lower.contains('invalid stream') ||
         lower.contains('spurious_eof') ||
-        lower.contains('premature end')) {
+        lower.contains('premature end') ||
+        lower.contains('end of file') && lower.contains('unexpected') ||
+        lower.contains('truncated') ||
+        lower.contains('moov atom not found') ||
+        lower.contains('invalid moov') ||
+        lower.contains('broken header') ||
+        lower.contains('malformed') ||
+        // libvlc / VLC / FVP patterns
+        lower.contains('cannot peek') ||
+        lower.contains('read error') && lower.contains('input') ||
+        lower.contains('corrupt module') ||
+        lower.contains('bad file descriptor') ||
+        lower.contains('no demux') ||
+        // ffmpeg / container patterns
+        lower.contains('error parsing') ||
+        lower.contains('invalid header') ||
+        lower.contains('not seekable') ||
+        lower.contains('missing moov') ||
+        lower.contains('error demuxing') ||
+        lower.contains('could not read') && lower.contains('header') ||
+        lower.contains('decode') && lower.contains('failed') && lower.contains('packet')) {
       return StreamingError.corruptFile(fileId);
     }
+
+    // ============================================================
+    // CATCH-ALL: Any message containing key concepts
+    // These are ordered from most specific to most general.
+    // ============================================================
+
+    // "codec" or "decoder" anywhere with a negative indicator → unsupportedCodec
+    if ((lower.contains('codec') || lower.contains('decoder')) &&
+        (lower.contains('error') ||
+            lower.contains('fail') ||
+            lower.contains('missing') ||
+            lower.contains('unsupported') ||
+            lower.contains('unknown') ||
+            lower.contains('cannot') ||
+            lower.contains('unable') ||
+            lower.contains('not found'))) {
+      return StreamingError.unsupportedCodec(fileId);
+    }
+
+    // "format" with negative indicator → unsupportedCodec
+    if (lower.contains('format') &&
+        (lower.contains('unsupported') ||
+            lower.contains('unknown') ||
+            lower.contains('invalid') ||
+            lower.contains('not recognized'))) {
+      return StreamingError.unsupportedCodec(fileId);
+    }
+
+    // Generic error reading/parsing the container → corruptFile
+    if ((lower.contains('demux') || lower.contains('container') || lower.contains('bitstream')) &&
+        (lower.contains('error') || lower.contains('fail') || lower.contains('invalid'))) {
+      return StreamingError.corruptFile(fileId);
+    }
+
     return null;
   }
 

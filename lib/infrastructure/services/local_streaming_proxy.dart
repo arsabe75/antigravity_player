@@ -471,13 +471,34 @@ class LocalStreamingProxy {
 
   /// Internal method to notify error and update state.
   /// Returns true if error was notified (new), false if it was a duplicate.
+  ///
+  /// Uses a severity hierarchy so more severe errors replace less severe ones:
+  ///   unknown < networkError < maxRetriesExceeded < timeout
+  ///   < fileNotFound < diskFull < playbackStall < unsupportedCodec < corruptFile
+  /// Within the same severity level, the first error is kept (deduplication).
   bool _notifyErrorIfNew(int fileId, StreamingError error) {
     final state = _getOrCreateState(fileId);
 
-    // Guard: Prevent duplicate error notifications for the same error type
-    // This prevents multiple concurrent stall timers from spamming MAX_RETRIES_EXCEEDED
-    if (state.lastError != null && state.lastError!.type == error.type) {
-      return false; // Already notified for this error type
+    final existing = state.lastError;
+    if (existing != null) {
+      // Same type: deduplicate to prevent concurrent timers from spamming
+      if (existing.type == error.type) return false;
+
+      // Severity hierarchy: only replace if new error is more severe
+      final newSeverity = _errorSeverity(error.type);
+      final oldSeverity = _errorSeverity(existing.type);
+      if (newSeverity <= oldSeverity) {
+        _logTrace(
+          'Keeping existing error ${existing.type} (sev $oldSeverity) '
+          'over incoming ${error.type} (sev $newSeverity) for $fileId',
+          fileId: fileId,
+        );
+        return false;
+      }
+      _logWarning(
+        'Replacing error ${existing.type} with more severe ${error.type} for $fileId',
+        fileId: fileId,
+      );
     }
 
     state.lastError = error;
@@ -520,6 +541,32 @@ class LocalStreamingProxy {
     }
 
     return true;
+  }
+
+  /// Severity score for [StreamingErrorType].
+  ///
+  /// Higher values represent more severe / less recoverable errors.
+  /// Used by [_notifyErrorIfNew] to decide whether an incoming error
+  /// should replace an existing one.
+  ///
+  /// Levels:
+  ///   0 — unknown, networkError (generic, may resolve on retry)
+  ///   1 — maxRetriesExceeded, timeout (retries exhausted, but may recover)
+  ///   2 — fileNotFound, diskFull (external / permanent, not file corruption)
+  ///   3 — playbackStall (file causes UI-blocking thrashing)
+  ///   4 — unsupportedCodec, corruptFile (file is genuinely broken)
+  static int _errorSeverity(StreamingErrorType type) {
+    return switch (type) {
+      StreamingErrorType.unknown => 0,
+      StreamingErrorType.networkError => 0,
+      StreamingErrorType.maxRetriesExceeded => 1,
+      StreamingErrorType.timeout => 1,
+      StreamingErrorType.fileNotFound => 2,
+      StreamingErrorType.diskFull => 2,
+      StreamingErrorType.playbackStall => 3,
+      StreamingErrorType.unsupportedCodec => 4,
+      StreamingErrorType.corruptFile => 4,
+    };
   }
 
   /// Get the current load state for a file
@@ -3504,7 +3551,29 @@ class LocalStreamingProxy {
           return;
         }
         if (_abortedRequests.contains(fileId)) return;
-        _startDownloadAtOffset(fileId, waitingOffset, forceRestart: true);
+
+        // FIX: Validate that the waiting offset hasn't changed during backoff.
+        // If no connection is waiting anymore, skip the restart entirely.
+        // If a different offset is now being waited on, use that instead.
+        final currentWaitingOffset = currentState.waitingForOffset;
+        if (currentWaitingOffset == null) {
+          _logTrace(
+            'Stall backoff skipped for $fileId - no connection waiting',
+            fileId: fileId,
+          );
+          return;
+        }
+        final effectiveOffset = currentWaitingOffset != waitingOffset
+            ? currentWaitingOffset
+            : waitingOffset;
+        if (effectiveOffset != waitingOffset) {
+          _debugLog(
+            'Proxy: Stall backoff - waiting offset changed from '
+            '${waitingOffset ~/ 1024}KB to ${effectiveOffset ~/ 1024}KB, '
+            'using new offset',
+          );
+        }
+        _startDownloadAtOffset(fileId, effectiveOffset, forceRestart: true);
       });
     } else {
       _startDownloadAtOffset(fileId, waitingOffset, forceRestart: true);
