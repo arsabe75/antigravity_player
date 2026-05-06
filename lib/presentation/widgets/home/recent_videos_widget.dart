@@ -160,10 +160,10 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
       decoration: BoxDecoration(
         color: isDark
             ? Colors.grey[900]?.withValues(alpha: 0.5)
-            : Colors.grey[50],
+            : const Color(0xFFEAE6DC),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? Colors.grey[800]! : Colors.grey[200]!,
+          color: isDark ? Colors.grey[800]! : const Color(0xFFD5CFC3),
         ),
       ),
       padding: const EdgeInsets.all(12),
@@ -229,7 +229,7 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
 
   Widget _buildVerticalVideoCard(RecentVideo video, bool isDark) {
     return Material(
-      color: isDark ? Colors.grey[850] : Colors.grey[100],
+      color: isDark ? Colors.grey[850] : const Color(0xFFF5F2EB),
       borderRadius: BorderRadius.circular(8),
       child: InkWell(
         mouseCursor: SystemMouseCursors.click,

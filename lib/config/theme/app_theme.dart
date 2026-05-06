@@ -6,14 +6,22 @@ class AppTheme {
     useMaterial3: true,
     brightness: Brightness.light,
     colorScheme: ColorScheme.fromSeed(
-      seedColor: Colors.blue,
+      seedColor: const Color(0xFF1A6DAF),
       brightness: Brightness.light,
+    ).copyWith(
+      surface: const Color(0xFFF8F6F1),
+      onSurface: const Color(0xFF1C1B18),
+      surfaceContainerHighest: const Color(0xFFE8E4DA),
+      surfaceContainerHigh: const Color(0xFFEDE9E0),
+      surfaceContainer: const Color(0xFFF0EDE5),
+      surfaceContainerLow: const Color(0xFFF5F2EB),
+      surfaceContainerLowest: const Color(0xFFF8F6F1),
     ),
-    scaffoldBackgroundColor: Colors.white,
+    scaffoldBackgroundColor: const Color(0xFFF0EDE5),
     fontFamilyFallback: Platform.isWindows ? const ['Noto Color Emoji'] : null,
     appBarTheme: const AppBarTheme(
-      backgroundColor: Colors.white,
-      foregroundColor: Colors.black,
+      backgroundColor: Color(0xFFF0EDE5),
+      foregroundColor: Color(0xFF1C1B18),
       elevation: 0,
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
