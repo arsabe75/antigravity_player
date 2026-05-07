@@ -118,6 +118,11 @@ class PlayerNotifier extends _$PlayerNotifier {
   static const int _maxSeekRecoveryExtensions = 3;
   int? _currentProxyFileId;
 
+  /// Buffer para errores de streaming que llegan cuando el video actual
+  /// no coincide con el fileId del error (ej. durante transiciones).
+  /// Al cargar un video, se verifica este buffer para mostrar errores pendientes.
+  final Map<int, StreamingError> _pendingStreamingErrors = {};
+
   // Track the position when initial loading started to detect actual playback
   Duration? _initialLoadingStartPosition;
 
@@ -170,6 +175,7 @@ class PlayerNotifier extends _$PlayerNotifier {
       _seekRecoveryTimer?.cancel();
       _savePosition();
       _abortCurrentProxyRequest();
+      _pendingStreamingErrors.clear();
       // Clear streaming error callback
       _streamingRepository.onStreamingError = null;
     });
@@ -509,6 +515,14 @@ class PlayerNotifier extends _$PlayerNotifier {
         );
         _repository.pause();
       }
+    } else {
+      // Buffer the error for when the user navigates to this video.
+      // Prevents silent error loss during video transitions (H11).
+      _pendingStreamingErrors[error.fileId] = error;
+      debugPrint(
+        'PlayerNotifier: Buffered streaming error for file ${error.fileId} '
+        '(current: $_currentProxyFileId)',
+      );
     }
   }
 
@@ -729,6 +743,29 @@ class PlayerNotifier extends _$PlayerNotifier {
             }
           }
         } catch (_) {}
+      }
+
+      // Check for pending streaming errors from a previous load attempt.
+      // If the proxy already reported an error for this file (e.g. during a
+      // transition), show it immediately instead of waiting for it to happen
+      // again. This prevents silent error loss (H11).
+      if (_currentProxyFileId != null) {
+        final pending = _pendingStreamingErrors.remove(_currentProxyFileId);
+        if (pending != null) {
+          debugPrint(
+            'PlayerNotifier: Found pending streaming error for file '
+            '$_currentProxyFileId: ${pending.type}',
+          );
+          _errorOccurredAtPosition = state.position;
+          state = state.copyWith(
+            streamingError: pending,
+            isBuffering: false,
+            isInitialLoading: false,
+          );
+          if (!pending.isRecoverable && state.isPlaying) {
+            _repository.pause();
+          }
+        }
       }
 
       if (!isNetwork) {

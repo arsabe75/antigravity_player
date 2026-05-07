@@ -1308,6 +1308,37 @@ class LocalStreamingProxy {
         // 2. Ensure File Info is available
         final fileResult = await _ensureFileAvailable(fileId, request);
         if (fileResult == null) return; // 404 already sent
+
+        // FIX 3.1b: Re-validate state after await. _ensureFileAvailable can
+        // take seconds (file download, re-fetch). During this time:
+        // - signalUserSeek may have fired (seekGeneration changed)
+        // - The file may have entered a terminal error state
+        // - forcedMoovOffset may have been set by an async callback
+        // If the seek generation changed, abort — the stream loop will also
+        // detect this, but aborting early saves work.
+        final currentGen = _seekGeneration[fileId] ?? 0;
+        if (mySeekGeneration != currentGen) {
+          _debugLog(
+            'Proxy: Seek generation changed during _ensureFileAvailable '
+            '($mySeekGeneration -> $currentGen), aborting request for $fileId',
+          );
+          request.response.statusCode = HttpStatus.serviceUnavailable;
+          await request.response.close();
+          return;
+        }
+        // Also check if file became terminal during the await
+        final reloadedState = _getOrCreateState(fileId);
+        if (reloadedState.loadState == FileLoadState.unsupported ||
+            reloadedState.loadState == FileLoadState.error ||
+            reloadedState.loadState == FileLoadState.timeout) {
+          _debugLog(
+            'Proxy: File $fileId entered terminal state during _ensureFileAvailable, aborting',
+          );
+          request.response.statusCode = HttpStatus.serviceUnavailable;
+          await request.response.close();
+          return;
+        }
+
         final file = fileResult.file;
 
         final effectiveTotalSize = totalSize > 0
@@ -1742,17 +1773,41 @@ class LocalStreamingProxy {
 
             if (connectionCumulativeWaitMs >= maxConnectionWaitMs &&
                 !_abortedRequests.contains(fileId)) {
-              _logError(
+              _logWarning(
                 'PER-CONNECTION STALL for $fileId: connection at offset '
                 '${start ~/ 1024}KB waited ${connectionCumulativeWaitMs ~/ 1000}s '
-                'at readOffset ${currentReadOffset ~/ 1024}KB. Triggering playback error.',
+                'at readOffset ${currentReadOffset ~/ 1024}KB. Breaking connection '
+                'and delegating recovery to per-file stall timer.',
                 fileId: fileId,
               );
-              final error = StreamingError.playbackStall(
-                fileId,
-                connectionCumulativeWaitMs ~/ 1000,
-              );
-              _notifyErrorIfNew(fileId, error);
+
+              // Instead of independently firing _notifyErrorIfNew (which
+              // competes with the per-file stall timer — see H9), delegate
+              // to the unified per-file recovery path:
+              // 1. Record a retry in the tracker (counts toward max retries)
+              // 2. Attempt a force-restart of the download
+              // 3. The per-file stall timer will fire the error on next cycle
+              //    if the retry limit is exhausted.
+              _retryTracker.recordRetry(fileId);
+
+              if (_retryTracker.canRetry(fileId)) {
+                final backoff = _retryTracker.getBackoffDelay(
+                  fileId,
+                  baseMs: ProxyConfig.retryBackoffBaseMs,
+                  maxMs: ProxyConfig.retryBackoffMaxMs,
+                  multiplier: ProxyConfig.retryBackoffMultiplier,
+                );
+                Timer(backoff, () {
+                  if (_abortedRequests.contains(fileId)) return;
+                  _startDownloadAtOffset(
+                    fileId,
+                    currentReadOffset,
+                    forceRestart: true,
+                  );
+                });
+              }
+              // Break this connection; the per-file stall timer handles
+              // error reporting and further retries.
               _abortedRequests.add(fileId);
 
               final waiters = _byteAvailabilityWaiters.remove(fileId);
@@ -1761,8 +1816,6 @@ class LocalStreamingProxy {
                   if (!entry.value.isCompleted) entry.value.complete();
                 }
               }
-              _cancelStallTimer(fileId);
-              _cancelPrefetchTimer(fileId);
               break;
             }
           }
@@ -3643,6 +3696,21 @@ class LocalStreamingProxy {
       return;
     }
     if (_abortedRequests.contains(fileId)) return;
+
+    // FIX: Skip proactive MOOV if user recently seeked. The seek target
+    // takes priority over MOOV preloading. Without this guard, an async
+    // _startProactiveMoovDownload callback could set forcedMoovOffset
+    // AFTER signalUserSeek already released it (FIX 5b), creating a lock
+    // that blocks the seek target download.
+    final seekTime = state.lastExplicitSeekTime;
+    if (seekTime != null &&
+        DateTime.now().difference(seekTime).inMilliseconds < 3000) {
+      _debugLog(
+        'Proxy: Skipping proactive MOOV for $fileId - '
+        'user seeked ${DateTime.now().difference(seekTime).inMilliseconds}ms ago',
+      );
+      return;
+    }
 
     // Si ya detectamos offset exacto de MOOV, usarlo directamente para
     // ahorrar megabytes. Si no, calculamos el porcentaje máximo.
