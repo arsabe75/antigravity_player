@@ -552,20 +552,22 @@ class LocalStreamingProxy {
   /// Levels:
   ///   0 — unknown, networkError (generic, may resolve on retry)
   ///   1 — maxRetriesExceeded, timeout (retries exhausted, but may recover)
-  ///   2 — fileNotFound, diskFull (external / permanent, not file corruption)
-  ///   3 — playbackStall (file causes UI-blocking thrashing)
-  ///   4 — unsupportedCodec, corruptFile (file is genuinely broken)
+  ///   2 — degraded (early warning, video still watchable)
+  ///   3 — fileNotFound, diskFull (external / permanent, not file corruption)
+  ///   4 — playbackStall (file causes UI-blocking thrashing)
+  ///   5 — unsupportedCodec, corruptFile (file is genuinely broken)
   static int _errorSeverity(StreamingErrorType type) {
     return switch (type) {
       StreamingErrorType.unknown => 0,
       StreamingErrorType.networkError => 0,
       StreamingErrorType.maxRetriesExceeded => 1,
       StreamingErrorType.timeout => 1,
-      StreamingErrorType.fileNotFound => 2,
-      StreamingErrorType.diskFull => 2,
-      StreamingErrorType.playbackStall => 3,
-      StreamingErrorType.unsupportedCodec => 4,
-      StreamingErrorType.corruptFile => 4,
+      StreamingErrorType.degraded => 2,
+      StreamingErrorType.fileNotFound => 3,
+      StreamingErrorType.diskFull => 3,
+      StreamingErrorType.playbackStall => 4,
+      StreamingErrorType.unsupportedCodec => 5,
+      StreamingErrorType.corruptFile => 5,
     };
   }
 
@@ -1863,6 +1865,27 @@ class LocalStreamingProxy {
 
       _cancelStallTimer(fileId);
       _cancelPrefetchTimer(fileId);
+    } else if (thrashState.earlyExitCount >=
+        ProxyConfig.degradedWarningThreshold) {
+      // Non-blocking warning: show UI overlay but keep proxy operational.
+      // The video may still be watchable with occasional pauses.
+      // When earlyExitThreshold is reached later, playbackStall replaces this.
+      final existing = thrashState.lastError;
+      if (existing == null || existing.type != StreamingErrorType.degraded) {
+        final warning = StreamingError.degraded(
+          fileId,
+          thrashState.earlyExitCount,
+        );
+        thrashState.lastError = warning;
+        onStreamingError?.call(warning);
+        _logWarning(
+          'DEGRADED PLAYBACK for $fileId: '
+          '${thrashState.earlyExitCount} early exits at offset '
+          '${currentReadOffset ~/ 1024}KB within ${elapsed}s. '
+          'Warning user but keeping playback active.',
+          fileId: fileId,
+        );
+      }
     }
   }
 
@@ -2319,6 +2342,30 @@ class LocalStreamingProxy {
         final cutoff = now.subtract(_floodTimeWindow);
         timestamps.removeWhere((t) => t.isBefore(cutoff));
         if (timestamps.length >= _floodEvictionThreshold) {
+          // FIX: Distinguir flood por scrubbing del usuario vs. video dañado.
+          // Si hubo seeks explícitos en la ventana de flood, el exceso de
+          // conexiones probablemente es causado por scrubbing rápido, no por
+          // un archivo corrupto. En ese caso, rechazar sólo esta request (503)
+          // sin marcar el archivo como dañado permanentemente.
+          final seekTime = _getOrCreateState(fileId).lastExplicitSeekTime;
+          final isRecentSeek = seekTime != null &&
+              now.difference(seekTime) < _floodTimeWindow;
+
+          if (isRecentSeek) {
+            _logWarning(
+              'CONNECTION FLOOD with recent user seek for $fileId: '
+              '${timestamps.length} evictions in ${_floodTimeWindow.inSeconds}s. '
+              'Likely caused by aggressive scrubbing — rejecting request but '
+              'keeping file available.',
+              fileId: fileId,
+            );
+            _evictionTimestamps.remove(fileId);
+            await Future.delayed(const Duration(milliseconds: 500));
+            request.response.statusCode = HttpStatus.serviceUnavailable;
+            await request.response.close();
+            return false;
+          }
+
           _logError(
             'CONNECTION FLOOD detected for $fileId: '
             '${timestamps.length} evictions in ${_floodTimeWindow.inSeconds}s. '

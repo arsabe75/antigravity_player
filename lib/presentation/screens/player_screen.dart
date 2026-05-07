@@ -24,6 +24,7 @@ import '../providers/video_repository_provider.dart';
 import '../providers/telegram_cache_notifier.dart';
 import '../widgets/player/player_widgets.dart';
 import '../widgets/player/track_selection_sheet.dart';
+import '../../domain/value_objects/streaming_error.dart';
 import '../widgets/player/streaming_error_overlay.dart';
 import '../../infrastructure/services/recent_videos_service.dart';
 import '../../infrastructure/services/media_control_service.dart';
@@ -623,6 +624,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                     onRetry: state.streamingError!.isRecoverable
                         ? () {
                             notifier.clearStreamingError();
+                            // Para advertencias (degraded), solo cerrar el overlay.
+                            // El video sigue reproduciéndose, no necesita recarga.
+                            if (state.streamingError!.type ==
+                                StreamingErrorType.degraded) {
+                              return;
+                            }
                             if (state.currentVideoPath != null) {
                               notifier.loadVideo(
                                 state.currentVideoPath!,

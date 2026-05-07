@@ -27,6 +27,7 @@ class StreamingErrorOverlay extends StatelessWidget {
       StreamingErrorType.diskFull => LucideIcons.hardDrive,
       StreamingErrorType.fileNotFound => LucideIcons.searchX,
       StreamingErrorType.maxRetriesExceeded => LucideIcons.alertOctagon,
+      StreamingErrorType.degraded => LucideIcons.info,
       StreamingErrorType.playbackStall => LucideIcons.alertTriangle,
       StreamingErrorType.unknown => LucideIcons.alertCircle,
     };
@@ -41,6 +42,7 @@ class StreamingErrorOverlay extends StatelessWidget {
       StreamingErrorType.diskFull => Colors.red,
       StreamingErrorType.fileNotFound => Colors.red,
       StreamingErrorType.maxRetriesExceeded => Colors.amber,
+      StreamingErrorType.degraded => Colors.blue,
       StreamingErrorType.playbackStall => Colors.deepOrange,
       StreamingErrorType.unknown => Colors.grey,
     };
@@ -55,6 +57,7 @@ class StreamingErrorOverlay extends StatelessWidget {
       StreamingErrorType.diskFull => 'Disco lleno',
       StreamingErrorType.fileNotFound => 'Video no disponible',
       StreamingErrorType.maxRetriesExceeded => 'No se pudo reproducir el video',
+      StreamingErrorType.degraded => 'Advertencia de rendimiento',
       StreamingErrorType.playbackStall => 'Problema de reproducción',
       StreamingErrorType.unknown => 'Error de reproducción',
     };
@@ -76,6 +79,8 @@ class StreamingErrorOverlay extends StatelessWidget {
         'El video ya no está disponible en Telegram. Puede haber sido eliminado.',
       StreamingErrorType.maxRetriesExceeded =>
         'Se agotaron los intentos de descarga. El video puede tener problemas de transmisión o estar temporalmente inaccesible.',
+      StreamingErrorType.degraded =>
+        'Este video muestra signos de transmisión inestable. Puede continuar viéndolo pero es posible que experimente pausas breves.',
       StreamingErrorType.playbackStall =>
         'Este video presenta interrupciones persistentes que bloquean la interfaz. Puede estar dañado o tener un formato de transmisión incompatible.',
       StreamingErrorType.unknown =>
@@ -83,12 +88,16 @@ class StreamingErrorOverlay extends StatelessWidget {
     };
   }
 
+  bool get _isWarning => error.type == StreamingErrorType.degraded;
+
   @override
   Widget build(BuildContext context) {
     final color = _getColor();
 
     return Container(
-      color: Colors.black87,
+      // For warnings, use a more transparent background so the video
+      // (which is still playing) remains partially visible.
+      color: _isWarning ? Colors.black54 : Colors.black87,
       child: Center(
         child: Container(
           margin: const EdgeInsets.all(32),
@@ -148,13 +157,15 @@ class StreamingErrorOverlay extends StatelessWidget {
                     ),
                   ),
 
-                  // Retry Button (only for recoverable errors)
+                  // Action button for recoverable errors: retry or dismiss warning
                   if (error.isRecoverable && onRetry != null) ...[
                     const SizedBox(width: 16),
                     ElevatedButton.icon(
                       onPressed: onRetry,
-                      icon: const Icon(LucideIcons.refreshCw),
-                      label: const Text('Reintentar'),
+                      icon: Icon(
+                        _isWarning ? LucideIcons.x : LucideIcons.refreshCw,
+                      ),
+                      label: Text(_isWarning ? 'Entendido' : 'Reintentar'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: color,
                         foregroundColor: Colors.white,

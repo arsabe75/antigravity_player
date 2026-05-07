@@ -22,6 +22,10 @@ enum StreamingErrorType {
   /// Maximum retry attempts exceeded
   maxRetriesExceeded,
 
+  /// Playback degradation: video shows early signs of connection thrashing
+  /// but may still be watchable. Shown as a warning, not a blocking error.
+  degraded,
+
   /// Playback stall: video causes repeated connection thrashing
   playbackStall,
 
@@ -115,6 +119,21 @@ class StreamingError {
       message: 'El archivo de video parece estar dañado o es inválido',
       fileId: fileId,
       isRecoverable: false,
+    );
+  }
+
+  /// Create a degradation warning (early signs of thrashing, video still watchable).
+  /// Marked as recoverable so the proxy continues normal operation while the
+  /// UI shows a warning to the user.
+  factory StreamingError.degraded(int fileId, int earlyExits) {
+    return StreamingError(
+      type: StreamingErrorType.degraded,
+      message: 'El video presenta problemas leves de reproducción '
+          '($earlyExits interrupciones). Puede continuar viéndose con '
+          'posibles pausas.',
+      fileId: fileId,
+      isRecoverable: true,
+      retryAttempts: earlyExits,
     );
   }
 

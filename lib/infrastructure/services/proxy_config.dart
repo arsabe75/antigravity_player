@@ -86,6 +86,11 @@ class ProxyConfig {
   /// that cause repeated connection thrashing and UI freezes.
   static const int earlyExitThreshold = 10;
 
+  /// Lower threshold: show a non-blocking degradation warning to the user
+  /// without stopping playback. The video may still be watchable with some
+  /// pauses. Must be less than [earlyExitThreshold].
+  static const int degradedWarningThreshold = 5;
+
   /// Time window (seconds) for counting early exits. Only exits within
   /// this window are counted toward the threshold.
   static const int earlyExitWindowSeconds = 30;
