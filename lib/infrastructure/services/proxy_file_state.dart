@@ -99,8 +99,13 @@ class ProxyFileState {
   int? forcedMoovOffset;
 
   /// FIX U: Timestamp when forced MOOV download started.
-  /// Used to detect stuck MOOV downloads that never progress.
+  /// Resets on any progress to detect consecutive stall periods.
   DateTime? forcedMoovStartTime;
+
+  /// H6 FIX: Absolute (non-resettable) timestamp when forced MOOV download started.
+  /// Used as a hard deadline — if the MOOV doesn't complete within 60s total,
+  /// the file is declared damaged regardless of incremental progress.
+  DateTime? forcedMoovAbsoluteStartTime;
 
   /// FIX U: Last observed byte count for the forced MOOV download.
   /// Tracks progress to distinguish between slow-but-progressing and truly stuck.
@@ -194,6 +199,7 @@ class ProxyFileState {
     exactMoovOffset = null;
     forcedMoovOffset = null;
     forcedMoovStartTime = null;
+    forcedMoovAbsoluteStartTime = null;
     forcedMoovLastProgress = 0;
     earlyMoovDetectionTriggered = false;
 

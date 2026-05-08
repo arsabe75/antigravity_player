@@ -277,8 +277,14 @@ class ProxyConfig {
 
   /// FIX U: Timeout in seconds for forced MOOV download with no progress.
   /// If TDLib can't deliver any data at the MOOV offset within this time,
-  /// the file is considered damaged.
+  /// the file is considered damaged. Resets on any byte progress.
   static const int moovDownloadTimeoutSeconds = 30;
+
+  /// H6 FIX: Absolute (non-resettable) timeout for forced MOOV download.
+  /// Even if TDLib delivers tiny amounts of data periodically (preventing
+  /// the progress timeout from firing), the MOOV must complete within this
+  /// total time or the file is declared damaged.
+  static const int moovDownloadAbsoluteTimeoutSeconds = 60;
 
   /// Min base bytes for instant primary offset progress (small files).
   static const int primaryProgressBaseMinBytes = 256 * 1024; // 256KB

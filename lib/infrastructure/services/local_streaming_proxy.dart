@@ -839,6 +839,7 @@ class LocalStreamingProxy {
       );
       moovState.forcedMoovOffset = null;
       moovState.forcedMoovStartTime = null;
+      moovState.forcedMoovAbsoluteStartTime = null;
       moovState.forcedMoovLastProgress = 0;
     }
 
@@ -3146,6 +3147,9 @@ class LocalStreamingProxy {
         'Proxy: Forced moov download satisfied ($availableAtForced bytes >= $targetSize), releasing lock for $fileId',
       );
       _getOrCreateState(fileId).forcedMoovOffset = null;
+      _getOrCreateState(fileId).forcedMoovStartTime = null;
+      _getOrCreateState(fileId).forcedMoovAbsoluteStartTime = null;
+      _getOrCreateState(fileId).forcedMoovLastProgress = 0;
       _getOrCreateState(fileId).activePriority = 0;
 
       if (!_abortedRequests.contains(fileId)) {
@@ -3170,6 +3174,37 @@ class LocalStreamingProxy {
 
     if (requestedOffset != forcedOffset) {
       final moovState = _getOrCreateState(fileId);
+
+      // H6 FIX: Absolute timeout — never resets, fires even if tiny progress
+      // keeps resetting the progress timer. Prevents the file from being
+      // locked in loadingMoov indefinitely.
+      final absStartTime = moovState.forcedMoovAbsoluteStartTime;
+      if (absStartTime != null &&
+          DateTime.now().difference(absStartTime).inSeconds >=
+              ProxyConfig.moovDownloadAbsoluteTimeoutSeconds) {
+        _logError(
+          'MOOV DOWNLOAD ABSOLUTE TIMEOUT for $fileId: '
+          '${DateTime.now().difference(absStartTime).inSeconds}s total '
+          '(have $availableAtForced/$targetSize bytes). '
+          'File appears damaged — blocking further requests.',
+          fileId: fileId,
+        );
+        moovState.forcedMoovOffset = null;
+        moovState.forcedMoovStartTime = null;
+        moovState.forcedMoovAbsoluteStartTime = null;
+        moovState.forcedMoovLastProgress = 0;
+        final error = StreamingError.corruptFile(fileId);
+        _notifyErrorIfNew(fileId, error);
+        _abortedRequests.add(fileId);
+        final waiters = _byteAvailabilityWaiters.remove(fileId);
+        if (waiters != null) {
+          for (final entry in waiters) {
+            if (!entry.value.isCompleted) entry.value.complete();
+          }
+        }
+        return true;
+      }
+
       final moovStartTime = moovState.forcedMoovStartTime;
       if (moovStartTime != null) {
         final moovElapsed = DateTime.now().difference(moovStartTime);
@@ -3185,6 +3220,7 @@ class LocalStreamingProxy {
           );
           moovState.forcedMoovOffset = null;
           moovState.forcedMoovStartTime = null;
+          moovState.forcedMoovAbsoluteStartTime = null;
           moovState.forcedMoovLastProgress = 0;
           final error = StreamingError.corruptFile(fileId);
           _notifyErrorIfNew(fileId, error);
@@ -3767,6 +3803,7 @@ class LocalStreamingProxy {
     // Activar lock: bloquea otras descargas hasta que MOOV termine
     state.forcedMoovOffset = moovOffset;
     state.forcedMoovStartTime = DateTime.now();
+    state.forcedMoovAbsoluteStartTime = DateTime.now(); // H6: absolute deadline
     state.forcedMoovLastProgress = 0;
     state.loadState = FileLoadState.loadingMoov;
 
