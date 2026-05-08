@@ -534,6 +534,25 @@ class PlayerNotifier extends _$PlayerNotifier {
     state = state.copyWith(streamingError: null);
   }
 
+  /// Force-retry a video that hit a recoverable error (e.g. maxRetriesExceeded).
+  /// Bypasses the circuit breaker, resets all retry counters, and starts
+  /// downloading with critical priority. More aggressive than clearStreamingError.
+  void forceRetry() {
+    if (_currentProxyFileId == null) return;
+    debugPrint('PlayerNotifier: Force retry for file $_currentProxyFileId');
+    _streamingRepository.forceRetry(_currentProxyFileId!);
+
+    // Clear the error from UI
+    _errorOccurredAtPosition = null;
+    state = state.copyWith(
+      streamingError: null,
+      isBuffering: true,
+      isInitialLoading: true,
+    );
+    // Restart playback from current position
+    _repository.resume();
+  }
+
   /// Start a timer to periodically check if video is not optimized for streaming
   /// This catches late detection of moov-at-end during initial buffering
   void _startMoovCheckTimer() {

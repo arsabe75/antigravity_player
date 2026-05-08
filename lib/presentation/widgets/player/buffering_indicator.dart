@@ -1,7 +1,12 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 
-/// Indicador de buffering que se muestra sobre el video
-class BufferingIndicator extends StatelessWidget {
+/// Indicador de buffering que se muestra sobre el video.
+///
+/// Incluye tracking del tiempo transcurrido para mostrar mensajes
+/// progresivos cuando la carga del video toma más de lo esperado
+/// (ej. videos con MOOV atom al final del archivo).
+class BufferingIndicator extends StatefulWidget {
   final bool isBuffering;
   final bool isVideoNotOptimizedForStreaming;
   final Color? color;
@@ -16,8 +21,75 @@ class BufferingIndicator extends StatelessWidget {
   });
 
   @override
+  State<BufferingIndicator> createState() => _BufferingIndicatorState();
+}
+
+class _BufferingIndicatorState extends State<BufferingIndicator> {
+  Timer? _elapsedTimer;
+  int _elapsedSeconds = 0;
+
+  @override
+  void didUpdateWidget(covariant BufferingIndicator oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.isBuffering && !oldWidget.isBuffering) {
+      _startTimer();
+    } else if (!widget.isBuffering && oldWidget.isBuffering) {
+      _stopTimer();
+    }
+  }
+
+  @override
+  void dispose() {
+    _stopTimer();
+    super.dispose();
+  }
+
+  void _startTimer() {
+    _stopTimer();
+    _elapsedSeconds = 0;
+    _elapsedTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) {
+        setState(() {
+          _elapsedSeconds++;
+        });
+      }
+    });
+  }
+
+  void _stopTimer() {
+    _elapsedTimer?.cancel();
+    _elapsedTimer = null;
+  }
+
+  String _getMessage() {
+    if (!widget.isVideoNotOptimizedForStreaming) {
+      if (_elapsedSeconds < 5) return 'Cargando video...';
+      if (_elapsedSeconds < 15) return 'Aún descargando datos...';
+      return 'La descarga está tardando. Verifica tu conexión.';
+    }
+    // MOOV at end: video not optimized for streaming
+    if (_elapsedSeconds < 10) {
+      return 'Preparando video...\n(metadatos al final del archivo)';
+    }
+    if (_elapsedSeconds < 20) {
+      return 'Video no optimizado para streaming.\n'
+          'Descargando metadatos desde el final...';
+    }
+    if (_elapsedSeconds < 35) {
+      return 'Este video puede tardar más de lo normal.\n'
+          'Los metadatos están al final del archivo.';
+    }
+    return 'La descarga de metadatos está tomando\n'
+        'demasiado tiempo. El video podría tener\n'
+        'problemas de compatibilidad.';
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (!isBuffering) return const SizedBox.shrink();
+    if (!widget.isBuffering) return const SizedBox.shrink();
+
+    final msg = _getMessage();
+    final lines = msg.split('\n');
 
     return Center(
       child: Container(
@@ -30,29 +102,36 @@ class BufferingIndicator extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             SizedBox(
-              width: size,
-              height: size,
+              width: widget.size,
+              height: widget.size,
               child: CircularProgressIndicator(
-                color: color ?? Colors.white,
+                color: widget.color ?? Colors.white,
                 strokeWidth: 3,
               ),
             ),
-            // Show message when video is not optimized for streaming
-            if (isVideoNotOptimizedForStreaming) ...[
-              const SizedBox(height: 12),
-              const Text(
-                'Video not optimized for streaming',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
+            const SizedBox(height: 12),
+            ...lines.map(
+              (line) => Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Text(
+                  line,
+                  style: TextStyle(
+                    color: _elapsedSeconds > 20
+                        ? Colors.orange[200]
+                        : Colors.white,
+                    fontSize: 14,
+                    fontWeight:
+                        _elapsedSeconds > 15 ? FontWeight.w500 : FontWeight.w400,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-                textAlign: TextAlign.center,
               ),
+            ),
+            if (_elapsedSeconds >= 5) ...[
               const SizedBox(height: 4),
-              const Text(
-                'Loading may take a moment...',
-                style: TextStyle(color: Colors.white70, fontSize: 12),
+              Text(
+                '${_elapsedSeconds}s transcurridos',
+                style: TextStyle(color: Colors.white54, fontSize: 11),
                 textAlign: TextAlign.center,
               ),
             ],

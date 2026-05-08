@@ -74,4 +74,9 @@ class LocalStreamingRepository implements StreamingRepository {
   void reportPlayerError(StreamingError error) {
     _proxy.reportPlayerError(error);
   }
+
+  @override
+  void forceRetry(int fileId) {
+    _proxy.forceRetry(fileId);
+  }
 }

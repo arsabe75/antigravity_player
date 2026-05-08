@@ -469,6 +469,42 @@ class LocalStreamingProxy {
     );
   }
 
+  /// Force-restart a file that failed with a recoverable error.
+  ///
+  /// More aggressive than [clearError]: resets the circuit breaker, the retry
+  /// tracker, the error state, AND immediately starts a download with critical
+  /// priority at the primary playback offset. Use this when the user explicitly
+  /// chooses "Forzar reproducción" on a video that hit max-retries but might
+  /// still be playable.
+  void forceRetry(int fileId) {
+    _logInfo('FORCE RETRY for $fileId - bypassing circuit breaker and restarting', fileId: fileId);
+
+    final state = _getOrCreateState(fileId);
+    state.lastError = null;
+    state.loadState = FileLoadState.idle;
+
+    // Reset retry tracker to give a fresh chance
+    _retryTracker.reset(fileId);
+    _downloadMetrics[fileId]?.resetStallCount();
+
+    // Remove from aborted list so new requests are accepted
+    _abortedRequests.remove(fileId);
+
+    // If there are waiters, wake them up — they'll re-request and get fresh data
+    final waiters = _byteAvailabilityWaiters.remove(fileId);
+    if (waiters != null) {
+      for (final entry in waiters) {
+        if (!entry.value.isCompleted) entry.value.complete();
+      }
+    }
+
+    // Immediately start download at the primary offset (or 0) with max priority.
+    // This ensures data starts flowing BEFORE the player's next HTTP request.
+    final primaryOffset = state.primaryPlaybackOffset ?? 0;
+    _startDownloadAtOffset(fileId, primaryOffset,
+        isBlocking: true, forceRestart: true);
+  }
+
   /// Internal method to notify error and update state.
   /// Returns true if error was notified (new), false if it was a duplicate.
   ///

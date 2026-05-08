@@ -50,4 +50,10 @@ abstract class StreamingRepository {
   /// Report a player-detected error (e.g. unsupported codec, corrupt file).
   /// Marks the file as unrecoverable in the proxy and invokes [onStreamingError].
   void reportPlayerError(StreamingError error);
+
+  /// Force-restart a file that previously failed with a recoverable error.
+  /// Bypasses circuit breaker, resets retries, and starts download with
+  /// critical priority. More aggressive than [clearError] which just resets
+  /// state but waits for the next player request to trigger the download.
+  void forceRetry(int fileId);
 }

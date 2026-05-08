@@ -9,12 +9,14 @@ import '../../../domain/value_objects/streaming_error.dart';
 class StreamingErrorOverlay extends StatelessWidget {
   final StreamingError error;
   final VoidCallback? onRetry;
+  final VoidCallback? onForceRetry;
   final VoidCallback onGoBack;
 
   const StreamingErrorOverlay({
     super.key,
     required this.error,
     this.onRetry,
+    this.onForceRetry,
     required this.onGoBack,
   });
 
@@ -90,6 +92,32 @@ class StreamingErrorOverlay extends StatelessWidget {
 
   bool get _isWarning => error.type == StreamingErrorType.degraded;
 
+  String _getSuggestion() {
+    return switch (error.type) {
+      StreamingErrorType.timeout =>
+        'Verifica tu conexión a internet e intenta de nuevo.',
+      StreamingErrorType.networkError =>
+        'Verifica tu conexión e intenta en unos minutos.',
+      StreamingErrorType.corruptFile =>
+        'Este archivo está dañado. No se puede reproducir.',
+      StreamingErrorType.unsupportedCodec =>
+        'Convierte el video a un formato compatible (H.264/AAC).',
+      StreamingErrorType.diskFull =>
+        'Libera espacio en disco y vuelve a intentar.',
+      StreamingErrorType.fileNotFound =>
+        'El video fue eliminado de Telegram.',
+      StreamingErrorType.maxRetriesExceeded =>
+        'Puedes reintentar normalmente o usar "Forzar" para un '
+            'reintento más agresivo.',
+      StreamingErrorType.degraded =>
+        'El video puede seguir viéndose con algunas pausas.',
+      StreamingErrorType.playbackStall =>
+        'Este video tiene problemas persistentes. Puede estar mal codificado.',
+      StreamingErrorType.unknown =>
+        'Contacta al soporte si el problema persiste.',
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final color = _getColor();
@@ -160,6 +188,19 @@ class StreamingErrorOverlay extends StatelessWidget {
                   // Action button for recoverable errors: retry or dismiss warning
                   if (error.isRecoverable && onRetry != null) ...[
                     const SizedBox(width: 16),
+                    // "Forzar" button: more aggressive recovery for stubborn errors
+                    if (!_isWarning && onForceRetry != null) ...[
+                      OutlinedButton.icon(
+                        onPressed: onForceRetry,
+                        icon: const Icon(LucideIcons.zap),
+                        label: const Text('Forzar'),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.orange,
+                          side: const BorderSide(color: Colors.orange),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
                     ElevatedButton.icon(
                       onPressed: onRetry,
                       icon: Icon(
@@ -191,17 +232,32 @@ class StreamingErrorOverlay extends StatelessWidget {
                       color: Colors.black26,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: SelectableText(
-                      'Tipo: ${error.type.name}\n'
-                      'File ID: ${error.fileId}\n'
-                      'Intentos: ${error.retryAttempts}\n'
-                      'Recuperable: ${error.isRecoverable ? "Sí" : "No"}\n'
-                      'Mensaje: ${error.message}',
-                      style: TextStyle(
-                        color: Colors.grey[500],
-                        fontSize: 11,
-                        fontFamily: 'monospace',
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        SelectableText(
+                          'Tipo: ${error.type.name}\n'
+                          'File ID: ${error.fileId}\n'
+                          'Intentos: ${error.retryAttempts}\n'
+                          'Recuperable: ${error.isRecoverable ? "Sí" : "No"}\n'
+                          'Mensaje: ${error.message}',
+                          style: TextStyle(
+                            color: Colors.grey[500],
+                            fontSize: 11,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Sugerencia: ${_getSuggestion()}',
+                          style: TextStyle(
+                            color: Colors.grey[400],
+                            fontSize: 12,
+                            fontStyle: FontStyle.italic,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ],
