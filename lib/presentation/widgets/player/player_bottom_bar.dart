@@ -1,6 +1,7 @@
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:lucide_icons/lucide_icons.dart';
 
+import '../../../domain/entities/playlist_entity.dart';
 import 'video_progress_slider.dart';
 import 'volume_control.dart';
 import 'playback_speed_control.dart';
@@ -20,6 +21,7 @@ class PlayerBottomBar extends StatelessWidget {
   final bool hasPrevious;
   final bool isPlaylistEmpty;
   final bool isMirrored;
+  final RepeatMode repeatMode;
 
   // Callbacks
   final VoidCallback onTogglePlay;
@@ -36,6 +38,7 @@ class PlayerBottomBar extends StatelessWidget {
   final VoidCallback? onToggleTracks;
   final VoidCallback onStop;
   final VoidCallback onToggleMirror;
+  final VoidCallback onToggleRepeat;
 
   const PlayerBottomBar({
     super.key,
@@ -51,6 +54,7 @@ class PlayerBottomBar extends StatelessWidget {
     required this.hasPrevious,
     required this.isPlaylistEmpty,
     required this.isMirrored,
+    required this.repeatMode,
     required this.onTogglePlay,
     required this.onNext,
     required this.onPrevious,
@@ -64,6 +68,7 @@ class PlayerBottomBar extends StatelessWidget {
     required this.onTogglePlaylist,
     this.onToggleTracks,
     required this.onToggleMirror,
+    required this.onToggleRepeat,
     required this.onStop,
   });
 
@@ -174,6 +179,23 @@ class PlayerBottomBar extends StatelessWidget {
                   ),
                   onPressed: onToggleMirror,
                   tooltip: isMirrored ? 'Disable Mirror' : 'Enable Mirror',
+                ),
+                // Repeat button
+                IconButton(
+                  icon: Icon(
+                    repeatMode != RepeatMode.one
+                        ? LucideIcons.repeat
+                        : LucideIcons.repeat1,
+                    color: repeatMode != RepeatMode.none
+                        ? Colors.blue
+                        : Colors.white,
+                  ),
+                  onPressed: onToggleRepeat,
+                  tooltip: switch (repeatMode) {
+                    RepeatMode.none => 'Repeat: Off',
+                    RepeatMode.all => 'Repeat: All',
+                    RepeatMode.one => 'Repeat: One',
+                  },
                 ),
                 // Always on top button
                 IconButton(
