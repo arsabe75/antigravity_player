@@ -5,10 +5,12 @@ import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:path/path.dart' as path;
+import 'package:window_manager/window_manager.dart';
 
 import '../../config/router/routes.dart';
 import '../../domain/entities/playlist_entity.dart';
 import '../providers/playlist_notifier.dart';
+import '../widgets/window_controls.dart';
 
 class PlaylistManagerScreen extends ConsumerStatefulWidget {
   const PlaylistManagerScreen({super.key});
@@ -279,6 +281,10 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
               ),
           ],
         ),
+        flexibleSpace: GestureDetector(
+          onPanStart: (_) => windowManager.startDragging(),
+          behavior: HitTestBehavior.translucent,
+        ),
         actions: [
           IconButton(
             icon: const Icon(LucideIcons.filePlus),
@@ -302,6 +308,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
             tooltip: 'Save As...',
             onPressed: _items.isEmpty ? null : () => _savePlaylist(asNew: true),
           ),
+          const WindowControls(),
         ],
       ),
       body: Column(

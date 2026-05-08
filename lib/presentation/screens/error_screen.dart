@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:window_manager/window_manager.dart';
+
+import '../widgets/window_controls.dart';
 
 /// Error screen displayed when navigation fails (404, invalid routes, etc.)
 class ErrorScreen extends StatelessWidget {
@@ -14,6 +17,16 @@ class ErrorScreen extends StatelessWidget {
     final colorScheme = theme.colorScheme;
 
     return Scaffold(
+      appBar: AppBar(
+        automaticallyImplyLeading: false,
+        flexibleSpace: GestureDetector(
+          onPanStart: (_) => windowManager.startDragging(),
+          behavior: HitTestBehavior.translucent,
+        ),
+        actions: const [
+          WindowControls(),
+        ],
+      ),
       body: Center(
         child: Padding(
           padding: const EdgeInsets.all(32.0),

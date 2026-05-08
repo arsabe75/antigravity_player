@@ -23,7 +23,7 @@ class WindowControls extends StatelessWidget {
         ),
         IconButton(
           icon: Icon(
-            LucideIcons.maximize,
+            LucideIcons.square,
             color: theme.colorScheme.onSurface,
             size: 20,
           ),

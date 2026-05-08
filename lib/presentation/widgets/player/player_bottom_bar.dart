@@ -110,7 +110,7 @@ class PlayerBottomBar extends StatelessWidget {
               children: [
                 // Stop button
                 IconButton(
-                  icon: const Icon(LucideIcons.square, color: Colors.white),
+                  icon: const Icon(LucideIcons.stopCircle, color: Colors.white),
                   onPressed: onStop,
                   tooltip: 'Stop',
                 ),

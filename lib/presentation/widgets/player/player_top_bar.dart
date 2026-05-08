@@ -78,7 +78,7 @@ class PlayerTopBar extends StatelessWidget {
               ),
               IconButton(
                 icon: const Icon(
-                  LucideIcons.maximize,
+                  LucideIcons.square,
                   color: Colors.white,
                   size: AppConstants.iconSize,
                 ),
