@@ -118,6 +118,10 @@ class PlayerNotifier extends _$PlayerNotifier {
   static const int _maxSeekRecoveryExtensions = 3;
   int? _currentProxyFileId;
 
+  // L9: Protección contra seeks concurrentes
+  bool _isSeeking = false;
+  Duration? _pendingSeekPosition;
+
   /// Buffer para errores de streaming que llegan cuando el video actual
   /// no coincide con el fileId del error (ej. durante transiciones).
   /// Al cargar un video, se verifica este buffer para mostrar errores pendientes.
@@ -896,39 +900,58 @@ class PlayerNotifier extends _$PlayerNotifier {
   }
 
   Future<void> seekTo(Duration position) async {
-    // Cancelar recuperación de seek anterior
-    _seekRecoveryTimer?.cancel();
-    _seekRecoveryTimer = null;
-    _lastSeekTarget = position;
-    _lastSeekTime = DateTime.now();
-    _seekRecoveryExtensions = 0;
-
-    // CRITICAL: Si hay un error de streaming activo, limpiar ANTES del seek.
-    // Sin esto, el proxy rechaza la request con 503 (circuit breaker) y el
-    // seek falla silenciosamente sin que el player entre en buffering.
-    if (state.streamingError != null && _currentProxyFileId != null) {
-      debugPrint(
-        'PlayerNotifier: Limpiando error de streaming antes de seek',
-      );
-      clearStreamingError();
+    // L9: Protección contra seeks concurrentes. Si ya hay un seek en progreso,
+    // guardar la posición pendiente y retornar. Se procesará al terminar.
+    if (_isSeeking) {
+      debugPrint('PlayerNotifier: L9 - Seek en progreso, encolando $position');
+      _pendingSeekPosition = position;
+      return;
     }
+    _isSeeking = true;
 
-    // Capturar bytes descargados para detectar progreso en recovery
-    _seekRecoveryBytesSnapshot = _currentProxyFileId != null
-        ? _streamingRepository
-                .getLoadingProgress(_currentProxyFileId!)
-                ?.bytesLoaded ??
-            0
-        : 0;
+    try {
+      // Cancelar recuperación de seek anterior
+      _seekRecoveryTimer?.cancel();
+      _seekRecoveryTimer = null;
+      _lastSeekTarget = position;
+      _lastSeekTime = DateTime.now();
+      _seekRecoveryExtensions = 0;
 
-    // Optimistic update
-    state = state.copyWith(position: position, seekRetryCount: 0);
-    await _savePosition();
-    await _repository.seekTo(position);
+      // CRITICAL: Si hay un error de streaming activo, limpiar ANTES del seek.
+      // Sin esto, el proxy rechaza la request con 503 (circuit breaker) y el
+      // seek falla silenciosamente sin que el player entre en buffering.
+      if (state.streamingError != null && _currentProxyFileId != null) {
+        debugPrint(
+          'PlayerNotifier: Limpiando error de streaming antes de seek',
+        );
+        clearStreamingError();
+      }
 
-    // Iniciar recuperación automática solo para videos de Telegram
-    if (_currentProxyFileId != null) {
-      _startSeekRecovery(position);
+      // Capturar bytes descargados para detectar progreso en recovery
+      _seekRecoveryBytesSnapshot = _currentProxyFileId != null
+          ? _streamingRepository
+                  .getLoadingProgress(_currentProxyFileId!)
+                  ?.bytesLoaded ??
+              0
+          : 0;
+
+      // Optimistic update
+      state = state.copyWith(position: position, seekRetryCount: 0);
+      await _savePosition();
+      await _repository.seekTo(position);
+
+      // Iniciar recuperación automática solo para videos de Telegram
+      if (_currentProxyFileId != null) {
+        _startSeekRecovery(position);
+      }
+    } finally {
+      _isSeeking = false;
+      // L9: Procesar seek pendiente que se encoló mientras este estaba en progreso
+      final pending = _pendingSeekPosition;
+      if (pending != null) {
+        _pendingSeekPosition = null;
+        seekTo(pending);
+      }
     }
   }
 
@@ -973,6 +996,29 @@ class PlayerNotifier extends _$PlayerNotifier {
             // Actualizar snapshot para la siguiente comparación
             _seekRecoveryBytesSnapshot = currentBytes;
             // Re-programar sin re-seek destructivo
+            _startSeekRecovery(seekTarget);
+            return;
+          }
+        }
+
+        // H3: Verificación final de progreso ANTES del re-seek destructivo.
+        // Entre el timeout y la ejecución del re-seek, el proxy puede haber
+        // empezado a entregar datos. Un último chequeo síncrono evita
+        // cancelar una descarga que acaba de arrancar.
+        if (_currentProxyFileId != null) {
+          final finalProgress = _streamingRepository.getLoadingProgress(
+            _currentProxyFileId!,
+          );
+          final finalBytes = finalProgress?.bytesLoaded ?? 0;
+          if (finalBytes > _seekRecoveryBytesSnapshot + 100 * 1024) {
+            final progressMB =
+                (finalBytes - _seekRecoveryBytesSnapshot) / 1024 / 1024;
+            debugPrint(
+              'PlayerNotifier: H3 - Proxy empezó a entregar datos '
+              '(${progressMB.toStringAsFixed(1)}MB) justo antes del re-seek, '
+              'extendiendo timeout en vez de reintentar',
+            );
+            _seekRecoveryBytesSnapshot = finalBytes;
             _startSeekRecovery(seekTarget);
             return;
           }

@@ -263,6 +263,10 @@ class FvpVideoRepository implements VideoRepository {
       }
     }
 
+    // M4: FVP no expone una API para cambiar cache-secs en runtime.
+    // MediaKit sí lo soporta vía (_player.platform as dynamic).setProperty().
+    // En FVP, el buffer se configura estáticamente en registerWith().
+    // Limitación documentada en el docstring de la clase.
     await _controller?.seekTo(position);
   }
 

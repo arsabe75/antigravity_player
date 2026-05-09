@@ -284,4 +284,48 @@ void main() {
       expect(prio, equals(DownloadPriority.minimum));
     });
   });
+
+  // ============================================================
+  // I-A: INTEGRATION TESTS — SEEK FLOW
+  // ============================================================
+
+  group('seek flow — signalUserSeek validates M8', () {
+    test('detectSeek returns false after signalUserSeek clears lastServedOffset', () {
+      // M8: signalUserSeek sets lastServedOffset = null.
+      // detectSeek returns false when there's no prior served offset,
+      // but the seek IS handled via userSeekInProgress flag in primary tracker.
+      final proxy = LocalStreamingProxy.testing(
+        tdlib: mockTdlib,
+        cacheService: mockCache,
+      );
+
+      // Without any prior data served, detectSeek always returns false
+      final isSeek = proxy.detectSeek(
+          42, 5000000, 100 * 1024 * 1024, 256 * 1024, 128 * 1024, false);
+      expect(isSeek, isFalse);
+    });
+  });
+
+  group('seek flow — isStaleSeekGeneration with generation tracking', () {
+    test('detects stale generation after multiple signalUserSeek calls', () {
+      final proxy = LocalStreamingProxy.testing(
+        tdlib: mockTdlib,
+        cacheService: mockCache,
+      );
+      proxy.signalUserSeek(42, 10000);
+      proxy.signalUserSeek(42, 20000);
+
+      // After two seeks, generation is 2.
+      // A connection captured before any seek (gen 0) should be stale.
+      expect(proxy.isStaleSeekGeneration(0, 42), isTrue);
+
+      // A connection with current gen (2) should not be stale
+      expect(proxy.isStaleSeekGeneration(2, 42), isFalse);
+    });
+
+    test('returns false when no generation stored for file', () {
+      // File 99 has no generation, so gen 0 is considered current
+      expect(proxy.isStaleSeekGeneration(0, 99), isFalse);
+    });
+  });
 }

@@ -20,6 +20,7 @@ class MediaKitVideoRepository implements VideoRepository {
 
   StreamSubscription? _playerSub;
   StreamSubscription? _tracksSub;
+  StreamSubscription? _seekBufferRestoreSub; // M5
   Duration _currentPosition = Duration.zero;
   Duration _totalDuration = Duration.zero;
   bool _isPlaying = false;
@@ -68,6 +69,8 @@ class MediaKitVideoRepository implements VideoRepository {
     }
     _controller = null;
     _videoUrl = null;
+    _seekBufferRestoreSub?.cancel(); // M5
+    _seekBufferRestoreSub = null;
 
     // Close StreamControllers safely (check if not already closed)
     if (!_positionController.isClosed) {
@@ -372,17 +375,41 @@ class MediaKitVideoRepository implements VideoRepository {
 
     await _player!.seek(position);
 
-    // Restore normal buffer after 5 seconds
-    Future.delayed(const Duration(seconds: 5), () async {
-      if (_player != null) {
-        try {
-          await (_player!.platform as dynamic).setProperty('cache-secs', '20');
-          debugPrint('MediaKit: Restored normal buffer (20s)');
-        } catch (e) {
-          // Player may have been disposed
-        }
+    // M5: Restauración adaptativa del buffer.
+    // En vez de un timer fijo de 5s, espera a que el player reporte
+    // posición >= seekTarget (playback reanudado) para restaurar el buffer.
+    // Esto evita restaurar el buffer antes de que lleguen los datos,
+    // lo que forzaría un re-buffer completo.
+    _seekBufferRestoreSub?.cancel();
+    final seekTarget = position;
+    _seekBufferRestoreSub = _positionController.stream.listen((pos) {
+      // Tolerancia de 500ms: playback efectivamente reanudado en la nueva posición
+      if (pos >= seekTarget - const Duration(milliseconds: 500)) {
+        _seekBufferRestoreSub?.cancel();
+        _seekBufferRestoreSub = null;
+        _restoreNormalBuffer();
       }
     });
+
+    // Fallback: restaurar después de 15s máximo si el stream nunca emite
+    Future.delayed(const Duration(seconds: 15), () {
+      if (_seekBufferRestoreSub != null) {
+        _seekBufferRestoreSub?.cancel();
+        _seekBufferRestoreSub = null;
+        _restoreNormalBuffer();
+      }
+    });
+  }
+
+  Future<void> _restoreNormalBuffer() async {
+    if (_player != null) {
+      try {
+        await (_player!.platform as dynamic).setProperty('cache-secs', '20');
+        debugPrint('MediaKit: Restored normal buffer (20s)');
+      } catch (e) {
+        // Player may have been disposed
+      }
+    }
   }
 
   @override

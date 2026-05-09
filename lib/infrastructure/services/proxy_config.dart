@@ -406,4 +406,32 @@ class ProxyConfig {
     final effectiveMax = absoluteMax < absoluteMin ? absoluteMin : absoluteMax;
     return (fileSize * percent).round().clamp(absoluteMin, effectiveMax);
   }
+
+  // ============================================================
+  // I-E: RUNTIME OVERRIDE MECHANISM
+  // ============================================================
+
+  static final Map<String, dynamic> _overrides = {};
+
+  /// Apply a runtime override for a config key.
+  /// Returns the previous override value, or null if none existed.
+  static dynamic override(String key, dynamic value) {
+    final previous = _overrides[key];
+    _overrides[key] = value;
+    return previous;
+  }
+
+  /// Remove a runtime override, restoring the default value.
+  static dynamic removeOverride(String key) => _overrides.remove(key);
+
+  /// Clear all runtime overrides.
+  static void clearOverrides() => _overrides.clear();
+
+  /// Read a config value, checking overrides first.
+  /// Usage: `ProxyConfig.config<int>('seekDebounceMs', 150)`
+  static T config<T>(String key, T defaultValue) {
+    final override = _overrides[key];
+    if (override != null) return override as T;
+    return defaultValue;
+  }
 }

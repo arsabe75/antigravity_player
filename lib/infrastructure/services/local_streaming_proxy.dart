@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'tdlib_client.dart';
@@ -307,6 +308,11 @@ class LocalStreamingProxy {
   // new HTTP connections cleared the flag before old loops could see it.
   final Map<int, int> _seekGeneration = {};
 
+  // H1: Captura la generación de seek al momento de programar la detección
+  // de MOOV. Se usa en _startProactiveMoovDownload para detectar si un seek
+  // del usuario ocurrió entre la programación y la ejecución asíncrona.
+  final Map<int, int> _moovDetectionSeekGen = {};
+
   // FIX T: Connection flood detector for broken videos.
   // Tracks eviction timestamps per file. If evictions exceed threshold
   // in a time window, the video is marked as corrupt and rejected.
@@ -355,8 +361,9 @@ class LocalStreamingProxy {
   // SEEK DEBOUNCE: Prevent flooding TDLib with rapid seek cancellations
   final Map<int, Timer?> _seekDebounceTimers = {};
   final Map<int, int> _pendingSeekOffsets = {};
-  // See ProxyConfig.seekDebounceMs for configuration
-  static int get _seekDebounceMs => ProxyConfig.seekDebounceMs;
+  // I-E: Soporta override en runtime para tuning
+  static int get _seekDebounceMs =>
+      ProxyConfig.config<int>('seekDebounceMs', 150);
 
   // STALL DETECTION: Track last download progress
   final Map<int, int> _lastDownloadProgress = {};
@@ -401,9 +408,7 @@ class LocalStreamingProxy {
   /// These files need MOOV verification before seeking to saved position
   final Set<int> _stalePlaybackPositions = {};
 
-  /// Track the saved position to seek to after MOOV is loaded
-  /// Key: fileId, Value: byte offset to seek to
-  final Map<int, int> _pendingSeekAfterMoov = {};
+  // L12: _pendingSeekAfterMoov migrado a ProxyFileState.pendingSeekAfterMoov
 
   // ============================================================
   // RETRY TRACKING AND ERROR HANDLING
@@ -618,12 +623,13 @@ class LocalStreamingProxy {
   /// Get the pending seek position for a file (set when MOOV-first redirect happened)
   /// Returns null if no pending seek.
   /// UI should call this after MOOV loads to know where to seek.
-  int? getPendingSeekPosition(int fileId) => _pendingSeekAfterMoov[fileId];
+  int? getPendingSeekPosition(int fileId) =>
+      _getOrCreateState(fileId).pendingSeekAfterMoov;
 
   /// Acknowledge that a pending seek has been processed.
   /// Call this after the player has successfully seeked to the pending position.
   void acknowledgePendingSeek(int fileId) {
-    _pendingSeekAfterMoov.remove(fileId);
+    _getOrCreateState(fileId).pendingSeekAfterMoov = null;
     _stalePlaybackPositions.remove(fileId);
     _getOrCreateState(fileId).loadState = FileLoadState.playing;
     _debugLog('Proxy: P0 FIX - Pending seek acknowledged for $fileId');
@@ -727,6 +733,7 @@ class LocalStreamingProxy {
     _evictedConnectionOffsets.remove(fileId);
     _connectionsSkipDecrement.remove(fileId);
     _seekGeneration.remove(fileId);
+    _moovDetectionSeekGen.remove(fileId); // H1
     _evictionTimestamps.remove(fileId);
     _lastDownloadProgress.remove(fileId);
     _lastStallCheckOffset.remove(fileId);
@@ -750,6 +757,7 @@ class LocalStreamingProxy {
     _evictedConnectionOffsets.clear();
     _connectionsSkipDecrement.clear();
     _seekGeneration.clear();
+    _moovDetectionSeekGen.clear(); // H1
     _evictionTimestamps.clear();
 
     _downloadMetrics.clear();
@@ -765,8 +773,11 @@ class LocalStreamingProxy {
     _streamingCaches.clear();
     _cacheLruOrder.clear();
 
-    // Clear file load states (handled by _fileStates.clear())
-    _pendingSeekAfterMoov.clear();
+    // Clear file load states
+    for (final state in _fileStates.values) {
+      state.pendingSeekAfterMoov = null;
+    }
+    _fileStates.clear();
     _stalePlaybackPositions.clear();
 
     // Cancel all per-file stall timers
@@ -823,6 +834,17 @@ class LocalStreamingProxy {
     // timestamp so the first downloadFile for the new seek target isn't blocked.
     _getOrCreateState(fileId).waitingForOffset = null;
     _getOrCreateState(fileId).lastDownloadFileCallTime = null;
+
+    // M8: Invalidar lastServedOffset en seeks explícitos.
+    // Si dos seeks consecutivos caen en rangos de bytes similares,
+    // el segundo no sería detectado como seek si lastServedOffset
+    // mantiene el valor del seek anterior.
+    _getOrCreateState(fileId).lastServedOffset = null;
+
+    // I-D: Registrar inicio del seek para telemetría de latencia
+    _getOrCreateState(fileId).seekStartTime = DateTime.now();
+    _getOrCreateState(fileId).seekTargetTimeMs = targetTimeMs;
+    _getOrCreateState(fileId).seekLatencyMs = null;
 
     // FIX 5b: Release the MOOV download lock. The proactive MOOV download sets
     // forcedMoovOffset, which causes the streaming loop to skip ALL calls to
@@ -1581,11 +1603,26 @@ class LocalStreamingProxy {
 
           _getOrCreateState(fileId).lastServedOffset = currentReadOffset;
 
+          // I-D: Medir latencia de seek cuando se sirven los primeros bytes
+          // en la nueva posición después de un seek del usuario.
           final fileState = _getOrCreateState(fileId);
+          if (fileState.seekStartTime != null && fileState.seekLatencyMs == null) {
+            final targetOffset = fileState.lastExplicitSeekOffset;
+            if (targetOffset != null && currentReadOffset >= targetOffset) {
+              fileState.seekLatencyMs = DateTime.now()
+                  .difference(fileState.seekStartTime!)
+                  .inMilliseconds;
+              _logInfo(
+                'Proxy: I-D - Seek latency for $fileId: '
+                '${fileState.seekLatencyMs}ms '
+                '(target offset: ${targetOffset ~/ 1024}KB)',
+              );
+            }
+          }
           if (fileState.loadState == FileLoadState.loadingMoov &&
               currentReadOffset >= moovReadyBytes) {
             fileState.loadState = FileLoadState.moovReady;
-            final pendingSeek = _pendingSeekAfterMoov[fileId];
+            final pendingSeek = fileState.pendingSeekAfterMoov;
             if (pendingSeek != null) {
               _debugLog(
                 'Proxy: P0 FIX - MOOV ready for $fileId. '
@@ -2212,6 +2249,7 @@ class LocalStreamingProxy {
             fileId: fileId,
           );
           shouldUpdatePrimary = false;
+          playbackState.zombieBlockCount++; // L11
         }
       }
 
@@ -2240,7 +2278,7 @@ class LocalStreamingProxy {
 
       if (currentState == FileLoadState.idle ||
           currentState == FileLoadState.loadingMoov) {
-        _pendingSeekAfterMoov[fileId] = start;
+        _getOrCreateState(fileId).pendingSeekAfterMoov = start;
         _getOrCreateState(fileId).loadState = FileLoadState.loadingMoov;
 
         final isMoovAtEnd = _getOrCreateState(fileId).isMoovAtEnd;
@@ -2265,7 +2303,7 @@ class LocalStreamingProxy {
         );
         _getOrCreateState(fileId).loadState = FileLoadState.seeking;
         _stalePlaybackPositions.remove(fileId);
-        _pendingSeekAfterMoov.remove(fileId);
+        _getOrCreateState(fileId).pendingSeekAfterMoov = null;
       }
     } else if (_stalePlaybackPositions.contains(fileId) &&
         start <= seekThreshold) {
@@ -2698,6 +2736,7 @@ class LocalStreamingProxy {
     bool isBlocking = false,
     bool forceRestart = false,
     bool isSeekRequest = false,
+    bool isPreview = false, // H2: preview seek target
     int? seekGeneration,
   }) async {
     // Guard pipeline — each returns if the request should be aborted
@@ -2717,7 +2756,9 @@ class LocalStreamingProxy {
     // Guard pipeline continued
     if (_isScrubbingDebounced(fileId, requestedOffset, totalSize)) return;
     if (await _isDataAvailableNow(fileId, requestedOffset)) return;
-    if (_isRateLimited(fileId, isBlocking: isBlocking, forceRestart: forceRestart, isSeekRequest: isSeekRequest)) return;
+    // H2: Preview seeks tienen su propio cooldown (previewCooldownMs).
+    // No aplicar rate limiting del pipeline principal.
+    if (!isPreview && _isRateLimited(fileId, isBlocking: isBlocking, forceRestart: forceRestart, isSeekRequest: isSeekRequest)) return;
 
     final currentDownloadOffset = cached?.downloadOffset ?? 0;
     final currentPrefix = cached?.downloadedPrefixSize ?? 0;
@@ -2745,9 +2786,12 @@ class LocalStreamingProxy {
         fileId, requestedOffset, totalSize, primaryOffset,
         isMoovDownload, isBlocking);
 
-    final priority = resolvePriority(
+    final computedPriority = resolvePriority(
         fileId, requestedOffset, totalSize, primaryOffset,
         distanceToPlayback, shouldForcePriority, isMoovDownload);
+    // H2: Preview seeks usan prioridad medium (16) para no competir
+    // con la descarga principal del playback activo.
+    final priority = isPreview ? DownloadPriority.medium : computedPriority;
 
     if (_isDisplacementBlocked(fileId, requestedOffset, priority,
         activeDownloadTarget, sequentialWindow, now,
@@ -3260,23 +3304,22 @@ class LocalStreamingProxy {
           ProxyConfig.activePlaybackMaxBytes,
         );
 
-    if (isActivePlayback && _pendingSeekOffsets.containsKey(fileId)) {
+    if (!isActivePlayback) return false;
+
+    // M6: Solo debouncear si ya hay un seek pendiente (2do+ seek en secuencia).
+    // El primer seek de una secuencia pasa sin debounce, eliminando 150ms de
+    // latencia innecesaria para seeks individuales.
+    if (_pendingSeekOffsets.containsKey(fileId)) {
       _handleDebouncedSeek(fileId, requestedOffset);
       return true;
     }
 
+    // M6: Edge case — ventana muy corta (50ms) para capturar races donde
+    // el primer seek debounced ya disparó su timer pero el streaming loop
+    // no lo ha procesado todavía.
     final debounceLastSeek = _getOrCreateState(fileId).lastSeekTime;
-    final isRapidSeek =
-        isActivePlayback &&
-        debounceLastSeek != null &&
-        DateTime.now().difference(debounceLastSeek).inMilliseconds <
-            ProxyConfig.seekDebounceMs;
-
-    if (isRapidSeek) {
-      _logTrace(
-        'Rapid seek detected for $fileId, debouncing to ${requestedOffset ~/ 1024}KB',
-        fileId: fileId,
-      );
+    if (debounceLastSeek != null &&
+        DateTime.now().difference(debounceLastSeek).inMilliseconds < 50) {
       _handleDebouncedSeek(fileId, requestedOffset);
       return true;
     }
@@ -3497,12 +3540,25 @@ class LocalStreamingProxy {
     // no interferir — el debounce se encargará de reiniciar la descarga.
     if (_pendingSeekOffsets.containsKey(fileId)) return;
 
-    // Si un seek debounced se ejecutó recientemente, dar tiempo a TDLib
-    // para procesar la nueva descarga antes de declarar stall.
+    // M7: Grace period adaptativo post-seek debounced.
+    // Fast network: 1s, Normal: 3s, Slow: 6s.
+    // Evita falsos stalls en redes lentas y acelera recuperación en rápidas.
     final lastDebounced = state.lastDebouncedSeekTime;
-    if (lastDebounced != null &&
-        DateTime.now().difference(lastDebounced) < const Duration(seconds: 3)) {
-      return;
+    if (lastDebounced != null) {
+      final metricsForGrace = _downloadMetrics[fileId];
+      final Duration debounceGrace;
+      if (metricsForGrace == null || metricsForGrace.bytesPerSecond == 0) {
+        debounceGrace = const Duration(seconds: 3);
+      } else if (metricsForGrace.isFastNetwork) {
+        debounceGrace = const Duration(seconds: 1);
+      } else if (metricsForGrace.isSlowNetwork) {
+        debounceGrace = const Duration(seconds: 6);
+      } else {
+        debounceGrace = const Duration(seconds: 3);
+      }
+      if (DateTime.now().difference(lastDebounced) < debounceGrace) {
+        return;
+      }
     }
 
     // MOOV PROTECTION
@@ -3769,18 +3825,21 @@ class LocalStreamingProxy {
     }
     if (_abortedRequests.contains(fileId)) return;
 
-    // FIX: Skip proactive MOOV if user recently seeked. The seek target
-    // takes priority over MOOV preloading. Without this guard, an async
-    // _startProactiveMoovDownload callback could set forcedMoovOffset
-    // AFTER signalUserSeek already released it (FIX 5b), creating a lock
-    // that blocks the seek target download.
-    final seekTime = state.lastExplicitSeekTime;
-    if (seekTime != null &&
-        DateTime.now().difference(seekTime).inMilliseconds < 3000) {
+    // H1: Skip proactive MOOV if user seeked since detection was scheduled.
+    // Reemplaza la ventana de 3s por tiempo con una verificación basada en
+    // generación de seek. Si la generación cambió, el seek del usuario tiene
+    // prioridad sobre la precarga del MOOV.
+    // Esto evita la condición de carrera donde un callback asíncrono re-adquiere
+    // forcedMoovOffset después de que signalUserSeek ya lo liberó.
+    final detectionGen = _moovDetectionSeekGen[fileId];
+    final currentGen = _seekGeneration[fileId] ?? 0;
+    if (detectionGen != null && detectionGen != currentGen) {
       _debugLog(
-        'Proxy: Skipping proactive MOOV for $fileId - '
-        'user seeked ${DateTime.now().difference(seekTime).inMilliseconds}ms ago',
+        'Proxy: H1 - Skipping proactive MOOV for $fileId: '
+        'seek generation changed ($detectionGen -> $currentGen) '
+        'since detection was scheduled',
       );
+      _moovDetectionSeekGen.remove(fileId);
       return;
     }
 
@@ -3841,8 +3900,22 @@ class LocalStreamingProxy {
         !_earlyMoovDetectionTriggered.contains(fileId)) {
       _earlyMoovDetectionTriggered.add(fileId);
 
+      // H1: Capturar la generación de seek ANTES de programar el async,
+      // para detectar si un seek ocurrió durante la detección asíncrona.
+      _moovDetectionSeekGen[fileId] = _seekGeneration[fileId] ?? 0;
+      final capturedSeekGen = _moovDetectionSeekGen[fileId]!;
+
       // Asynchronously detect - this is non-blocking
       _detectMoovPosition(fileId, info.totalSize).then((position) {
+        // H1: Verificar que no hubo un seek del usuario mientras tanto
+        final currentGen = _seekGeneration[fileId] ?? 0;
+        if (currentGen != capturedSeekGen) {
+          _debugLog(
+            'Proxy: H1 - Skipping async MOOV detection result for $fileId: '
+            'seek generation changed ($capturedSeekGen -> $currentGen)',
+          );
+          return;
+        }
         if (position == MoovPosition.start) {
           // Great! Video is optimized for streaming
           _debugLog('Proxy: EARLY DETECT - File $fileId has MOOV at START');
@@ -3869,6 +3942,8 @@ class LocalStreamingProxy {
       _debugLog(
         'Proxy: EARLY DETECT - File $fileId inferred MOOV at END (${prefix ~/ (1024 * 1024)}MB downloaded)',
       );
+      // H1: Capturar generación antes de la descarga proactiva (mismo patrón)
+      _moovDetectionSeekGen[fileId] = _seekGeneration[fileId] ?? 0;
       // P1: Descarga proactiva por inferencia
       _startProactiveMoovDownload(fileId, info.totalSize);
     }
@@ -4222,20 +4297,21 @@ class LocalStreamingProxy {
       return;
     }
 
-    // Start download with medium priority (16) - not highest to avoid
-    // interrupting active playback if video is still playing during drag
+    // H2: Rutear preview a través del pipeline de guardias de
+    // _startDownloadAtOffset para beneficiarse de rate limiting,
+    // displacement blocking, cooldown y zombie protection.
+    // Usa prioridad medium (16) para no competir con playback principal.
     _debugLog('Proxy: Preview seek preload at $estimatedOffset for $fileId');
 
     _lastPreviewTime[fileId] = now;
 
-    _tdlib.send({
-      '@type': 'downloadFile',
-      'file_id': fileId,
-      'priority': DownloadPriority.highFloor, // High priority for seek preview
-      'offset': estimatedOffset,
-      'limit': ProxyConfig.previewPreloadBytes, // Preload around target
-      'synchronous': false,
-    });
+    _startDownloadAtOffset(
+      fileId,
+      estimatedOffset,
+      isPreview: true,
+      isBlocking: false,
+      forceRestart: false,
+    );
   }
 
   /// Get accurate byte offset for time using parsed sample table
@@ -4285,7 +4361,9 @@ class LocalStreamingProxy {
       }
     }
 
-    // Parse from file
+    // I-B: Parse from file in an isolate to avoid blocking the event loop.
+    // Mp4SampleTable.parse() does extensive binary parsing that can block
+    // the main isolate for hundreds of ms on files with many samples.
     try {
       final file = File(fileInfo.path);
       if (!await file.exists()) {
@@ -4293,32 +4371,22 @@ class LocalStreamingProxy {
         return;
       }
 
-      final raf = await _openFileWithRetry(file, fileId);
-      if (raf == null) {
-        _sampleTableCache[fileId] = null;
-        return;
-      }
-      try {
-        _sampleTableCache[fileId] = await Mp4SampleTable.parse(
-          raf,
-          fileInfo.totalSize,
+      _sampleTableCache[fileId] = await Isolate.run(
+        () => _parseSampleTableInIsolate(fileInfo.path, fileInfo.totalSize),
+      );
+      final parsed = _sampleTableCache[fileId];
+      if (parsed != null) {
+        _debugLog(
+          'Proxy: Parsed MP4 sample table for $fileId: '
+          '${parsed.samples.length} samples, '
+          '${parsed.keyframeSampleIndices.length} keyframes',
         );
-        final parsed = _sampleTableCache[fileId];
-        if (parsed != null) {
-          _debugLog(
-            'Proxy: Parsed MP4 sample table for $fileId: '
-            '${parsed.samples.length} samples, '
-            '${parsed.keyframeSampleIndices.length} keyframes',
-          );
 
-          // Save to disk cache for future use
-          if (cachePath != null) {
-            await parsed.saveToFile(cachePath);
-            _debugLog('Proxy: Saved sample table to cache for $fileId');
-          }
+        // Save to disk cache for future use
+        if (cachePath != null) {
+          await parsed.saveToFile(cachePath);
+          _debugLog('Proxy: Saved sample table to cache for $fileId');
         }
-      } finally {
-        await raf.close();
       }
     } catch (e) {
       _debugLog('Proxy: Failed to parse sample table for $fileId: $e');
@@ -4409,5 +4477,28 @@ class LocalStreamingProxy {
         }
       },
     );
+  }
+}
+
+// ============================================================
+// I-B: Top-level function for isolate-based sample table parsing
+// ============================================================
+
+/// Parses an MP4 sample table in a separate isolate to avoid blocking
+/// the main event loop during extensive binary parsing.
+///
+/// [filePath] must be an absolute path to an existing MP4 file.
+/// Returns null if the file doesn't exist or parsing fails.
+Future<Mp4SampleTable?> _parseSampleTableInIsolate(
+  String filePath,
+  int fileSize,
+) async {
+  final file = File(filePath);
+  if (!await file.exists()) return null;
+  final raf = await file.open(mode: FileMode.read);
+  try {
+    return await Mp4SampleTable.parse(raf, fileSize);
+  } finally {
+    await raf.close();
   }
 }

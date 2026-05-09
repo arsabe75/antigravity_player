@@ -69,8 +69,10 @@ class ProxyFileState {
   /// Last explicit seek target offset
   int? lastExplicitSeekOffset;
 
-  /// Número de secuencia de seek. Se incrementa con cada seek del usuario.
-  /// Conexiones HTTP creadas antes del último seek no actualizan primaryPlaybackOffset.
+  /// Número de secuencia de seeks aceptados por el primary tracker.
+  /// Diferente de _seekGeneration (que cuenta TODOS los seeks para zombie protection).
+  /// Se incrementa solo cuando un seek cambia efectivamente el primaryPlaybackOffset.
+  /// Útil para diagnóstico y trazabilidad de cambios de offset primario.
   int seekSequenceNumber = 0;
 
   /// Pending seek offset after MOOV loads
@@ -146,6 +148,24 @@ class ProxyFileState {
   /// Timestamp of the first early exit in the current detection window.
   DateTime? firstEarlyExitTime;
 
+  /// L11: Número de bloqueos zombie (primary updates suprimidos de conexiones
+  /// HTTP obsoletas después de un seek). Para diagnóstico.
+  int zombieBlockCount = 0;
+
+  // ============================================================
+  // I-D: SEEK LATENCY TELEMETRY
+  // ============================================================
+
+  /// Timestamp cuando signalUserSeek fue llamado (para medición de latencia).
+  DateTime? seekStartTime;
+
+  /// Offset objetivo del seek en milisegundos (para diagnóstico).
+  int? seekTargetTimeMs;
+
+  /// Latencia del seek en ms (medida cuando se sirve el primer byte en la
+  /// nueva posición). Null si el seek aún no ha completado.
+  int? seekLatencyMs;
+
   /// Read offset of the last early exit.
   /// Used to detect if exits are stuck at the same point.
   int? lastEarlyExitReadOffset;
@@ -214,6 +234,12 @@ class ProxyFileState {
     earlyExitCount = 0;
     firstEarlyExitTime = null;
     lastEarlyExitReadOffset = null;
+    zombieBlockCount = 0;
+
+    // I-D: Seek latency telemetry
+    seekStartTime = null;
+    seekTargetTimeMs = null;
+    seekLatencyMs = null;
 
     // Prefetch
     prefetchActive = false;
