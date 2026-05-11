@@ -7,6 +7,7 @@ import 'package:media_kit/media_kit.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:flutter_single_instance/flutter_single_instance.dart';
 import 'package:windows_single_instance/windows_single_instance.dart';
+import 'package:flutter_media_session/flutter_media_session.dart';
 
 import 'config/router/app_router.dart';
 import 'config/theme/app_theme.dart';
@@ -91,6 +92,16 @@ void main(List<String> args) async {
     await windowManager.focus();
     await windowManager.setResizable(true);
   });
+
+  // Register Windows SMTC (SystemMediaTransportControls) for media key integration.
+  // This must be called before activating the media session so the Windows volume
+  // overlay shows "Antigravity Player" instead of "Unknown Application".
+  if (Platform.isWindows) {
+    await FlutterMediaSession().setWindowsAppUserModelId(
+      'antigravity_player',
+      displayName: 'Antigravity Player',
+    );
+  }
 
   // Windows Single Instance Check
   // Note: Windows hook relies on window creation, so it runs after GUI init.
