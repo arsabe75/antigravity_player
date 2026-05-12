@@ -36,8 +36,50 @@ class MediaControlService {
 
   // ── Linux MPRIS ──────────────────────────────────────────────────────
 
+  Future<void> _ensureDesktopEntry() async {
+    try {
+      final home = Platform.environment['HOME'];
+      if (home == null) return;
+
+      final xdgDataHome = Platform.environment['XDG_DATA_HOME'] ??
+          '$home/.local/share';
+      final appsDir = Directory('$xdgDataHome/applications');
+      if (!await appsDir.exists()) {
+        await appsDir.create(recursive: true);
+      }
+
+      final desktopFile = File('${appsDir.path}/$_desktopEntry.desktop');
+      // Only write if not present or if updated
+      final content = '''
+[Desktop Entry]
+Version=1.0
+Name=Video Player App
+Comment=Futuristic Video Player
+Exec=video_player_app
+Icon=$_desktopEntry
+Terminal=false
+Type=Application
+Categories=AudioVideo;Player;Video;
+Keywords=video;movie;player;
+StartupNotify=true
+StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
+''';
+
+      if (!await desktopFile.exists()) {
+        await desktopFile.writeAsString(content);
+      }
+    } catch (_) {
+      // Non-critical — media keys may not route if this fails
+    }
+  }
+
   Future<void> _initMpris() async {
     try {
+      // Ensure the .desktop file is installed in the XDG applications
+      // directory so KDE/GNOME can find it via the MPRIS DesktopEntry property
+      // and route physical media keys to our window.
+      await _ensureDesktopEntry();
+
       _mprisClient = DBusClient.session();
 
       final reply = await _mprisClient!.requestName(
