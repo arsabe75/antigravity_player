@@ -11,9 +11,11 @@ class MediaControlService {
   StreamSubscription<String>? _nameLostSub;
   int _mprisRetryCount = 0;
   static const _maxRetries = 5;
-  static const _busName = 'org.mpris.MediaPlayer2.antigravity_player';
-  static const _desktopEntry = 'antigravity_player';
-  static const _identity = 'Antigravity Player';
+  static const _busName = 'org.mpris.MediaPlayer2.video_player_app';
+  static const _desktopEntry = 'video_player_app';
+  static const _identity = 'Video Player App';
+  int _trackCounter = 0;
+  String? _lastMetaTitle;
 
   // Windows SMTC
   StreamSubscription<MediaAction>? _smTcSubscription;
@@ -181,6 +183,12 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
   ) {
     if (_mprisObject == null) return;
 
+    // Increment track counter when the title changes (new video loaded)
+    if (title != _lastMetaTitle) {
+      _lastMetaTitle = title;
+      _trackCounter++;
+    }
+
     final metadata = _buildMprisMetadata(title, duration, artist, thumbUrl);
     _mprisObject!.metadata = metadata;
 
@@ -197,7 +205,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     String? thumbUrl,
   ) {
     final map = <String, DBusValue>{
-      'mpris:trackid': DBusObjectPath('/org/mpris/MediaPlayer2/antigravity_player/track/0'),
+      'mpris:trackid': DBusObjectPath('/org/mpris/MediaPlayer2/video_player_app/track/$_trackCounter'),
       'mpris:length': DBusInt64(duration.inMicroseconds),
       'xesam:title': DBusString(title),
     };

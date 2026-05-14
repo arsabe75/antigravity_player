@@ -95,11 +95,11 @@ void main(List<String> args) async {
 
   // Register Windows SMTC (SystemMediaTransportControls) for media key integration.
   // This must be called before activating the media session so the Windows volume
-  // overlay shows "Antigravity Player" instead of "Unknown Application".
+  // overlay shows the application name instead of "Unknown Application".
   if (Platform.isWindows) {
     await FlutterMediaSession().setWindowsAppUserModelId(
-      'antigravity_player',
-      displayName: 'Antigravity Player',
+      'video_player_app',
+      displayName: 'Video Player App',
     );
   }
 
@@ -108,7 +108,7 @@ void main(List<String> args) async {
   if (Platform.isWindows) {
     await WindowsSingleInstance.ensureSingleInstance(
       args,
-      "antigravity_player",
+      "video_player_app",
       onSecondWindow: (newArgs) {
         debugPrint("Second window attempted to open on Windows with args: $newArgs");
         if (newArgs.isNotEmpty) {

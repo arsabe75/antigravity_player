@@ -114,14 +114,14 @@ install(FILES "${CMAKE_SOURCE_DIR}/tdlib_libs/libtdjson.so"
 # Install .desktop file for MPRIS media key routing.
 # KDE/GNOME locate the desktop file via the MPRIS DesktopEntry property
 # and use StartupWMClass to associate the running window with this file.
-install(FILES "${CMAKE_SOURCE_DIR}/antigravity_player.desktop"
+install(FILES "${CMAKE_SOURCE_DIR}/video_player_app.desktop"
         DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/applications"
         COMPONENT Runtime)
 
 # Install application icon referenced by the .desktop file.
 install(FILES "${CMAKE_SOURCE_DIR}/../assets/icon/app_icon_v2.png"
         DESTINATION "${INSTALL_BUNDLE_DATA_DIR}/icons/hicolor/256x256/apps"
-        RENAME "antigravity_player.png"
+        RENAME "video_player_app.png"
         COMPONENT Runtime)
 
 # Copy the native assets provided by the build.dart from all packages.
