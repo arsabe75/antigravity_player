@@ -45,19 +45,26 @@ class MediaControlService {
 
       final xdgDataHome = Platform.environment['XDG_DATA_HOME'] ??
           '$home/.local/share';
+
+      // Copy icon from bundle to user's XDG icons directory so KDE/GNOME
+      // can find it via the Icon= key in the desktop entry.
+      await _installRuntimeIcon(xdgDataHome);
+
       final appsDir = Directory('$xdgDataHome/applications');
       if (!await appsDir.exists()) {
         await appsDir.create(recursive: true);
       }
 
       final desktopFile = File('${appsDir.path}/$_desktopEntry.desktop');
-      // Only write if not present or if updated
+
+      // Use the real executable path so KDE can launch the app even when
+      // the bundle is not in PATH (e.g. manual copy to an arbitrary folder).
       final content = '''
 [Desktop Entry]
 Version=1.0
 Name=Video Player App
 Comment=Futuristic Video Player
-Exec=video_player_app
+Exec=${Platform.resolvedExecutable}
 Icon=$_desktopEntry
 Terminal=false
 Type=Application
@@ -67,11 +74,45 @@ StartupNotify=true
 StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
 ''';
 
-      if (!await desktopFile.exists()) {
+      // Overwrite if missing or stale — catches bundle relocation and
+      // upgrades from the old relative-path version.
+      final current = await desktopFile.exists()
+          ? await desktopFile.readAsString().catchError((_) => '')
+          : null;
+      if (current != content) {
         await desktopFile.writeAsString(content);
       }
     } catch (_) {
       // Non-critical — media keys may not route if this fails
+    }
+  }
+
+  /// Copies the application icon from the release bundle (data/icons/...)
+  /// into the user's XDG icons directory so the desktop entry Icon= key
+  /// resolves. In dev builds the bundle icon may not exist; silently skipped.
+  Future<void> _installRuntimeIcon(String xdgDataHome) async {
+    try {
+      final destDir = Directory(
+        '$xdgDataHome/icons/hicolor/256x256/apps',
+      );
+      final destIcon = File('${destDir.path}/$_desktopEntry.png');
+      if (await destIcon.exists()) return;
+
+      // Icon is installed by CMake next to the binary at:
+      //   $bundleRoot/data/icons/hicolor/256x256/apps/<name>.png
+      final exeDir = File(Platform.resolvedExecutable).parent.path;
+      final srcIcon = File(
+        '$exeDir/data/icons/hicolor/256x256/apps/$_desktopEntry.png',
+      );
+
+      if (await srcIcon.exists()) {
+        if (!await destDir.exists()) {
+          await destDir.create(recursive: true);
+        }
+        await srcIcon.copy(destIcon.path);
+      }
+    } catch (_) {
+      // Best-effort — icon is cosmetic, not having it doesn't break MPRIS
     }
   }
 
