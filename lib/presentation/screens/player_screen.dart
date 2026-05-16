@@ -512,6 +512,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             cursor: state.isFullscreen && !state.areControlsVisible
                 ? SystemMouseCursors.none
                 : SystemMouseCursors.basic,
+            onEnter: (_) => _startHideTimer(),
             onHover: _onHover,
             onExit: (_) => _onExit(),
             child: Stack(
@@ -527,7 +528,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                 ),
 
                 // Controls Layer
-                AnimatedOpacity(
+                IgnorePointer(
+                  ignoring: !state.areControlsVisible,
+                  child: AnimatedOpacity(
                   opacity: state.areControlsVisible ? 1.0 : 0.0,
                   duration: AppConstants.controlsFadeDuration,
                   child: Stack(
@@ -591,6 +594,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                       ),
                     ],
                   ),
+                ),
                 ),
 
                 // File Picker Button (if no video loaded)
@@ -887,6 +891,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           // Right click - toggle play/pause or show menu (currently just toggle)
           return;
         }
+
+        // Show controls on any touch/mouse click (same as mouse hover behavior)
+        _startHideTimer();
 
         _tapCount++;
         _tapTimer?.cancel();
