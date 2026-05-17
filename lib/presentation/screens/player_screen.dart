@@ -411,13 +411,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       }
 
       if (previous?.currentVideoPath != next.currentVideoPath &&
-          next.currentVideoPath != null) {
+          next.currentVideoPath != null &&
+          next.duration > Duration.zero) {
         final title = next.currentVideoTitle ??
             next.currentVideoPath!.split('/').last;
         _mediaControl.updateMetaData(title: title, duration: next.duration);
       }
       // Also update duration if it changes (e.g. loaded)
-      if (previous?.duration != next.duration) {
+      // Only send metadata when we have a real duration (>0).
+      // Sending mpris:length=0 causes KDE Connect to hide the metadata display.
+      if (previous?.duration != next.duration &&
+          next.duration > Duration.zero) {
         final title = next.currentVideoTitle ??
             next.currentVideoPath?.split('/').last ??
             'Unknown';

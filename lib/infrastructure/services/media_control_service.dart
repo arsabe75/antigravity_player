@@ -248,7 +248,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
   ) {
     final map = <String, DBusValue>{
       'mpris:trackid': DBusObjectPath('/org/mpris/MediaPlayer2/video_player_app/track/$_trackCounter'),
-      'mpris:length': DBusInt64(duration.inMicroseconds),
+      'mpris:length': DBusInt64(duration.inMicroseconds > 0 ? duration.inMicroseconds : -1),
       'xesam:title': DBusString(title),
     };
     if (artist != null && artist.isNotEmpty) {
