@@ -186,7 +186,11 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       ref.read(playerProvider.notifier).seekTo(newPos);
     };
 
-    // Send initial state
+    // Initialize the MPRIS/SMTC service first so the D-Bus object exists
+    // before we try to send any metadata or playback state.
+    await _mediaControl.init();
+
+    // Send initial state (must happen AFTER init — _mprisObject is null otherwise)
     final currentState = ref.read(playerProvider);
     _mediaControl.updatePlaybackState(
       isPlaying: currentState.isPlaying,
@@ -194,15 +198,12 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       speed: currentState.playbackSpeed,
     );
     if (currentState.currentVideoPath != null) {
-      final filename = currentState.currentVideoPath!.split('/').last;
       _mediaControl.updateMetaData(
-        title: filename,
+        title: currentState.currentVideoTitle ??
+            currentState.currentVideoPath!.split('/').last,
         duration: currentState.duration,
       );
     }
-
-    // Initialize service
-    await _mediaControl.init();
   }
 
   @override
@@ -409,13 +410,16 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
       if (previous?.currentVideoPath != next.currentVideoPath &&
           next.currentVideoPath != null) {
-        final filename = next.currentVideoPath!.split('/').last;
-        _mediaControl.updateMetaData(title: filename, duration: next.duration);
+        final title = next.currentVideoTitle ??
+            next.currentVideoPath!.split('/').last;
+        _mediaControl.updateMetaData(title: title, duration: next.duration);
       }
       // Also update duration if it changes (e.g. loaded)
       if (previous?.duration != next.duration) {
-        final filename = next.currentVideoPath?.split('/').last ?? 'Unknown';
-        _mediaControl.updateMetaData(title: filename, duration: next.duration);
+        final title = next.currentVideoTitle ??
+            next.currentVideoPath?.split('/').last ??
+            'Unknown';
+        _mediaControl.updateMetaData(title: title, duration: next.duration);
       }
     });
 
