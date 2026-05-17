@@ -186,24 +186,17 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       ref.read(playerProvider.notifier).seekTo(newPos);
     };
 
-    // Initialize the MPRIS/SMTC service first so the D-Bus object exists
-    // before we try to send any metadata or playback state.
-    await _mediaControl.init();
-
-    // Send initial state (must happen AFTER init — _mprisObject is null otherwise)
+    // Initialize the MPRIS/SMTC service with the current player state so
+    // it never appears as "Stopped" — KDE Connect ignores Stopped players.
     final currentState = ref.read(playerProvider);
-    _mediaControl.updatePlaybackState(
+    await _mediaControl.init(
       isPlaying: currentState.isPlaying,
       position: currentState.position,
-      speed: currentState.playbackSpeed,
+      title: currentState.currentVideoTitle ??
+          currentState.currentVideoPath?.split('/').last ??
+          '',
+      duration: currentState.duration,
     );
-    if (currentState.currentVideoPath != null) {
-      _mediaControl.updateMetaData(
-        title: currentState.currentVideoTitle ??
-            currentState.currentVideoPath!.split('/').last,
-        duration: currentState.duration,
-      );
-    }
   }
 
   @override
