@@ -225,6 +225,12 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
   ) {
     if (_mprisObject == null) return;
 
+    // Guard: never emit metadata with zero duration.
+    // Per MPRIS spec, mpris:length=-1 means unknown, but KDE Connect
+    // treats it as "no valid track" and hides the metadata display.
+    // Wait for the real duration to arrive before emitting anything.
+    if (duration <= Duration.zero) return;
+
     // Increment track counter when the title changes (new video loaded)
     if (title != _lastMetaTitle) {
       _lastMetaTitle = title;
