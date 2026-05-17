@@ -28,19 +28,9 @@ class MediaControlService {
   void Function()? onPrevious;
   void Function(Duration)? onSeek;
 
-  Future<void> init({
-    bool isPlaying = false,
-    Duration position = Duration.zero,
-    String title = '',
-    Duration duration = Duration.zero,
-  }) async {
+  Future<void> init() async {
     if (Platform.isLinux) {
-      await _initMpris(
-        isPlaying: isPlaying,
-        position: position,
-        title: title,
-        duration: duration,
-      );
+      await _initMpris();
     } else if (Platform.isWindows) {
       await _initSmTc();
     }
@@ -127,12 +117,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     });
   }
 
-  Future<void> _initMpris({
-    bool isPlaying = false,
-    Duration position = Duration.zero,
-    String title = '',
-    Duration duration = Duration.zero,
-  }) async {
+  Future<void> _initMpris() async {
     try {
       // Ensure the .desktop file is installed in the XDG applications
       // directory so KDE/GNOME can find it via the MPRIS DesktopEntry property
@@ -154,16 +139,6 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
 
       _mprisRetryCount = 0;
 
-      // Build initial metadata so KDE Connect never sees an empty state.
-      // The initial playback status must NOT be Stopped — that tells MPRIS
-      // clients the player is inactive, causing them to ignore it.
-      final initialStatus = isPlaying
-          ? _MprisPlaybackStatus.playing
-          : _MprisPlaybackStatus.paused;
-      final initialMeta = title.isNotEmpty
-          ? _buildMprisMetadata(title, duration, null, null)
-          : DBusDict.stringVariant({});
-
       _mprisObject = _MprisObject(
         DBusObjectPath('/org/mpris/MediaPlayer2'),
         _identity,
@@ -174,9 +149,6 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
         () => onNext?.call(),
         () => onPrevious?.call(),
         (offset) => onSeek?.call(offset),
-        initialPlaybackStatus: initialStatus,
-        initialMetadata: initialMeta,
-        initialPosition: position,
       );
 
       await _mprisClient!.registerObject(_mprisObject!);
@@ -416,10 +388,10 @@ class _MprisObject extends DBusObject {
   final _MprisMethodCallback onPrevious;
   final _MprisSeekCallback onSeek;
 
-  _MprisPlaybackStatus playbackStatus;
+  _MprisPlaybackStatus playbackStatus = _MprisPlaybackStatus.paused;
   Duration? position;
   double rate = 1.0;
-  DBusDict metadata;
+  DBusDict metadata = DBusDict.stringVariant({});
 
   _MprisObject(
     super.path,
@@ -430,13 +402,8 @@ class _MprisObject extends DBusObject {
     this.onPlayPause,
     this.onNext,
     this.onPrevious,
-    this.onSeek, {
-    required _MprisPlaybackStatus initialPlaybackStatus,
-    required DBusDict initialMetadata,
-    Duration? initialPosition,
-  })  : playbackStatus = initialPlaybackStatus,
-        position = initialPosition,
-        metadata = initialMetadata;
+    this.onSeek,
+  );
 
   // ── Introspection ──────────────────────────────────────────────────
 
