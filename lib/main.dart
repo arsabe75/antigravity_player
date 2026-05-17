@@ -18,6 +18,7 @@ import 'infrastructure/services/secure_storage_service.dart';
 import 'presentation/providers/video_repository_provider.dart';
 import 'presentation/providers/player_notifier.dart';
 import 'infrastructure/services/external_file_handler.dart';
+import 'infrastructure/services/media_control_service.dart';
 
 class _PreloadedBackendNotifier extends PlayerBackend {
   final String initialBackend;
@@ -66,6 +67,9 @@ void main(List<String> args) async {
       }
       exit(0);
     }
+    // Create the XDG desktop entry at startup so KDE can find the app
+    // and route media keys before any video is opened.
+    MediaControlService.ensureDesktopEntry();
   }
 
   // Initialize Window Manager

@@ -38,7 +38,10 @@ class MediaControlService {
 
   // ── Linux MPRIS ──────────────────────────────────────────────────────
 
-  Future<void> _ensureDesktopEntry() async {
+  /// Ensures the XDG desktop entry file exists at the standard applications
+  /// path with an absolute Exec path. Safe to call early during startup
+  /// before any window opens.
+  static Future<void> ensureDesktopEntry() async {
     try {
       final home = Platform.environment['HOME'];
       if (home == null) return;
@@ -85,7 +88,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
   /// Copies the application icon from the release bundle (data/icons/...)
   /// into the user's XDG icons directory so the desktop entry Icon= key
   /// resolves. Fire-and-forget — best-effort, non-blocking.
-  void _installRuntimeIcon(String xdgDataHome) {
+  static void _installRuntimeIcon(String xdgDataHome) {
     // Run asynchronously; failures are silently ignored.
     Future.sync(() async {
       try {
@@ -119,7 +122,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
       // Ensure the .desktop file is installed in the XDG applications
       // directory so KDE/GNOME can find it via the MPRIS DesktopEntry property
       // and route physical media keys to our window.
-      await _ensureDesktopEntry();
+      await ensureDesktopEntry();
 
       _mprisClient = DBusClient.session();
 
