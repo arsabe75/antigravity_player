@@ -250,7 +250,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     if (duration > Duration.zero) {
       _mprisObject!.emitPropertiesChanged(
         'org.mpris.MediaPlayer2.Player',
-        changedProperties: {'Metadata': DBusVariant(metadata)},
+        changedProperties: {'Metadata': metadata},
       );
     }
   }
