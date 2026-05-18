@@ -217,6 +217,14 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     }
   }
 
+  /// Updates MPRIS metadata internally and optionally emits PropertiesChanged.
+  ///
+  /// The metadata dict and mpris:trackid are ALWAYS kept current so that
+  /// D-Bus Get/GetAll return accurate information. However, PropertiesChanged
+  /// is only emitted when the duration is known (>0). Emitting with
+  /// mpris:length=0 causes KDE Connect to dismiss the metadata display and
+  /// ignore subsequent updates (per the MPRIS spec, clients may treat
+  /// length=0 as "no valid track").
   void _updateMprisMetaData(
     String title,
     Duration duration,
@@ -225,13 +233,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
   ) {
     if (_mprisObject == null) return;
 
-    // Guard: never emit metadata with zero duration.
-    // Per MPRIS spec, mpris:length=-1 means unknown, but KDE Connect
-    // treats it as "no valid track" and hides the metadata display.
-    // Wait for the real duration to arrive before emitting anything.
-    if (duration <= Duration.zero) return;
-
-    // Increment track counter when the title changes (new video loaded)
+    // Track title changes for unique mpris:trackid per video
     if (title != _lastMetaTitle) {
       _lastMetaTitle = title;
       _trackCounter++;
@@ -240,10 +242,17 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     final metadata = _buildMprisMetadata(title, duration, artist, thumbUrl);
     _mprisObject!.metadata = metadata;
 
-    _mprisObject!.emitPropertiesChanged(
-      'org.mpris.MediaPlayer2.Player',
-      changedProperties: {'Metadata': DBusVariant(metadata)},
-    );
+    // Only notify KDE Connect when we have a real duration.
+    // Emitting PropertiesChanged with mpris:length=0/-1 during the
+    // loadVideo() state reset causes KDE Connect to hide the entire
+    // metadata section (title, time, progress) while keeping transport
+    // buttons functional.
+    if (duration > Duration.zero) {
+      _mprisObject!.emitPropertiesChanged(
+        'org.mpris.MediaPlayer2.Player',
+        changedProperties: {'Metadata': DBusVariant(metadata)},
+      );
+    }
   }
 
   DBusDict _buildMprisMetadata(

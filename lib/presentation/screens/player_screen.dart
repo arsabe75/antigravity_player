@@ -199,11 +199,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       position: currentState.position,
       speed: currentState.playbackSpeed,
     );
-    // Only send metadata if we have a real duration (>0).
-    // Sending mpris:length=0/-1 before the video loads causes KDE Connect
-    // to dismiss the metadata display and ignore later updates.
-    if (currentState.currentVideoPath != null &&
-        currentState.duration > Duration.zero) {
+    if (currentState.currentVideoPath != null) {
       _mediaControl.updateMetaData(
         title: currentState.currentVideoTitle ??
             currentState.currentVideoPath!.split('/').last,
@@ -415,17 +411,13 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       }
 
       if (previous?.currentVideoPath != next.currentVideoPath &&
-          next.currentVideoPath != null &&
-          next.duration > Duration.zero) {
+          next.currentVideoPath != null) {
         final title = next.currentVideoTitle ??
             next.currentVideoPath!.split('/').last;
         _mediaControl.updateMetaData(title: title, duration: next.duration);
       }
       // Also update duration if it changes (e.g. loaded)
-      // Only send metadata when we have a real duration (>0).
-      // Sending mpris:length=0 causes KDE Connect to hide the metadata display.
-      if (previous?.duration != next.duration &&
-          next.duration > Duration.zero) {
+      if (previous?.duration != next.duration) {
         final title = next.currentVideoTitle ??
             next.currentVideoPath?.split('/').last ??
             'Unknown';
