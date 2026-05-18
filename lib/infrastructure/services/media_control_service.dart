@@ -16,6 +16,7 @@ class MediaControlService {
   static const _identity = 'Video Player App';
   int _trackCounter = 0;
   String? _lastMetaTitle;
+  String? _lastTrackId;
 
   // Windows SMTC
   StreamSubscription<MediaAction>? _smTcSubscription;
@@ -230,29 +231,30 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     Duration duration,
     String? artist,
     String? thumbUrl,
+    String? trackId,
   ) {
     if (_mprisObject == null) return;
 
-    // Track title changes for unique mpris:trackid per video
-    if (title != _lastMetaTitle) {
-      _lastMetaTitle = title;
-      _trackCounter++;
+    // Track title/ID changes for unique mpris:trackid per video
+    if (trackId != null) {
+      if (trackId != _lastTrackId) {
+        _lastTrackId = trackId;
+        _trackCounter++;
+      }
+    } else {
+      if (title != _lastMetaTitle) {
+        _lastMetaTitle = title;
+        _trackCounter++;
+      }
     }
 
     final metadata = _buildMprisMetadata(title, duration, artist, thumbUrl);
     _mprisObject!.metadata = metadata;
 
-    // Only notify KDE Connect when we have a real duration.
-    // Emitting PropertiesChanged with mpris:length=0/-1 during the
-    // loadVideo() state reset causes KDE Connect to hide the entire
-    // metadata section (title, time, progress) while keeping transport
-    // buttons functional.
-    if (duration > Duration.zero) {
-      _mprisObject!.emitPropertiesChanged(
-        'org.mpris.MediaPlayer2.Player',
-        changedProperties: {'Metadata': metadata},
-      );
-    }
+    _mprisObject!.emitPropertiesChanged(
+      'org.mpris.MediaPlayer2.Player',
+      changedProperties: {'Metadata': metadata},
+    );
   }
 
   DBusDict _buildMprisMetadata(
@@ -263,9 +265,11 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
   ) {
     final map = <String, DBusValue>{
       'mpris:trackid': DBusObjectPath('/org/mpris/MediaPlayer2/video_player_app/track/$_trackCounter'),
-      'mpris:length': DBusInt64(duration.inMicroseconds > 0 ? duration.inMicroseconds : -1),
       'xesam:title': DBusString(title),
     };
+    if (duration > Duration.zero) {
+      map['mpris:length'] = DBusInt64(duration.inMicroseconds);
+    }
     if (artist != null && artist.isNotEmpty) {
       map['xesam:artist'] = DBusArray.string([artist]);
     }
@@ -358,9 +362,10 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     required Duration duration,
     String? artist,
     String? thumbUrl,
+    String? trackId,
   }) {
     if (Platform.isLinux) {
-      _updateMprisMetaData(title, duration, artist, thumbUrl);
+      _updateMprisMetaData(title, duration, artist, thumbUrl, trackId);
     } else if (Platform.isWindows) {
       _updateSmTcMetaData(title, duration, artist, thumbUrl);
     }

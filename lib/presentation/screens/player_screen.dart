@@ -204,6 +204,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
         title: currentState.currentVideoTitle ??
             currentState.currentVideoPath!.split('/').last,
         duration: currentState.duration,
+        trackId: currentState.currentVideoPath,
       );
     }
   }
@@ -414,14 +415,22 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           next.currentVideoPath != null) {
         final title = next.currentVideoTitle ??
             next.currentVideoPath!.split('/').last;
-        _mediaControl.updateMetaData(title: title, duration: next.duration);
+        _mediaControl.updateMetaData(
+          title: title,
+          duration: next.duration,
+          trackId: next.currentVideoPath,
+        );
       }
       // Also update duration if it changes (e.g. loaded)
       if (previous?.duration != next.duration) {
         final title = next.currentVideoTitle ??
             next.currentVideoPath?.split('/').last ??
             'Unknown';
-        _mediaControl.updateMetaData(title: title, duration: next.duration);
+        _mediaControl.updateMetaData(
+          title: title,
+          duration: next.duration,
+          trackId: next.currentVideoPath,
+        );
       }
     });
 
