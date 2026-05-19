@@ -127,17 +127,6 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
 
       _mprisClient = DBusClient.session();
 
-      final reply = await _mprisClient!.requestName(
-        _busName,
-        flags: {DBusRequestNameFlag.replaceExisting, DBusRequestNameFlag.doNotQueue},
-      );
-
-      if (reply != DBusRequestNameReply.primaryOwner) {
-        await _mprisClient!.close();
-        _mprisClient = null;
-        return;
-      }
-
       _mprisRetryCount = 0;
 
       _mprisObject = _MprisObject(
@@ -152,7 +141,22 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
         (offset) => onSeek?.call(offset),
       );
 
+      // IMPORTANTE: Registrar el objeto ANTES de solicitar el nombre del bus.
+      // Esto previene una condición de carrera donde KDE mpris-proxy intenta
+      // consultar el objeto apenas detecta el nombre, fallando si aún no existe.
       await _mprisClient!.registerObject(_mprisObject!);
+
+      final reply = await _mprisClient!.requestName(
+        _busName,
+        flags: {DBusRequestNameFlag.replaceExisting, DBusRequestNameFlag.doNotQueue},
+      );
+
+      if (reply != DBusRequestNameReply.primaryOwner) {
+        await _mprisClient!.close();
+        _mprisClient = null;
+        _mprisObject = null;
+        return;
+      }
 
       _nameLostSub = _mprisClient!.nameLost.listen((_) => _onNameLost());
     } catch (e) {
