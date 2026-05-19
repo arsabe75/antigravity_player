@@ -20,6 +20,7 @@ class MediaControlService {
 
   // Windows SMTC
   StreamSubscription<MediaAction>? _smTcSubscription;
+  Duration _currentPosition = Duration.zero;
 
   // Callbacks
   void Function()? onPlay;
@@ -294,6 +295,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
         MediaAction.pause,
         MediaAction.skipToNext,
         MediaAction.skipToPrevious,
+        MediaAction.seekTo,
       });
 
       _smTcSubscription = session.onMediaAction.listen((action) {
@@ -307,6 +309,9 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
           onPrevious?.call();
         } else if (action == MediaAction.stop) {
           onPause?.call();
+        } else if (action.name == MediaAction.seekTo.name && action.seekPosition != null) {
+          final offset = action.seekPosition! - _currentPosition;
+          onSeek?.call(offset);
         }
       });
 
@@ -354,6 +359,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     required Duration position,
     required double speed,
   }) {
+    _currentPosition = position;
     if (Platform.isLinux) {
       _updateMprisPlaybackState(isPlaying, position, speed);
     } else if (Platform.isWindows) {
@@ -383,6 +389,21 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     _mprisClient = null;
     _smTcSubscription?.cancel();
     _smTcSubscription = null;
+    if (Platform.isWindows) {
+      final session = FlutterMediaSession();
+      session.updateMetadata(const MediaMetadata(
+        title: '',
+        artist: '',
+        album: '',
+        artworkUri: null,
+        duration: Duration.zero,
+      ));
+      session.updatePlaybackState(const PlaybackState(
+        status: PlaybackStatus.idle,
+        position: Duration.zero,
+        speed: 0.0,
+      ));
+    }
   }
 }
 
