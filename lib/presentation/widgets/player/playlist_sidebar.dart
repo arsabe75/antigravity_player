@@ -278,8 +278,7 @@ class PlaylistSidebar extends ConsumerWidget {
   ) {
     return ReorderableListView.builder(
       itemCount: playlist.length,
-      onReorder: (oldIndex, newIndex) {
-        if (newIndex > oldIndex) newIndex--;
+      onReorderItem: (oldIndex, newIndex) {
         notifier.moveItem(oldIndex, newIndex);
       },
       itemBuilder: (context, index) {

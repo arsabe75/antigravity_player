@@ -60,9 +60,6 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
 
   void _onReorder(int oldIndex, int newIndex) {
     setState(() {
-      if (oldIndex < newIndex) {
-        newIndex -= 1;
-      }
       final item = _items.removeAt(oldIndex);
       _items.insert(newIndex, item);
       _isDirty = true;
@@ -348,7 +345,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
                 : ReorderableListView.builder(
                     padding: const EdgeInsets.only(bottom: 80),
                     itemCount: _items.length,
-                    onReorder: _onReorder,
+                    onReorderItem: _onReorder,
                     itemBuilder: (context, index) {
                       final item = _items[index];
                       return ListTile(
