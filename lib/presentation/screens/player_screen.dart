@@ -202,7 +202,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
     if (currentState.currentVideoPath != null) {
       _mediaControl.updateMetaData(
         title: currentState.currentVideoTitle ??
-            currentState.currentVideoPath!.split('/').last,
+            p.basename(currentState.currentVideoPath!),
         duration: currentState.duration,
         trackId: currentState.currentVideoPath,
       );
@@ -414,7 +414,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       if (previous?.currentVideoPath != next.currentVideoPath &&
           next.currentVideoPath != null) {
         final title = next.currentVideoTitle ??
-            next.currentVideoPath!.split('/').last;
+            p.basename(next.currentVideoPath!);
         _mediaControl.updateMetaData(
           title: title,
           duration: next.duration,
@@ -424,7 +424,9 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
       // Also update duration if it changes (e.g. loaded)
       if (previous?.duration != next.duration) {
         final title = next.currentVideoTitle ??
-            next.currentVideoPath?.split('/').last ??
+            (next.currentVideoPath != null
+                ? p.basename(next.currentVideoPath!)
+                : null) ??
             'Unknown';
         _mediaControl.updateMetaData(
           title: title,

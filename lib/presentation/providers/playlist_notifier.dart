@@ -1,5 +1,6 @@
 import 'dart:math';
 
+import 'package:path/path.dart' as p;
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 
 import '../../domain/entities/playlist_entity.dart';
@@ -72,7 +73,7 @@ class PlaylistNotifier extends _$PlaylistNotifier {
     final item = PlaylistItem(
       path: path,
       isNetwork: isNetwork,
-      title: title ?? path.split('/').last,
+      title: title ?? p.basename(path),
     );
     // Actualizamos el estado creando una nueva copia con el nuevo item añadido.
     // Nunca mutamos el estado directamente (ej. state.items.add(item) NO funcionaría si la lista fuera mutable,

@@ -1,3 +1,5 @@
+import 'package:path/path.dart' as p;
+
 class VideoEntity {
   final String path;
   final bool isNetwork;
@@ -5,5 +7,5 @@ class VideoEntity {
 
   const VideoEntity({required this.path, this.isNetwork = false, this.title});
 
-  String get name => title ?? path.split('/').last;
+  String get name => title ?? p.basename(path);
 }
