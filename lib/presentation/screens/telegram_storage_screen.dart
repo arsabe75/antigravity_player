@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:lucide_icons/lucide_icons.dart';
+import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../domain/entities/storage_statistics.dart';
 import '../../infrastructure/services/telegram_cache_service.dart';
 import '../../infrastructure/services/cache_settings.dart';
