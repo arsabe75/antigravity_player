@@ -20,6 +20,7 @@ class MediaControlService {
 
   // Windows SMTC
   StreamSubscription<MediaAction>? _smTcSubscription;
+  bool _smTcActionsCleared = false;
   Duration _currentPosition = Duration.zero;
 
   // Callbacks
@@ -326,6 +327,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     Duration position,
     double speed,
   ) {
+    _restoreSmTcActionsIfNeeded();
     final session = FlutterMediaSession();
     final status = isPlaying ? PlaybackStatus.playing : PlaybackStatus.paused;
 
@@ -336,12 +338,27 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     ));
   }
 
+  void _restoreSmTcActionsIfNeeded() {
+    if (!_smTcActionsCleared) return;
+    _smTcActionsCleared = false;
+    FlutterMediaSession().updateAvailableActions({
+      MediaAction.play,
+      MediaAction.pause,
+      MediaAction.skipToNext,
+      MediaAction.skipToPrevious,
+      MediaAction.seekTo,
+    });
+  }
+
   void _updateSmTcMetaData(
     String title,
     Duration duration,
     String? artist,
     String? thumbUrl,
   ) {
+    if (title.isNotEmpty && duration > Duration.zero) {
+      _restoreSmTcActionsIfNeeded();
+    }
     final session = FlutterMediaSession();
 
     session.updateMetadata(MediaMetadata(
@@ -391,6 +408,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     _smTcSubscription = null;
     if (Platform.isWindows) {
       final session = FlutterMediaSession();
+      session.updateAvailableActions({});
       session.updateMetadata(const MediaMetadata(
         title: '',
         artist: '',
@@ -403,6 +421,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
         position: Duration.zero,
         speed: 0.0,
       ));
+      _smTcActionsCleared = true;
     }
   }
 }
