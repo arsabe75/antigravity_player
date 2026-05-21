@@ -529,6 +529,42 @@ class MediaKitVideoRepository implements VideoRepository {
   }
 
   @override
+  String? getAudioTrackId(int index) {
+    if (_player == null) return null;
+    final tracks = _player!.state.tracks.audio;
+    if (index < 0 || index >= tracks.length) return null;
+    return tracks[index].id;
+  }
+
+  @override
+  String? getSubtitleTrackId(int index) {
+    if (_player == null) return null;
+    final tracks = _player!.state.tracks.subtitle;
+    if (index < 0 || index >= tracks.length) return null;
+    return tracks[index].id;
+  }
+
+  @override
+  int? findAudioTrackIndexById(String id) {
+    if (_player == null) return null;
+    final tracks = _player!.state.tracks.audio;
+    for (var i = 0; i < tracks.length; i++) {
+      if (tracks[i].id == id) return i;
+    }
+    return null;
+  }
+
+  @override
+  int? findSubtitleTrackIndexById(String id) {
+    if (_player == null) return null;
+    final tracks = _player!.state.tracks.subtitle;
+    for (var i = 0; i < tracks.length; i++) {
+      if (tracks[i].id == id) return i;
+    }
+    return null;
+  }
+
+  @override
   Stream<void> get tracksChangedStream => _tracksChangedController.stream;
 
   @override

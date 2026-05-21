@@ -1133,23 +1133,65 @@ class PlayerNotifier extends _$PlayerNotifier {
   Future<void> _loadTracks() async {
     final audioTracks = await _repository.getAudioTracks();
     final subtitleTracks = await _repository.getSubtitleTracks();
+
+    var audioIndex = 0;
+    var subtitleIndex = 0;
+
+    // Restore saved track preferences for this video
+    final storageKey = _getStableStorageKey(state.currentVideoPath!);
+    final savedAudioId = _storageService.getTrackPreference(storageKey, 'audio');
+    if (savedAudioId != null) {
+      final idx = _repository.findAudioTrackIndexById(savedAudioId);
+      if (idx != null) audioIndex = idx;
+    }
+
+    final savedSubtitleId = _storageService.getTrackPreference(
+      storageKey,
+      'subtitle',
+    );
+    if (savedSubtitleId != null) {
+      final idx = _repository.findSubtitleTrackIndexById(savedSubtitleId);
+      if (idx != null) subtitleIndex = idx;
+    }
+
     state = state.copyWith(
       audioTracks: audioTracks,
       subtitleTracks: subtitleTracks,
-      // Reset current selection or set default if needed
-      currentAudioTrack: 0,
-      currentSubtitleTrack: 0,
+      currentAudioTrack: audioIndex,
+      currentSubtitleTrack: subtitleIndex,
     );
+
+    // Apply restored selections to the player
+    if (audioIndex != 0) {
+      await _repository.setAudioTrack(audioIndex);
+    }
+    if (subtitleIndex != 0) {
+      await _repository.setSubtitleTrack(subtitleIndex);
+    }
   }
 
   Future<void> setAudioTrack(int trackId) async {
     await _repository.setAudioTrack(trackId);
     state = state.copyWith(currentAudioTrack: trackId);
+    await _persistTrackPreference('audio', trackId);
   }
 
   Future<void> setSubtitleTrack(int trackId) async {
     await _repository.setSubtitleTrack(trackId);
     state = state.copyWith(currentSubtitleTrack: trackId);
+    await _persistTrackPreference('subtitle', trackId);
+  }
+
+  Future<void> _persistTrackPreference(String trackType, int trackId) async {
+    final storageKey = _getStableStorageKey(state.currentVideoPath!);
+
+    final trackIdStr = trackType == 'audio'
+        ? _repository.getAudioTrackId(trackId)
+        : _repository.getSubtitleTrackId(trackId);
+
+    if (trackIdStr != null) {
+      await _storageService.saveTrackPreference(storageKey, trackType, trackIdStr);
+    }
   }
 
   /// Manually refresh available tracks (useful for streaming videos)

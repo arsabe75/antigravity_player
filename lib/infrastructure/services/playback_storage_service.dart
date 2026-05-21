@@ -21,6 +21,32 @@ class PlaybackStorageService {
     await prefs.remove('$_prefix$videoPath');
   }
 
+  static const String _trackPrefPrefix = 'track_pref_';
+
+  /// Saves the user's track preference (audio or subtitle) for a given video key.
+  Future<void> saveTrackPreference(
+    String videoKey,
+    String trackType,
+    String trackId,
+  ) async {
+    final prefs = SecureStorageService.instance;
+    await prefs.setString('$_trackPrefPrefix${trackType}_$videoKey', trackId);
+  }
+
+  /// Retrieves the user's saved track preference (audio or subtitle) for a video key.
+  /// Returns the track ID string, or null if no preference was saved.
+  String? getTrackPreference(String videoKey, String trackType) {
+    final prefs = SecureStorageService.instance;
+    return prefs.getString('$_trackPrefPrefix${trackType}_$videoKey');
+  }
+
+  /// Clears saved track preferences for a given video key.
+  Future<void> clearTrackPreferences(String videoKey) async {
+    final prefs = SecureStorageService.instance;
+    await prefs.remove('${_trackPrefPrefix}audio_$videoKey');
+    await prefs.remove('${_trackPrefPrefix}subtitle_$videoKey');
+  }
+
   /// Clears all saved playback positions.
   /// Called when cache is cleared to avoid resume-after-cache-clear issues.
   Future<void> clearAllPositions() async {

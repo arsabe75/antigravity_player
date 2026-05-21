@@ -35,6 +35,22 @@ abstract class VideoRepository {
   /// Sets the subtitle track by ID
   Future<void> setSubtitleTrack(int trackId);
 
+  /// Returns the media_kit track ID string for a given audio track index.
+  /// Returns null if the index is out of bounds or tracks are unavailable.
+  String? getAudioTrackId(int index);
+
+  /// Returns the media_kit track ID string for a given subtitle track index.
+  /// Returns null if the index is out of bounds or tracks are unavailable.
+  String? getSubtitleTrackId(int index);
+
+  /// Finds the audio track index by its media_kit ID string.
+  /// Returns null if no track with the given ID is found.
+  int? findAudioTrackIndexById(String id);
+
+  /// Finds the subtitle track index by its media_kit ID string.
+  /// Returns null if no track with the given ID is found.
+  int? findSubtitleTrackIndexById(String id);
+
   /// Stream that emits when available tracks change (for streaming videos)
   Stream<void> get tracksChangedStream;
 

@@ -326,6 +326,18 @@ class FvpVideoRepository implements VideoRepository {
     // No-op
   }
 
+  @override
+  String? getAudioTrackId(int index) => null;
+
+  @override
+  String? getSubtitleTrackId(int index) => null;
+
+  @override
+  int? findAudioTrackIndexById(String id) => null;
+
+  @override
+  int? findSubtitleTrackIndexById(String id) => null;
+
   // FVP doesn't support track detection - return empty stream
   @override
   Stream<void> get tracksChangedStream => const Stream.empty();

@@ -168,25 +168,30 @@ class _TrackSelectionSheetState extends ConsumerState<TrackSelectionSheet> {
         final name = tracks[id]!;
         final isSelected = id == currentId;
 
-        return ListTile(
-          leading: Icon(
-            icon,
-            color: isSelected ? Colors.blue : Colors.white54,
-            size: 20,
-          ),
-          title: Text(
-            name,
-            style: TextStyle(
-              color: isSelected ? Colors.blue : Colors.white,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        return Material(
+          type: MaterialType.transparency,
+          child: ListTile(
+            splashColor: Colors.white10,
+            hoverColor: Colors.white10,
+            leading: Icon(
+              icon,
+              color: isSelected ? Colors.blue : Colors.white54,
+              size: 20,
             ),
+            title: Text(
+              name,
+              style: TextStyle(
+                color: isSelected ? Colors.blue : Colors.white,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+            trailing: isSelected
+                ? const Icon(Icons.check, color: Colors.blue, size: 20)
+                : null,
+            onTap: () {
+              onSelect(id);
+            },
           ),
-          trailing: isSelected
-              ? const Icon(Icons.check, color: Colors.blue, size: 20)
-              : null,
-          onTap: () {
-            onSelect(id);
-          },
         );
       },
     );
