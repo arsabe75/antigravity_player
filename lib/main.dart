@@ -67,9 +67,6 @@ void main(List<String> args) async {
       }
       exit(0);
     }
-    // Create the XDG desktop entry at startup so KDE can find the app
-    // and route media keys before any video is opened.
-    MediaControlService.ensureDesktopEntry();
   }
 
   // Initialize Window Manager
@@ -163,6 +160,14 @@ class _VideoPlayerAppState extends ConsumerState<VideoPlayerApp>
     windowManager.addListener(this);
     // Enable window close interception for proper cleanup
     windowManager.setPreventClose(true);
+
+    // Create the XDG desktop entry after the first frame so file I/O
+    // doesn't compete with initial rendering on cold boots.
+    if (Platform.isLinux) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        MediaControlService.ensureDesktopEntry();
+      });
+    }
   }
 
   @override
