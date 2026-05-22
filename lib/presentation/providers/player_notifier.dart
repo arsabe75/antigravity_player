@@ -421,6 +421,16 @@ class PlayerNotifier extends _$PlayerNotifier {
     }
 
     // ============================================================
+    // METADATA UNAVAILABLE (transient, not file corruption)
+    // ============================================================
+    // MOOV atom patterns — metadata hasn't arrived yet, not corruption.
+    if (lower.contains('moov atom not found') ||
+        lower.contains('invalid moov') ||
+        lower.contains('missing moov')) {
+      return StreamingError.metadataUnavailable(fileId);
+    }
+
+    // ============================================================
     // CORRUPT / INVALID FILE
     // ============================================================
     // mpv / libmpv / MediaKit patterns
@@ -435,8 +445,6 @@ class PlayerNotifier extends _$PlayerNotifier {
         lower.contains('premature end') ||
         lower.contains('end of file') && lower.contains('unexpected') ||
         lower.contains('truncated') ||
-        lower.contains('moov atom not found') ||
-        lower.contains('invalid moov') ||
         lower.contains('broken header') ||
         lower.contains('malformed') ||
         // libvlc / VLC / FVP patterns
@@ -449,7 +457,6 @@ class PlayerNotifier extends _$PlayerNotifier {
         lower.contains('error parsing') ||
         lower.contains('invalid header') ||
         lower.contains('not seekable') ||
-        lower.contains('missing moov') ||
         lower.contains('error demuxing') ||
         lower.contains('could not read') && lower.contains('header') ||
         lower.contains('decode') && lower.contains('failed') && lower.contains('packet')) {

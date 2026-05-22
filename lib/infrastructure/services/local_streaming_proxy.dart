@@ -466,7 +466,11 @@ class LocalStreamingProxy {
     final fileId = error.fileId;
     final state = _getOrCreateState(fileId);
     state.lastError = error;
-    state.loadState = FileLoadState.unsupported;
+    if (error.isRecoverable) {
+      state.loadState = FileLoadState.error;
+    } else {
+      state.loadState = FileLoadState.unsupported;
+    }
     onStreamingError?.call(error);
     _logError(
       'Player reported error for file - ${error.type}: ${error.message}',
@@ -609,6 +613,7 @@ class LocalStreamingProxy {
       StreamingErrorType.playbackStall => 4,
       StreamingErrorType.unsupportedCodec => 5,
       StreamingErrorType.corruptFile => 5,
+      StreamingErrorType.metadataUnavailable => 1,
     };
   }
 
@@ -1098,6 +1103,17 @@ class LocalStreamingProxy {
   Future<void> _runEnforcement() async {
     _lastEnforcementTime = DateTime.now();
     _totalBytesDownloadedSinceEnforcement = 0; // Reset counter
+    // Proteger archivos en reproducción activa de la evicción de caché.
+    // Si hay un archivo en playing o loadingMoov, TDLib podría eliminar
+    // datos que el reproductor está usando activamente (incluyendo MOOV).
+    final hasActivePlayback = _fileStates.values.any(
+      (s) => s.loadState == FileLoadState.playing ||
+             s.loadState == FileLoadState.loadingMoov,
+    );
+    if (hasActivePlayback) {
+      _logTrace('Skipping cache limit enforcement: active playback in progress');
+      return;
+    }
     _logTrace('Running cache limit enforcement');
     await _cacheService.enforceVideoSizeLimit();
   }
@@ -3230,14 +3246,14 @@ class LocalStreamingProxy {
           'MOOV DOWNLOAD ABSOLUTE TIMEOUT for $fileId: '
           '${DateTime.now().difference(absStartTime).inSeconds}s total '
           '(have $availableAtForced/$targetSize bytes). '
-          'File appears damaged — blocking further requests.',
+          'Metadata may not be available — blocking further requests.',
           fileId: fileId,
         );
         moovState.forcedMoovOffset = null;
         moovState.forcedMoovStartTime = null;
         moovState.forcedMoovAbsoluteStartTime = null;
         moovState.forcedMoovLastProgress = 0;
-        final error = StreamingError.corruptFile(fileId);
+        final error = StreamingError.metadataUnavailable(fileId);
         _notifyErrorIfNew(fileId, error);
         _abortedRequests.add(fileId);
         final waiters = _byteAvailabilityWaiters.remove(fileId);
@@ -3259,14 +3275,14 @@ class LocalStreamingProxy {
           _logError(
             'MOOV DOWNLOAD TIMEOUT for $fileId: no progress for ${moovElapsed.inSeconds}s '
             '(have $availableAtForced/$targetSize bytes at offset $forcedOffset). '
-            'File appears damaged — blocking further requests.',
+            'Metadata may not be available — blocking further requests.',
             fileId: fileId,
           );
           moovState.forcedMoovOffset = null;
           moovState.forcedMoovStartTime = null;
           moovState.forcedMoovAbsoluteStartTime = null;
           moovState.forcedMoovLastProgress = 0;
-          final error = StreamingError.corruptFile(fileId);
+          final error = StreamingError.metadataUnavailable(fileId);
           _notifyErrorIfNew(fileId, error);
           _abortedRequests.add(fileId);
           final waiters = _byteAvailabilityWaiters.remove(fileId);
@@ -3835,12 +3851,17 @@ class LocalStreamingProxy {
     final currentGen = _seekGeneration[fileId] ?? 0;
     if (detectionGen != null && detectionGen != currentGen) {
       _debugLog(
-        'Proxy: H1 - Skipping proactive MOOV for $fileId: '
-        'seek generation changed ($detectionGen -> $currentGen) '
-        'since detection was scheduled',
+        'Proxy: H1 - Seek generation changed ($detectionGen -> $currentGen) '
+        'since MOOV detection. Re-enqueuing for current generation for $fileId.',
       );
-      _moovDetectionSeekGen.remove(fileId);
-      return;
+      // Actualizar a la generación actual para que la descarga proceda
+      _moovDetectionSeekGen[fileId] = currentGen;
+      // Limpiar estado de MOOV forzado previo (pertenece a la gen vieja)
+      state.forcedMoovOffset = null;
+      state.forcedMoovStartTime = null;
+      state.forcedMoovAbsoluteStartTime = null;
+      state.forcedMoovLastProgress = 0;
+      // Caer al código de abajo para iniciar descarga MOOV con gen actual
     }
 
     // Si ya detectamos offset exacto de MOOV, usarlo directamente para
@@ -3911,9 +3932,10 @@ class LocalStreamingProxy {
         final currentGen = _seekGeneration[fileId] ?? 0;
         if (currentGen != capturedSeekGen) {
           _debugLog(
-            'Proxy: H1 - Skipping async MOOV detection result for $fileId: '
-            'seek generation changed ($capturedSeekGen -> $currentGen)',
+            'Proxy: H1 - Seek generation changed ($capturedSeekGen -> $currentGen) '
+            'during async detection. Re-triggering MOOV download for $fileId.',
           );
+          _startProactiveMoovDownload(fileId, info.totalSize);
           return;
         }
         if (position == MoovPosition.start) {

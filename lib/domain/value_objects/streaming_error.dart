@@ -26,6 +26,10 @@ enum StreamingErrorType {
   /// but may still be watchable. Shown as a warning, not a blocking error.
   degraded,
 
+  /// Metadata not yet available (e.g. MOOV atom not loaded for MP4-at-end).
+  /// The file may be playable once metadata arrives.
+  metadataUnavailable,
+
   /// Playback stall: video causes repeated connection thrashing
   playbackStall,
 
@@ -146,6 +150,18 @@ class StreamingError {
       fileId: fileId,
       isRecoverable: false,
       retryAttempts: earlyExits,
+    );
+  }
+
+  /// Create a metadata unavailable error (transient, may resolve on retry).
+  /// Used when MOOV atom or other metadata hasn't been downloaded yet,
+  /// which is common for MP4 files with metadata at the end.
+  factory StreamingError.metadataUnavailable(int fileId) {
+    return StreamingError(
+      type: StreamingErrorType.metadataUnavailable,
+      message: 'Metadatos del video no disponibles temporalmente',
+      fileId: fileId,
+      isRecoverable: true,
     );
   }
 

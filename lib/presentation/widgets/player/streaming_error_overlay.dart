@@ -30,6 +30,7 @@ class StreamingErrorOverlay extends StatelessWidget {
       StreamingErrorType.fileNotFound => LucideIcons.searchX,
       StreamingErrorType.maxRetriesExceeded => LucideIcons.alertOctagon,
       StreamingErrorType.degraded => LucideIcons.info,
+      StreamingErrorType.metadataUnavailable => LucideIcons.fileSearch,
       StreamingErrorType.playbackStall => LucideIcons.alertTriangle,
       StreamingErrorType.unknown => LucideIcons.alertCircle,
     };
@@ -45,6 +46,7 @@ class StreamingErrorOverlay extends StatelessWidget {
       StreamingErrorType.fileNotFound => Colors.red,
       StreamingErrorType.maxRetriesExceeded => Colors.amber,
       StreamingErrorType.degraded => Colors.blue,
+      StreamingErrorType.metadataUnavailable => Colors.amber,
       StreamingErrorType.playbackStall => Colors.deepOrange,
       StreamingErrorType.unknown => Colors.grey,
     };
@@ -60,6 +62,7 @@ class StreamingErrorOverlay extends StatelessWidget {
       StreamingErrorType.fileNotFound => 'Video no disponible',
       StreamingErrorType.maxRetriesExceeded => 'No se pudo reproducir el video',
       StreamingErrorType.degraded => 'Advertencia de rendimiento',
+      StreamingErrorType.metadataUnavailable => 'Metadatos no disponibles',
       StreamingErrorType.playbackStall => 'Problema de reproducción',
       StreamingErrorType.unknown => 'Error de reproducción',
     };
@@ -72,7 +75,7 @@ class StreamingErrorOverlay extends StatelessWidget {
       StreamingErrorType.networkError =>
         'No se pudo conectar al servidor. Verifica tu conexión a internet.',
       StreamingErrorType.corruptFile =>
-        'El archivo de video parece estar dañado o tiene un formato inválido. No se puede reproducir.',
+        'El reproductor no puede procesar este video. Puede estar dañado, tener un formato no compatible, o presentar problemas temporales de transmisión.',
       StreamingErrorType.unsupportedCodec =>
         'El formato de este video no es compatible con el reproductor.',
       StreamingErrorType.diskFull =>
@@ -83,6 +86,9 @@ class StreamingErrorOverlay extends StatelessWidget {
         'Se agotaron los intentos de descarga. El video puede tener problemas de transmisión o estar temporalmente inaccesible.',
       StreamingErrorType.degraded =>
         'Este video muestra signos de transmisión inestable. Puede continuar viéndolo pero es posible que experimente pausas breves.',
+      StreamingErrorType.metadataUnavailable =>
+        'Los metadatos del video no están disponibles temporalmente. '
+        'El video puede reproducirse una vez que se cargue la información necesaria.',
       StreamingErrorType.playbackStall =>
         'Este video presenta interrupciones persistentes que bloquean la interfaz. Puede estar dañado o tener un formato de transmisión incompatible.',
       StreamingErrorType.unknown =>
@@ -99,7 +105,7 @@ class StreamingErrorOverlay extends StatelessWidget {
       StreamingErrorType.networkError =>
         'Verifica tu conexión e intenta en unos minutos.',
       StreamingErrorType.corruptFile =>
-        'Este archivo está dañado. No se puede reproducir.',
+        'Usa "Forzar reproducción" para un reintento más agresivo, o vuelve más tarde.',
       StreamingErrorType.unsupportedCodec =>
         'Convierte el video a un formato compatible (H.264/AAC).',
       StreamingErrorType.diskFull =>
@@ -111,6 +117,9 @@ class StreamingErrorOverlay extends StatelessWidget {
             'reintento más agresivo.',
       StreamingErrorType.degraded =>
         'El video puede seguir viéndose con algunas pausas.',
+      StreamingErrorType.metadataUnavailable =>
+        'Espera unos segundos y vuelve a intentar. Si el problema persiste, '
+        'usa "Forzar" para un reintento más agresivo.',
       StreamingErrorType.playbackStall =>
         'Este video tiene problemas persistentes. Puede estar mal codificado.',
       StreamingErrorType.unknown =>
@@ -185,22 +194,23 @@ class StreamingErrorOverlay extends StatelessWidget {
                     ),
                   ),
 
-                  // Action button for recoverable errors: retry or dismiss warning
-                  if (error.isRecoverable && onRetry != null) ...[
+                  // "Forzar reproducción": disponible para todos los errores
+                  // como vía de escape incluso cuando la clasificación falla.
+                  if (!_isWarning && onForceRetry != null) ...[
                     const SizedBox(width: 16),
-                    // "Forzar" button: more aggressive recovery for stubborn errors
-                    if (!_isWarning && onForceRetry != null) ...[
-                      OutlinedButton.icon(
-                        onPressed: onForceRetry,
-                        icon: const Icon(LucideIcons.zap),
-                        label: const Text('Forzar'),
-                        style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.orange,
-                          side: const BorderSide(color: Colors.orange),
-                        ),
+                    OutlinedButton.icon(
+                      onPressed: onForceRetry,
+                      icon: const Icon(LucideIcons.zap),
+                      label: const Text('Forzar'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: Colors.orange,
+                        side: const BorderSide(color: Colors.orange),
                       ),
-                      const SizedBox(width: 12),
-                    ],
+                    ),
+                    const SizedBox(width: 12),
+                  ],
+                  // Reintentar/Entendido: solo para errores recuperables
+                  if (error.isRecoverable && onRetry != null)
                     ElevatedButton.icon(
                       onPressed: onRetry,
                       icon: Icon(
@@ -212,7 +222,6 @@ class StreamingErrorOverlay extends StatelessWidget {
                         foregroundColor: Colors.white,
                       ),
                     ),
-                  ],
                 ],
               ),
 

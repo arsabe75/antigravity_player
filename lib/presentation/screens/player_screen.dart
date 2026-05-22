@@ -669,10 +669,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
                             }
                           }
                         : null,
-                    // "Forzar": bypass más agresivo para errores recuperables
-                    onForceRetry: state.streamingError!.isRecoverable &&
-                            state.streamingError!.type !=
-                                StreamingErrorType.degraded
+                    // "Forzar": bypass agresivo disponible para todos los errores
+                    // (incluyendo no-recuperables) como vía de escape.
+                    onForceRetry: state.streamingError!.type !=
+                            StreamingErrorType.degraded
                         ? () => notifier.forceRetry()
                         : null,
                     onGoBack: _handleBack,
