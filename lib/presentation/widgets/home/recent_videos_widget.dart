@@ -145,8 +145,20 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
       _loadVideos();
     });
 
+    // While loading, reserve the panel width so the Row layout doesn't shift
+    // when videos appear. On cold boot the DB query can take long enough that
+    // the initial collapsed state becomes visible and then jumps.
     if (_isLoading) {
-      return const SizedBox.shrink();
+      return SizedBox(
+        width: widget.panelWidth,
+        child: const Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
+          ),
+        ),
+      );
     }
 
     if (_videos.isEmpty) {

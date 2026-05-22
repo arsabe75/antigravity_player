@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -31,14 +32,14 @@ class _PreloadedBackendNotifier extends PlayerBackend {
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load environment variables
-  await dotenv.load(fileName: ".env");
-
-  // Initialize encrypted storage
-  await SecureStorageService.initialize();
-
-  // Initialize MediaKit
+  // Fire I/O-heavy init that isn't needed for the first frame in parallel.
+  // dotenv is only used by TelegramAuth (lazy provider, accessed on navigation).
+  // MediaKit is only needed when creating a video player.
+  unawaited(dotenv.load(fileName: ".env")); // only needed by lazy TelegramAuth
   MediaKit.ensureInitialized();
+
+  // Initialize encrypted storage (blocking: needed for backend selection below)
+  await SecureStorageService.initialize();
 
   // Load Player Settings
   final settingsService = PlayerSettingsService();
