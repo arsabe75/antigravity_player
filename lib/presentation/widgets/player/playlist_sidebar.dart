@@ -324,6 +324,8 @@ class _PlaylistItemTile extends StatelessWidget {
           ? Colors.blue.withValues(alpha: 0.2)
           : Colors.transparent,
       child: ListTile(
+        splashColor: Colors.white10,
+        hoverColor: Colors.white10,
         dense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         leading: Container(

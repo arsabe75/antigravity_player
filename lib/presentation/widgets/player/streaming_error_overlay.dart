@@ -136,18 +136,23 @@ class StreamingErrorOverlay extends StatelessWidget {
       // (which is still playing) remains partially visible.
       color: _isWarning ? Colors.black54 : Colors.black87,
       child: Center(
-        child: Container(
-          margin: const EdgeInsets.all(32),
-          padding: const EdgeInsets.all(24),
-          constraints: const BoxConstraints(maxWidth: 480),
-          decoration: BoxDecoration(
-            color: Colors.grey[900],
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: color.withValues(alpha: 0.5), width: 2),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 480,
+            maxHeight: MediaQuery.of(context).size.height * 0.8,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+          child: Container(
+            margin: const EdgeInsets.all(32),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.grey[900],
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: color.withValues(alpha: 0.5), width: 2),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
               // Error Icon
               Container(
                 padding: const EdgeInsets.all(16),
@@ -227,14 +232,16 @@ class StreamingErrorOverlay extends StatelessWidget {
 
               // Technical Details (expandable)
               const SizedBox(height: 16),
-              ExpansionTile(
-                title: Text(
-                  'Detalles técnicos',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                ),
-                collapsedIconColor: Colors.grey[600],
-                iconColor: Colors.grey[600],
-                children: [
+              Material(
+                color: Colors.transparent,
+                child: ExpansionTile(
+                  title: Text(
+                    'Detalles técnicos',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  ),
+                  collapsedIconColor: Colors.grey[600],
+                  iconColor: Colors.grey[600],
+                  children: [
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -271,7 +278,10 @@ class StreamingErrorOverlay extends StatelessWidget {
                   ),
                 ],
               ),
+              ),
             ],
+          ),
+            ),
           ),
         ),
       ),

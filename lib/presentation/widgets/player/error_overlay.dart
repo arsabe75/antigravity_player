@@ -45,20 +45,25 @@ class ErrorOverlay extends StatelessWidget {
     return Container(
       color: Colors.black87,
       child: Center(
-        child: Container(
-          margin: const EdgeInsets.all(32),
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: Colors.grey[900],
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: _getErrorColor().withValues(alpha: 0.5),
-              width: 2,
-            ),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxHeight: MediaQuery.of(context).size.height * 0.8,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
+          child: Container(
+            margin: const EdgeInsets.all(32),
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: Colors.grey[900],
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _getErrorColor().withValues(alpha: 0.5),
+                width: 2,
+              ),
+            ),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
               // Error Icon
               Container(
                 padding: const EdgeInsets.all(16),
@@ -138,14 +143,16 @@ class ErrorOverlay extends StatelessWidget {
 
               // Technical Details (expandable)
               const SizedBox(height: 16),
-              ExpansionTile(
-                title: Text(
-                  'Technical Details',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 12),
-                ),
-                collapsedIconColor: Colors.grey[600],
-                iconColor: Colors.grey[600],
-                children: [
+              Material(
+                color: Colors.transparent,
+                child: ExpansionTile(
+                  title: Text(
+                    'Technical Details',
+                    style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                  ),
+                  collapsedIconColor: Colors.grey[600],
+                  iconColor: Colors.grey[600],
+                  children: [
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -163,9 +170,12 @@ class ErrorOverlay extends StatelessWidget {
                   ),
                 ],
               ),
+              ),
             ],
           ),
+            ),
         ),
+      ),
       ),
     );
   }
