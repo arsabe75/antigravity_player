@@ -121,152 +121,146 @@ class HomeScreen extends ConsumerWidget {
             children: [
               // Left side - Main content
               Expanded(
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: Center(
-                        child: SingleChildScrollView(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 32,
+                child: Align(
+                  alignment: const Alignment(0, -0.15),
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 32,
+                    ),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Image.asset(
+                          'assets/icon/app_icon_v2.png',
+                          width: 120,
+                          height: 120,
+                        ),
+                        const SizedBox(height: 32),
+                        Text(
+                          AppConstants.appName,
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onSurface,
                           ),
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Image.asset(
-                                'assets/icon/app_icon_v2.png',
-                                width: 120,
-                                height: 120,
-                              ),
-                              const SizedBox(height: 32),
-                              Text(
-                                AppConstants.appName,
-                                style: TextStyle(
-                                  fontSize: 24,
-                                  fontWeight: FontWeight.bold,
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onSurface,
-                                ),
-                              ),
-                              const SizedBox(height: 48),
-                              Wrap(
-                                spacing: 16,
-                                runSpacing: 16,
-                                alignment: WrapAlignment.center,
-                                children: [
-                                  Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      SizedBox(
-                                        width: 155,
-                                        height: 50,
-                                        child: OutlinedButton.icon(
-                                          onPressed: () =>
-                                              _pickFile(context, ref),
-                                          style: OutlinedButton.styleFrom(
-                                            shape: const RoundedRectangleBorder(
-                                              borderRadius:
-                                                  BorderRadius.horizontal(
-                                                    left: Radius.circular(
-                                                      8,
-                                                    ), // Standard radius
-                                                    right: Radius.circular(
-                                                      2,
-                                                    ), // Tight fit
-                                                  ),
+                        ),
+                        const SizedBox(height: 48),
+                        Wrap(
+                          spacing: 16,
+                          runSpacing: 16,
+                          alignment: WrapAlignment.center,
+                          children: [
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 155,
+                                  height: 50,
+                                  child: OutlinedButton.icon(
+                                    onPressed: () =>
+                                        _pickFile(context, ref),
+                                    style: OutlinedButton.styleFrom(
+                                      shape: const RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.horizontal(
+                                              left: Radius.circular(
+                                                8,
+                                              ), // Standard radius
+                                              right: Radius.circular(
+                                                2,
+                                              ), // Tight fit
                                             ),
-                                          ),
-                                          icon: const Icon(
-                                            LucideIcons.folderOpen,
-                                          ),
-                                          label: const Text(
-                                            'Local Files',
-                                            maxLines: 1,
-                                            overflow: TextOverflow.ellipsis,
-                                          ),
-                                        ),
                                       ),
-                                      const SizedBox(
-                                        width: 2,
-                                      ), // Small separation
-                                      SizedBox(
-                                        width: 60,
-                                        height: 50,
-                                        child: OutlinedButton(
-                                          onPressed: () =>
-                                              const PlaylistManagerRoute()
-                                                  .push(context),
-                                          style: OutlinedButton.styleFrom(
-                                            padding: EdgeInsets.zero,
-                                            shape:
-                                                const RoundedRectangleBorder(
-                                                  borderRadius:
-                                                      BorderRadius.horizontal(
-                                                        left:
-                                                            Radius.circular(
-                                                              2,
-                                                            ),
-                                                        right:
-                                                            Radius.circular(
-                                                              8,
-                                                            ),
+                                    ),
+                                    icon: const Icon(
+                                      LucideIcons.folderOpen,
+                                    ),
+                                    label: const Text(
+                                      'Local Files',
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(
+                                  width: 2,
+                                ), // Small separation
+                                SizedBox(
+                                  width: 60,
+                                  height: 50,
+                                  child: OutlinedButton(
+                                    onPressed: () =>
+                                        const PlaylistManagerRoute()
+                                            .push(context),
+                                    style: OutlinedButton.styleFrom(
+                                      padding: EdgeInsets.zero,
+                                      shape:
+                                          const RoundedRectangleBorder(
+                                            borderRadius:
+                                                BorderRadius.horizontal(
+                                                  left:
+                                                      Radius.circular(
+                                                        2,
+                                                      ),
+                                                  right:
+                                                      Radius.circular(
+                                                        8,
                                                       ),
                                                 ),
                                           ),
-                                          child: const Column(
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.center,
-                                            children: [
-                                              Icon(
-                                                LucideIcons.list,
-                                                size: 18,
-                                              ),
-                                              Text(
-                                                'Lists',
-                                                style: TextStyle(
-                                                  fontSize: 10,
-                                                ),
-                                              ),
-                                            ],
+                                    ),
+                                    child: const Column(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          LucideIcons.list,
+                                          size: 18,
+                                        ),
+                                        Text(
+                                          'Lists',
+                                          style: TextStyle(
+                                            fontSize: 10,
                                           ),
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                  SizedBox(
-                                    width: 200,
-                                    height: 50,
-                                    child: OutlinedButton.icon(
-                                      onPressed: () =>
-                                          _enterUrl(context, ref),
-                                      icon: const Icon(LucideIcons.globe),
-                                      label: const Text('Open Network URL'),
+                                      ],
                                     ),
                                   ),
-                                  SizedBox(
-                                    width: 200,
-                                    height: 50,
-                                    child: OutlinedButton.icon(
-                                      onPressed: () => const TelegramRoute()
-                                          .push(context),
-                                      icon: const Icon(LucideIcons.send),
-                                      label: const Text('Telegram'),
-                                    ),
-                                  ),
-                                ],
+                                ),
+                              ],
+                            ),
+                            SizedBox(
+                              width: 200,
+                              height: 50,
+                              child: OutlinedButton.icon(
+                                onPressed: () =>
+                                    _enterUrl(context, ref),
+                                icon: const Icon(LucideIcons.globe),
+                                label: const Text('Open Network URL'),
                               ),
-                            ],
-                          ),
+                            ),
+                            SizedBox(
+                              width: 200,
+                              height: 50,
+                              child: OutlinedButton.icon(
+                                onPressed: () => const TelegramRoute()
+                                    .push(context),
+                                icon: const Icon(LucideIcons.send),
+                                label: const Text('Telegram'),
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
               ),
               // Right side - Recent Videos Panel (only shows when not empty)
               Padding(
                 padding: const EdgeInsets.only(
-                  top: 48,
                   bottom: 16,
                   right: 16,
                 ),
