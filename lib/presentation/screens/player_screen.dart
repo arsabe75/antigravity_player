@@ -901,16 +901,19 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
 
     return Listener(
       onPointerDown: (event) {
-        // Handle input directly to support problematic devices like K400
-        // and fix double-click issues
+        if (event.kind == PointerDeviceKind.mouse &&
+            event.buttons == kSecondaryMouseButton) {
+          return;
+        }
+        // Show controls immediately on pointer down for better responsiveness
+        _startHideTimer();
+      },
+      onPointerUp: (event) {
         if (event.kind == PointerDeviceKind.mouse &&
             event.buttons == kSecondaryMouseButton) {
           // Right click - toggle play/pause or show menu (currently just toggle)
           return;
         }
-
-        // Show controls on any touch/mouse click (same as mouse hover behavior)
-        _startHideTimer();
 
         _tapCount++;
         _tapTimer?.cancel();
@@ -935,6 +938,10 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             _tapCount = 0;
           });
         }
+      },
+      onPointerCancel: (event) {
+        _tapCount = 0;
+        _tapTimer?.cancel();
       },
       child: Center(child: videoWidget),
     );
