@@ -33,7 +33,7 @@ class PlayerTopBar extends StatelessWidget {
       child: GestureDetector(
         onPanStart: (_) => windowManager.startDragging(),
         child: Container(
-          height: AppConstants.topBarHeight,
+          height: 56.0,
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
@@ -49,7 +49,7 @@ class PlayerTopBar extends StatelessWidget {
                 icon: const Icon(
                   LucideIcons.arrowLeft,
                   color: Colors.white,
-                  size: AppConstants.iconSize,
+                  size: 24.0,
                 ),
                 onPressed: onBack,
                 tooltip: 'Back',
@@ -62,6 +62,7 @@ class PlayerTopBar extends StatelessWidget {
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
+                    fontSize: 20.0,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -71,7 +72,7 @@ class PlayerTopBar extends StatelessWidget {
                 icon: const Icon(
                   LucideIcons.minus,
                   color: Colors.white,
-                  size: AppConstants.iconSize,
+                  size: 24.0,
                 ),
                 onPressed: () => windowManager.minimize(),
                 tooltip: 'Minimize',
@@ -80,7 +81,7 @@ class PlayerTopBar extends StatelessWidget {
                 icon: const Icon(
                   LucideIcons.square,
                   color: Colors.white,
-                  size: AppConstants.iconSize,
+                  size: 24.0,
                 ),
                 onPressed: () async {
                   if (await windowManager.isMaximized()) {
@@ -95,7 +96,7 @@ class PlayerTopBar extends StatelessWidget {
                 icon: const Icon(
                   LucideIcons.x,
                   color: Colors.white,
-                  size: AppConstants.iconSize,
+                  size: 24.0,
                 ),
                 onPressed: onClose,
                 tooltip: 'Close',
