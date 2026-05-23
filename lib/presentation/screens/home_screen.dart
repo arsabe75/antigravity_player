@@ -70,262 +70,229 @@ class HomeScreen extends ConsumerWidget {
     final isDarkMode = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      body: Stack(
-        children: [
-          // Main content with right panel
-          LayoutBuilder(
-            builder: (context, constraints) {
-              // Calculate 40% of screen width with min bounds
-              final panelWidth = (constraints.maxWidth * 0.40).clamp(
-                250.0,
-                double.infinity,
+      appBar: AppBar(
+        title: Text(
+          AppConstants.appName,
+          style: const TextStyle(
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        flexibleSpace: GestureDetector(
+          onPanStart: (_) => windowManager.startDragging(),
+          behavior: HitTestBehavior.translucent,
+        ),
+        actions: [
+          // Theme Toggle Button
+          IconButton(
+            icon: Icon(
+              isDarkMode ? LucideIcons.sun : LucideIcons.moon,
+            ),
+            onPressed: () {
+              ref.read(themeProvider.notifier).toggleTheme();
+            },
+            tooltip: isDarkMode
+                ? 'Switch to Light Mode'
+                : 'Switch to Dark Mode',
+          ),
+          IconButton(
+            icon: const Icon(LucideIcons.settings),
+            onPressed: () {
+              showDialog(
+                context: context,
+                builder: (context) => const SettingsDialog(),
               );
+            },
+            tooltip: 'Settings',
+          ),
+          const SizedBox(width: 8),
+          const WindowControls(),
+          const SizedBox(width: 8),
+        ],
+      ),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          // Calculate 40% of screen width with min bounds
+          final panelWidth = (constraints.maxWidth * 0.40).clamp(
+            250.0,
+            double.infinity,
+          );
 
-              return Row(
-                children: [
-                  // Left side - Main content
-                  Expanded(
-                    child: Column(
-                      children: [
-                        Expanded(
-                          child: Center(
-                            child: SingleChildScrollView(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 32,
+          return Row(
+            children: [
+              // Left side - Main content
+              Expanded(
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: Center(
+                        child: SingleChildScrollView(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                          ),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Image.asset(
+                                'assets/icon/app_icon_v2.png',
+                                width: 120,
+                                height: 120,
                               ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
+                              const SizedBox(height: 32),
+                              Text(
+                                AppConstants.appName,
+                                style: TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onSurface,
+                                ),
+                              ),
+                              const SizedBox(height: 48),
+                              Wrap(
+                                spacing: 16,
+                                runSpacing: 16,
+                                alignment: WrapAlignment.center,
                                 children: [
-                                  const SizedBox(
-                                    height: 60,
-                                  ), // Space for top bar
-                                  Image.asset(
-                                    'assets/icon/app_icon_v2.png',
-                                    width: 120,
-                                    height: 120,
-                                  ),
-                                  const SizedBox(height: 32),
-                                  Text(
-                                    AppConstants.appName,
-                                    style: TextStyle(
-                                      fontSize: 24,
-                                      fontWeight: FontWeight.bold,
-                                      color: Theme.of(
-                                        context,
-                                      ).colorScheme.onSurface,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 48),
-                                  Wrap(
-                                    spacing: 16,
-                                    runSpacing: 16,
-                                    alignment: WrapAlignment.center,
+                                  Row(
+                                    mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          SizedBox(
-                                            width: 155,
-                                            height: 50,
-                                            child: OutlinedButton.icon(
-                                              onPressed: () =>
-                                                  _pickFile(context, ref),
-                                              style: OutlinedButton.styleFrom(
-                                                shape: const RoundedRectangleBorder(
-                                                  borderRadius:
-                                                      BorderRadius.horizontal(
-                                                        left: Radius.circular(
-                                                          8,
-                                                        ), // Standard radius
-                                                        right: Radius.circular(
-                                                          2,
-                                                        ), // Tight fit
-                                                      ),
-                                                ),
-                                              ),
-                                              icon: const Icon(
-                                                LucideIcons.folderOpen,
-                                              ),
-                                              label: const Text(
-                                                'Local Files',
-                                                maxLines: 1,
-                                                overflow: TextOverflow.ellipsis,
-                                              ),
-                                            ),
-                                          ),
-                                          const SizedBox(
-                                            width: 2,
-                                          ), // Small separation
-                                          SizedBox(
-                                            width: 60,
-                                            height: 50,
-                                            child: OutlinedButton(
-                                              onPressed: () =>
-                                                  const PlaylistManagerRoute()
-                                                      .push(context),
-                                              style: OutlinedButton.styleFrom(
-                                                padding: EdgeInsets.zero,
-                                                shape:
-                                                    const RoundedRectangleBorder(
-                                                      borderRadius:
-                                                          BorderRadius.horizontal(
-                                                            left:
-                                                                Radius.circular(
-                                                                  2,
-                                                                ),
-                                                            right:
-                                                                Radius.circular(
-                                                                  8,
-                                                                ),
-                                                          ),
-                                                    ),
-                                              ),
-                                              child: const Column(
-                                                mainAxisAlignment:
-                                                    MainAxisAlignment.center,
-                                                children: [
-                                                  Icon(
-                                                    LucideIcons.list,
-                                                    size: 18,
-                                                  ),
-                                                  Text(
-                                                    'Lists',
-                                                    style: TextStyle(
-                                                      fontSize: 10,
-                                                    ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
                                       SizedBox(
-                                        width: 200,
+                                        width: 155,
                                         height: 50,
                                         child: OutlinedButton.icon(
                                           onPressed: () =>
-                                              _enterUrl(context, ref),
-                                          icon: const Icon(LucideIcons.globe),
-                                          label: const Text('Open Network URL'),
+                                              _pickFile(context, ref),
+                                          style: OutlinedButton.styleFrom(
+                                            shape: const RoundedRectangleBorder(
+                                              borderRadius:
+                                                  BorderRadius.horizontal(
+                                                    left: Radius.circular(
+                                                      8,
+                                                    ), // Standard radius
+                                                    right: Radius.circular(
+                                                      2,
+                                                    ), // Tight fit
+                                                  ),
+                                            ),
+                                          ),
+                                          icon: const Icon(
+                                            LucideIcons.folderOpen,
+                                          ),
+                                          label: const Text(
+                                            'Local Files',
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
                                         ),
                                       ),
+                                      const SizedBox(
+                                        width: 2,
+                                      ), // Small separation
                                       SizedBox(
-                                        width: 200,
+                                        width: 60,
                                         height: 50,
-                                        child: OutlinedButton.icon(
-                                          onPressed: () => const TelegramRoute()
-                                              .push(context),
-                                          icon: const Icon(LucideIcons.send),
-                                          label: const Text('Telegram'),
+                                        child: OutlinedButton(
+                                          onPressed: () =>
+                                              const PlaylistManagerRoute()
+                                                  .push(context),
+                                          style: OutlinedButton.styleFrom(
+                                            padding: EdgeInsets.zero,
+                                            shape:
+                                                const RoundedRectangleBorder(
+                                                  borderRadius:
+                                                      BorderRadius.horizontal(
+                                                        left:
+                                                            Radius.circular(
+                                                              2,
+                                                            ),
+                                                        right:
+                                                            Radius.circular(
+                                                              8,
+                                                            ),
+                                                      ),
+                                                ),
+                                          ),
+                                          child: const Column(
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.center,
+                                            children: [
+                                              Icon(
+                                                LucideIcons.list,
+                                                size: 18,
+                                              ),
+                                              Text(
+                                                'Lists',
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
                                         ),
                                       ),
                                     ],
                                   ),
+                                  SizedBox(
+                                    width: 200,
+                                    height: 50,
+                                    child: OutlinedButton.icon(
+                                      onPressed: () =>
+                                          _enterUrl(context, ref),
+                                      icon: const Icon(LucideIcons.globe),
+                                      label: const Text('Open Network URL'),
+                                    ),
+                                  ),
+                                  SizedBox(
+                                    width: 200,
+                                    height: 50,
+                                    child: OutlinedButton.icon(
+                                      onPressed: () => const TelegramRoute()
+                                          .push(context),
+                                      icon: const Icon(LucideIcons.send),
+                                      label: const Text('Telegram'),
+                                    ),
+                                  ),
                                 ],
                               ),
-                            ),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                  // Right side - Recent Videos Panel (only shows when not empty)
-                  Padding(
-                    padding: const EdgeInsets.only(
-                      top: 48,
-                      bottom: 16,
-                      right: 16,
-                    ),
-                    child: RecentVideosWidget(
-                      panelWidth: panelWidth,
-                      // showTelegramVideos: false (default) - only local/network videos
-                      onVideoSelected: (video) {
-                        // Create playlist item
-                        final item = PlaylistItem(
-                          path: video.path,
-                          isNetwork: video.isNetwork,
-                          title: video.displayName,
-                        );
-
-                        // Set playlist
-                        ref.read(playlistProvider.notifier).setPlaylist([item]);
-
-                        PlayerRoute(
-                          $extra: PlayerRouteExtra(url: video.path),
-                        ).go(context);
-                      },
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-          // Top bar with window controls
-          Positioned(
-            top: 0,
-            left: 0,
-            right: 0,
-            child: GestureDetector(
-              onPanStart: (_) => windowManager.startDragging(),
-              child: Container(
-                height: 40,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      isDarkMode ? Colors.black54 : Colors.transparent,
-                      Colors.transparent,
-                    ],
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    const SizedBox(width: 16),
-                    Text(
-                      AppConstants.appName,
-                      style: TextStyle(
-                        color: Theme.of(context).colorScheme.onSurface,
-                        fontWeight: FontWeight.bold,
                       ),
                     ),
-                    const Spacer(),
-                    // Theme Toggle Button
-                    IconButton(
-                      icon: Icon(
-                        isDarkMode ? LucideIcons.sun : LucideIcons.moon,
-                        color: Theme.of(context).colorScheme.onSurface,
-                        size: 20,
-                      ),
-                      onPressed: () {
-                        ref.read(themeProvider.notifier).toggleTheme();
-                      },
-                      tooltip: isDarkMode
-                          ? 'Switch to Light Mode'
-                          : 'Switch to Dark Mode',
-                    ),
-                    IconButton(
-                      icon: Icon(
-                        LucideIcons.settings,
-                        color: Theme.of(context).colorScheme.onSurface,
-                        size: 20,
-                      ),
-                      onPressed: () {
-                        showDialog(
-                          context: context,
-                          builder: (context) => const SettingsDialog(),
-                        );
-                      },
-                      tooltip: 'Settings',
-                    ),
-                    const WindowControls(),
                   ],
                 ),
               ),
-            ),
-          ),
-        ],
+              // Right side - Recent Videos Panel (only shows when not empty)
+              Padding(
+                padding: const EdgeInsets.only(
+                  top: 48,
+                  bottom: 16,
+                  right: 16,
+                ),
+                child: RecentVideosWidget(
+                  panelWidth: panelWidth,
+                  // showTelegramVideos: false (default) - only local/network videos
+                  onVideoSelected: (video) {
+                    // Create playlist item
+                    final item = PlaylistItem(
+                      path: video.path,
+                      isNetwork: video.isNetwork,
+                      title: video.displayName,
+                    );
+
+                    // Set playlist
+                    ref.read(playlistProvider.notifier).setPlaylist([item]);
+
+                    PlayerRoute(
+                      $extra: PlayerRouteExtra(url: video.path),
+                    ).go(context);
+                  },
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

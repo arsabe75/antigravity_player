@@ -16,7 +16,7 @@ class WindowControls extends StatelessWidget {
           icon: Icon(
             LucideIcons.minus,
             color: theme.colorScheme.onSurface,
-            size: 20,
+            size: 24,
           ),
           onPressed: () => windowManager.minimize(),
           tooltip: 'Minimize',
@@ -25,7 +25,7 @@ class WindowControls extends StatelessWidget {
           icon: Icon(
             LucideIcons.square,
             color: theme.colorScheme.onSurface,
-            size: 20,
+            size: 24,
           ),
           onPressed: () async {
             if (await windowManager.isMaximized()) {
@@ -40,7 +40,7 @@ class WindowControls extends StatelessWidget {
           icon: Icon(
             LucideIcons.x,
             color: theme.colorScheme.onSurface,
-            size: 20,
+            size: 24,
           ),
           onPressed: () => windowManager.close(),
           tooltip: 'Close',
