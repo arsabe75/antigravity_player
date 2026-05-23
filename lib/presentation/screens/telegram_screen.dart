@@ -589,6 +589,8 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                         telegramChatId: video.telegramChatId,
                         telegramMessageId: video.telegramMessageId,
                         telegramFileSize: video.telegramFileSize,
+                        telegramTopicId: video.telegramTopicId,
+                        telegramTopicName: video.telegramTopicName,
                       ),
                     ).push(context).then((_) {
                       // Refresh recent videos when returning from player

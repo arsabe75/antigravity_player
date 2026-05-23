@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../infrastructure/services/recent_videos_service.dart';
+import '../../../infrastructure/services/telegram_service.dart';
 import '../../providers/recent_videos_refresh_provider.dart';
 
 /// Widget que muestra los videos recientes
@@ -32,6 +33,8 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
   final _service = RecentVideosService();
   List<RecentVideo> _videos = [];
   bool _isLoading = true;
+  final Map<int, String> _chatNames = {};
+  final Set<int> _pendingChatIds = {};
 
   @override
   void initState() {
@@ -138,6 +141,33 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
     }
   }
 
+  void _resolveChatName(int chatId) {
+    if (_chatNames.containsKey(chatId) || _pendingChatIds.contains(chatId)) {
+      return;
+    }
+    final service = TelegramService();
+    if (!service.isClientReady) return;
+
+    _pendingChatIds.add(chatId);
+    service.sendWithResult({
+      '@type': 'getChat',
+      'chat_id': chatId,
+    }).then((result) {
+      if (result['@type'] == 'chat') {
+        final title = result['title'] as String?;
+        if (title != null && mounted) {
+          setState(() {
+            _chatNames[chatId] = title;
+          });
+        }
+      }
+    }).catchError((e) {
+      debugPrint('Error getting chat name for recent video: $e');
+    }).whenComplete(() {
+      _pendingChatIds.remove(chatId);
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     // Listen for refresh trigger from anywhere in the app
@@ -240,6 +270,15 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
   }
 
   Widget _buildVerticalVideoCard(RecentVideo video, bool isDark) {
+    if (video.isTelegramVideo && video.telegramChatId != null) {
+      final chatId = video.telegramChatId!;
+      if (!_chatNames.containsKey(chatId) && !_pendingChatIds.contains(chatId)) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _resolveChatName(chatId);
+        });
+      }
+    }
+
     return Material(
       color: isDark ? Colors.grey[850] : const Color(0xFFF5F2EB),
       borderRadius: BorderRadius.circular(8),
@@ -288,33 +327,89 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    // Show topic name if available
-                    if (video.telegramTopicName != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 2),
-                        child: Row(
-                          children: [
-                            Icon(
-                              LucideIcons.hash,
-                              size: 10,
-                              color: Colors.orange[400],
-                            ),
-                            const SizedBox(width: 2),
-                            Expanded(
-                              child: Text(
-                                video.telegramTopicName!,
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w400,
-                                  color: Colors.orange[400],
-                                ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
+                    if (video.isTelegramVideo && video.telegramChatId != null) ...[
+                      if (video.telegramTopicName != null) ...[
+                        // Topic name
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Row(
+                            children: [
+                              Icon(
+                                LucideIcons.hash,
+                                size: 10,
+                                color: Colors.orange[400],
                               ),
-                            ),
-                          ],
+                              const SizedBox(width: 2),
+                              Expanded(
+                                child: Text(
+                                  video.telegramTopicName!,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w400,
+                                    color: Colors.orange[400],
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
+                        // Group name
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Row(
+                            children: [
+                              Icon(
+                                LucideIcons.users,
+                                size: 10,
+                                color: Colors.blue[400],
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  _chatNames[video.telegramChatId] ?? 'Loading group...',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w400,
+                                    color: Colors.blue[400],
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ] else ...[
+                        // Channel name
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Row(
+                            children: [
+                              Icon(
+                                LucideIcons.radio,
+                                size: 10,
+                                color: Colors.blue[400],
+                              ),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text(
+                                  _chatNames[video.telegramChatId] ?? 'Loading channel...',
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w400,
+                                    color: Colors.blue[400],
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ],
                     const SizedBox(height: 2),
                     Row(
                       children: [
