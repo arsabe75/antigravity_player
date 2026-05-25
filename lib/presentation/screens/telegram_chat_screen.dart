@@ -8,6 +8,7 @@ import '../providers/telegram_content_notifier.dart'; // For getStreamUrl helper
 import '../../config/router/routes.dart';
 import '../../domain/entities/playlist_entity.dart';
 import '../providers/playlist_notifier.dart';
+import '../../l10n/l10n.dart';
 
 class TelegramChatScreen extends ConsumerStatefulWidget {
   final int chatId;
@@ -71,6 +72,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(telegramChatProvider(_params));
+    final t = AppLocalizations.of(context);
 
     // Filter for video or video note messages, including MKV documents
     final videoMessages = state.messages.where((m) {
@@ -140,8 +142,8 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
             ? TextField(
                 controller: _searchController,
                 focusNode: _searchFocusNode,
-                decoration: const InputDecoration(
-                  hintText: 'Search videos...',
+                decoration: InputDecoration(
+                  hintText: t.telegramChatSearchVideos,
                   border: InputBorder.none,
                 ),
                 textInputAction: TextInputAction.search,
@@ -158,7 +160,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
           if (_isSearching)
             IconButton(
               icon: const Icon(LucideIcons.x),
-              tooltip: 'Cancel Search',
+              tooltip: t.telegramChatCancelSearch,
               onPressed: () {
                 setState(() {
                   _isSearching = false;
@@ -170,7 +172,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
           else
             IconButton(
               icon: const Icon(LucideIcons.search),
-              tooltip: 'Search',
+              tooltip: t.telegramChatSearch,
               onPressed: () {
                 setState(() {
                   _isSearching = true;
@@ -181,7 +183,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
           if (!_isSearching)
             IconButton(
               icon: const Icon(LucideIcons.refreshCw),
-              tooltip: 'Refresh',
+              tooltip: t.telegramChatRefresh,
               onPressed: () => ref
                   .read(telegramChatProvider(_params).notifier)
                   .refreshMessages(),
@@ -196,15 +198,15 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
           : videoMessages.isEmpty && !state.isLoading
           ? Center(
               child: state.isLoadingMore
-                  ? const Column(
+                  ? Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text('Searching chat history for videos...'),
+                        const CircularProgressIndicator(),
+                        const SizedBox(height: 16),
+                        Text(t.telegramChatSearchingHistory),
                       ],
                     )
-                  : const Text('No videos found in this chat.'),
+                  : Text(t.telegramChatNoVideos),
             )
           : CustomScrollView(
               controller: _scrollController,
@@ -286,7 +288,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                       final fileName =
                           captionText ??
                           effectiveFileName ??
-                          'Video sin título';
+                          t.telegramChatUntitled;
 
                       String videoExt = 'VIDEO';
                       if (effectiveFileName != null && effectiveFileName.contains('.')) {
@@ -477,7 +479,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
           ? FloatingActionButton.extended(
               onPressed: () => _playSelectedVideos(videoMessages),
               icon: const Icon(LucideIcons.play),
-              label: Text('Play (${_selectedMessages.length})'),
+              label: Text(t.playerPlayCount(_selectedMessages.length)),
               backgroundColor: Theme.of(context).primaryColor,
               foregroundColor: Colors.white,
             )
@@ -561,6 +563,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
     final playlistNotifier = ref.read(playlistProvider.notifier);
     final playlistItems = <PlaylistItem>[];
     final telegramContent = ref.read(telegramContentProvider.notifier);
+    final t = AppLocalizations.of(context);
 
     // Map message ID to video info for O(1) lookup
     final videoMap = {for (var v in allVideos) v['id'] as int: v};
@@ -606,7 +609,7 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
       if (effectiveFileName != null && effectiveFileName.trim().isEmpty) {
         effectiveFileName = null;
       }
-      final title = captionText ?? effectiveFileName ?? 'Video sin título';
+      final title = captionText ?? effectiveFileName ?? t.telegramChatUntitled;
 
       // Get URL (can be async, but for playlist we might need it now OR just store fileId and let player handle it?)
       // The current Player expects a path/URL.

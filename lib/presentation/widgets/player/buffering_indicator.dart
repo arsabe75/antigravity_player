@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 
+import '../../../../l10n/l10n.dart';
+
 /// Indicador de buffering que se muestra sobre el video.
 ///
 /// Incluye tracking del tiempo transcurrido para mostrar mensajes
@@ -61,34 +63,31 @@ class _BufferingIndicatorState extends State<BufferingIndicator> {
     _elapsedTimer = null;
   }
 
-  String _getMessage() {
+  String _getMessage(BuildContext context) {
+    final t = AppLocalizations.of(context);
     if (!widget.isVideoNotOptimizedForStreaming) {
-      if (_elapsedSeconds < 5) return 'Cargando video...';
-      if (_elapsedSeconds < 15) return 'Aún descargando datos...';
-      return 'La descarga está tardando. Verifica tu conexión.';
+      if (_elapsedSeconds < 5) return t.bufferingLoading;
+      if (_elapsedSeconds < 15) return t.bufferingStillDownloading;
+      return t.bufferingCheckConnection;
     }
-    // MOOV at end: video not optimized for streaming
     if (_elapsedSeconds < 10) {
-      return 'Preparando video...\n(metadatos al final del archivo)';
+      return t.bufferingPreparingVideo;
     }
     if (_elapsedSeconds < 20) {
-      return 'Video no optimizado para streaming.\n'
-          'Descargando metadatos desde el final...';
+      return t.bufferingNotOptimized;
     }
     if (_elapsedSeconds < 35) {
-      return 'Este video puede tardar más de lo normal.\n'
-          'Los metadatos están al final del archivo.';
+      return t.bufferingSlowMetadata;
     }
-    return 'La descarga de metadatos está tomando\n'
-        'demasiado tiempo. El video podría tener\n'
-        'problemas de compatibilidad.';
+    return t.bufferingTooLong;
   }
 
   @override
   Widget build(BuildContext context) {
     if (!widget.isBuffering) return const SizedBox.shrink();
 
-    final msg = _getMessage();
+    final t = AppLocalizations.of(context);
+    final msg = _getMessage(context);
     final lines = msg.split('\n');
 
     return Center(
@@ -130,7 +129,7 @@ class _BufferingIndicatorState extends State<BufferingIndicator> {
             if (_elapsedSeconds >= 5) ...[
               const SizedBox(height: 4),
               Text(
-                '${_elapsedSeconds}s transcurridos',
+                '$_elapsedSeconds${t.bufferingSecondsElapsed}',
                 style: TextStyle(color: Colors.white54, fontSize: 11),
                 textAlign: TextAlign.center,
               ),

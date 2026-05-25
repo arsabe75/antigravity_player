@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 
 import '../../../domain/entities/playlist_entity.dart';
 import '../../providers/playlist_notifier.dart';
+import '../../../../l10n/l10n.dart';
 
 /// Sidebar que muestra la playlist actual
 class PlaylistSidebar extends ConsumerWidget {
@@ -39,10 +40,11 @@ class PlaylistSidebar extends ConsumerWidget {
     PlaylistEntity playlist,
     WidgetRef ref,
   ) async {
+    final t = AppLocalizations.of(context);
     String? targetPath = playlist.sourcePath;
 
     targetPath ??= await FilePicker.platform.saveFile(
-      dialogTitle: 'Save Playlist',
+      dialogTitle: t.sidebarSave,
       fileName: 'playlist.m3u',
       type: FileType.custom,
       allowedExtensions: ['m3u'],
@@ -72,13 +74,13 @@ class PlaylistSidebar extends ConsumerWidget {
         if (context.mounted) {
           ScaffoldMessenger.of(
             context,
-          ).showSnackBar(const SnackBar(content: Text('Playlist saved')));
+          ).showSnackBar(SnackBar(content: Text(t.playlistSaved)));
         }
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(
             context,
-          ).showSnackBar(SnackBar(content: Text('Error saving playlist: $e')));
+          ).showSnackBar(SnackBar(content: Text(t.playlistErrorSaving)));
         }
       }
     }
@@ -100,7 +102,7 @@ class PlaylistSidebar extends ConsumerWidget {
           // Playlist items
           Expanded(
             child: playlist.isEmpty
-                ? _buildEmptyState(notifier)
+                ? _buildEmptyState(context, notifier)
                 : _buildPlaylistItems(playlist, notifier),
           ),
         ],
@@ -118,6 +120,7 @@ class PlaylistSidebar extends ConsumerWidget {
       (item) =>
           item.extras != null && item.extras!.containsKey('telegramChatId'),
     );
+    final t = AppLocalizations.of(context);
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -133,8 +136,8 @@ class PlaylistSidebar extends ConsumerWidget {
             children: [
               const Icon(LucideIcons.listVideo, color: Colors.white, size: 18),
               const SizedBox(width: 8),
-              const Text(
-                'Playlist',
+              Text(
+                t.sidebarPlaylist,
                 style: TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -172,8 +175,8 @@ class PlaylistSidebar extends ConsumerWidget {
                 ),
                 onPressed: hasTelegramItems ? null : () => _addFiles(notifier),
                 tooltip: hasTelegramItems
-                    ? 'Cannot add files to Telegram playlist'
-                    : 'Add files',
+                    ? t.sidebarCannotAddTelegram
+                    : t.sidebarAddFiles,
               ),
               // Save
               IconButton(
@@ -186,8 +189,8 @@ class PlaylistSidebar extends ConsumerWidget {
                     ? null
                     : () => _savePlaylist(context, playlist, ref),
                 tooltip: hasTelegramItems
-                    ? 'Cannot save Telegram playlist'
-                    : 'Save playlist',
+                    ? t.sidebarCannotSaveTelegram
+                    : t.sidebarSavePlaylist,
               ),
               // Shuffle
               IconButton(
@@ -197,7 +200,7 @@ class PlaylistSidebar extends ConsumerWidget {
                   size: 18,
                 ),
                 onPressed: notifier.toggleShuffle,
-                tooltip: 'Shuffle',
+                tooltip: t.sidebarShuffle,
               ),
               // Repeat
               IconButton(
@@ -209,7 +212,7 @@ class PlaylistSidebar extends ConsumerWidget {
                   size: 18,
                 ),
                 onPressed: notifier.toggleRepeat,
-                tooltip: _getRepeatTooltip(playlist.repeatMode),
+                tooltip: _getRepeatTooltip(context, playlist.repeatMode),
               ),
               // Clear
               IconButton(
@@ -219,7 +222,7 @@ class PlaylistSidebar extends ConsumerWidget {
                   size: 18,
                 ),
                 onPressed: playlist.isEmpty ? null : notifier.clear,
-                tooltip: 'Clear playlist',
+                tooltip: t.sidebarClearPlaylist,
               ),
             ],
           ),
@@ -236,32 +239,34 @@ class PlaylistSidebar extends ConsumerWidget {
     };
   }
 
-  String _getRepeatTooltip(RepeatMode mode) {
+  String _getRepeatTooltip(BuildContext context, RepeatMode mode) {
+    final t = AppLocalizations.of(context);
     return switch (mode) {
-      RepeatMode.none => 'Repeat: Off',
-      RepeatMode.all => 'Repeat: All',
-      RepeatMode.one => 'Repeat: One',
+      RepeatMode.none => t.controlRepeatOff,
+      RepeatMode.all => t.controlRepeatAll,
+      RepeatMode.one => t.controlRepeatOne,
     };
   }
 
-  Widget _buildEmptyState(PlaylistNotifier notifier) {
+  Widget _buildEmptyState(BuildContext context, PlaylistNotifier notifier) {
+    final t = AppLocalizations.of(context);
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Icon(LucideIcons.listVideo, size: 48, color: Colors.grey[600]),
           const SizedBox(height: 16),
-          Text('Playlist is empty', style: TextStyle(color: Colors.grey[500])),
+          Text(t.sidebarPlaylistIsEmpty, style: TextStyle(color: Colors.grey[500])),
           const SizedBox(height: 8),
           Text(
-            'Add videos to your playlist',
+            t.sidebarAddVideosToPlaylist,
             style: TextStyle(color: Colors.grey[600], fontSize: 12),
           ),
           const SizedBox(height: 16),
           ElevatedButton.icon(
             onPressed: () => _addFiles(notifier),
             icon: const Icon(LucideIcons.folderPlus, size: 16),
-            label: const Text('Add Files'),
+            label: Text(t.sidebarAddFilesButton),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.blue,
               foregroundColor: Colors.white,
@@ -319,6 +324,7 @@ class _PlaylistItemTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLocalizations.of(context);
     return Material(
       color: isCurrent
           ? Colors.blue.withValues(alpha: 0.2)
@@ -360,8 +366,8 @@ class _PlaylistItemTile extends StatelessWidget {
             const SizedBox(width: 4),
             Text(
               (item.extras != null && item.extras!.containsKey('telegramChatId'))
-                  ? 'Telegram'
-                  : (item.isNetwork ? 'Network' : 'Local'),
+                  ? t.sidebarTelegram
+                  : (item.isNetwork ? t.sidebarNetwork : t.sidebarLocal),
               style: TextStyle(fontSize: 10, color: Colors.grey[600]),
             ),
           ],

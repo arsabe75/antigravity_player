@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../../../l10n/l10n.dart';
 import '../../../domain/entities/playlist_entity.dart';
 import 'video_progress_slider.dart';
 import 'volume_control.dart';
@@ -112,7 +113,7 @@ class PlayerBottomBar extends StatelessWidget {
                 IconButton(
                   icon: const Icon(LucideIcons.stopCircle, color: Colors.white),
                   onPressed: onStop,
-                  tooltip: 'Stop',
+                  tooltip: AppLocalizations.of(context).controlStop,
                 ),
                 // Previous button
                 if (!isPlaylistEmpty)
@@ -122,7 +123,7 @@ class PlayerBottomBar extends StatelessWidget {
                       color: hasPrevious ? Colors.white : Colors.white30,
                     ),
                     onPressed: hasPrevious ? onPrevious : null,
-                    tooltip: 'Previous',
+                    tooltip: AppLocalizations.of(context).controlPrevious,
                   ),
                 // Play/Pause button
                 IconButton(
@@ -131,7 +132,7 @@ class PlayerBottomBar extends StatelessWidget {
                     color: Colors.white,
                   ),
                   onPressed: onTogglePlay,
-                  tooltip: isPlaying ? 'Pause' : 'Play',
+                  tooltip: isPlaying ? AppLocalizations.of(context).controlPause : AppLocalizations.of(context).controlPlay,
                 ),
                 // Next button
                 if (!isPlaylistEmpty)
@@ -141,7 +142,7 @@ class PlayerBottomBar extends StatelessWidget {
                       color: hasNext ? Colors.white : Colors.white30,
                     ),
                     onPressed: hasNext ? onNext : null,
-                    tooltip: 'Next',
+                    tooltip: AppLocalizations.of(context).controlNext,
                   ),
                 if (!isPlaylistEmpty) const SizedBox(width: 8),
                 // Time display
@@ -169,7 +170,7 @@ class PlayerBottomBar extends StatelessWidget {
                       color: Colors.white,
                     ),
                     onPressed: onToggleTracks!,
-                    tooltip: 'Audio & Subtitles',
+                    tooltip: AppLocalizations.of(context).controlAudioSubtitles,
                   ),
                 // Mirror button
                 IconButton(
@@ -178,7 +179,7 @@ class PlayerBottomBar extends StatelessWidget {
                     color: isMirrored ? Colors.blue : Colors.white,
                   ),
                   onPressed: onToggleMirror,
-                  tooltip: isMirrored ? 'Disable Mirror' : 'Enable Mirror',
+                  tooltip: isMirrored ? AppLocalizations.of(context).controlDisableMirror : AppLocalizations.of(context).controlEnableMirror,
                 ),
                 // Repeat button
                 IconButton(
@@ -192,9 +193,9 @@ class PlayerBottomBar extends StatelessWidget {
                   ),
                   onPressed: onToggleRepeat,
                   tooltip: switch (repeatMode) {
-                    RepeatMode.none => 'Repeat: Off',
-                    RepeatMode.all => 'Repeat: All',
-                    RepeatMode.one => 'Repeat: One',
+                    RepeatMode.none => AppLocalizations.of(context).controlRepeatOff,
+                    RepeatMode.all => AppLocalizations.of(context).controlRepeatAll,
+                    RepeatMode.one => AppLocalizations.of(context).controlRepeatOne,
                   },
                 ),
                 // Always on top button
@@ -205,8 +206,8 @@ class PlayerBottomBar extends StatelessWidget {
                   ),
                   onPressed: onToggleAlwaysOnTop,
                   tooltip: isAlwaysOnTop
-                      ? 'Disable Always on Top'
-                      : 'Enable Always on Top',
+                      ? AppLocalizations.of(context).controlDisableAlwaysOnTop
+                      : AppLocalizations.of(context).controlEnableAlwaysOnTop,
                 ),
                 // Playlist button
                 IconButton(
@@ -215,7 +216,7 @@ class PlayerBottomBar extends StatelessWidget {
                     color: showPlaylist ? Colors.blue : Colors.white,
                   ),
                   onPressed: onTogglePlaylist,
-                  tooltip: 'Playlist',
+                  tooltip: AppLocalizations.of(context).controlPlaylist,
                 ),
                 // Fullscreen button
                 IconButton(
@@ -224,7 +225,7 @@ class PlayerBottomBar extends StatelessWidget {
                     color: Colors.white,
                   ),
                   onPressed: onToggleFullscreen,
-                  tooltip: isFullscreen ? 'Exit Fullscreen' : 'Fullscreen',
+                  tooltip: isFullscreen ? AppLocalizations.of(context).controlExitFullscreen : AppLocalizations.of(context).controlFullscreen,
                 ),
               ],
             ),

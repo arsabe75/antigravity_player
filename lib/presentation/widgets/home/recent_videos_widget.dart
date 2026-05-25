@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../../infrastructure/services/recent_videos_service.dart';
 import '../../../infrastructure/services/telegram_service.dart';
 import '../../providers/recent_videos_refresh_provider.dart';
+import '../../../l10n/l10n.dart';
 
 /// Widget que muestra los videos recientes
 /// Use [showTelegramVideos] to filter:
@@ -82,18 +83,18 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Clear History'),
-        content: const Text(
-          'Are you sure you want to clear all recent videos?',
+        title: Text(AppLocalizations.of(context).recentClearHistory),
+        content: Text(
+          AppLocalizations.of(context).recentClearHistoryMsg,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(AppLocalizations.of(context).recentCancel),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Clear', style: TextStyle(color: Colors.red)),
+            child: Text(AppLocalizations.of(context).recentClear, style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -110,20 +111,20 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
     }
   }
 
-  String _formatTimeAgo(DateTime dateTime) {
+  String _formatTimeAgo(DateTime dateTime, AppLocalizations t) {
     final now = DateTime.now();
     final difference = now.difference(dateTime);
 
     if (difference.inDays > 7) {
       return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
     } else if (difference.inDays > 0) {
-      return '${difference.inDays}d ago';
+      return '${difference.inDays}${t.recentDaysAgo}';
     } else if (difference.inHours > 0) {
-      return '${difference.inHours}h ago';
+      return '${difference.inHours}${t.recentHoursAgo}';
     } else if (difference.inMinutes > 0) {
-      return '${difference.inMinutes}m ago';
+      return '${difference.inMinutes}${t.recentMinutesAgo}';
     } else {
-      return 'Just now';
+      return t.recentJustNow;
     }
   }
 
@@ -225,7 +226,7 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  'Recent',
+                  AppLocalizations.of(context).recentTitle,
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
@@ -240,7 +241,7 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                     size: 14,
                     color: Colors.grey[500],
                   ),
-                  tooltip: 'Clear all',
+                  tooltip: AppLocalizations.of(context).recentClearAll,
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(
                     minWidth: 24,
@@ -368,7 +369,7 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
-                                  _chatNames[video.telegramChatId] ?? 'Loading group...',
+                                  _chatNames[video.telegramChatId] ?? AppLocalizations.of(context).recentLoadingGroup,
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w400,
@@ -395,7 +396,7 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
-                                  _chatNames[video.telegramChatId] ?? 'Loading channel...',
+                                  _chatNames[video.telegramChatId] ?? AppLocalizations.of(context).recentLoadingChannel,
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w400,
@@ -414,7 +415,7 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                     Row(
                       children: [
                         Text(
-                          _formatTimeAgo(video.playedAt),
+                          _formatTimeAgo(video.playedAt, AppLocalizations.of(context)),
                           style: TextStyle(
                             fontSize: 10,
                             color: Colors.grey[500],
@@ -444,7 +445,7 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
               ),
               // Delete button
               Tooltip(
-                message: 'Remove video',
+                message: AppLocalizations.of(context).recentRemoveVideo,
                 child: MouseRegion(
                   cursor: SystemMouseCursors.click,
                   child: GestureDetector(

@@ -7,6 +7,7 @@ import '../../infrastructure/services/cache_settings.dart';
 import '../providers/telegram_cache_notifier.dart';
 import 'package:window_manager/window_manager.dart';
 import '../widgets/window_controls.dart';
+import '../../l10n/l10n.dart';
 
 /// Screen for viewing and managing Telegram cache storage.
 ///
@@ -23,15 +24,16 @@ class TelegramStorageScreen extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final cacheState = ref.watch(telegramCacheProvider);
     final theme = Theme.of(context);
+    final t = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(LucideIcons.arrowLeft),
-          tooltip: 'Back',
+          tooltip: t.storageBack,
           onPressed: () => Navigator.of(context).pop(),
         ),
-        title: const Text('Storage Usage'),
+        title: Text(t.storageUsage),
         flexibleSpace: GestureDetector(
           onPanStart: (_) => windowManager.startDragging(),
           behavior: HitTestBehavior.translucent,
@@ -99,6 +101,7 @@ class TelegramStorageScreen extends ConsumerWidget {
 
   Widget _buildDiskSpaceCard(BuildContext context, TelegramCacheState state) {
     final theme = Theme.of(context);
+    final t = AppLocalizations.of(context);
     final availableSpace = state.availableDiskSpace;
     final totalSpace = state.totalDiskSpace;
     final usedPercent = totalSpace > 0
@@ -124,13 +127,13 @@ class TelegramStorageScreen extends ConsumerWidget {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'Disk Space',
+                        t.storageDiskSpace,
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       Text(
-                        '${StorageStatistics.formatBytes(availableSpace)} free',
+                        '${StorageStatistics.formatBytes(availableSpace)} ${t.storageFree}',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.primary,
                           fontWeight: FontWeight.w500,
@@ -155,7 +158,7 @@ class TelegramStorageScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${StorageStatistics.formatBytes(totalSpace - availableSpace)} used of ${StorageStatistics.formatBytes(totalSpace)}',
+                    '${StorageStatistics.formatBytes(totalSpace - availableSpace)} ${t.storageUsedOf} ${StorageStatistics.formatBytes(totalSpace)}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -171,6 +174,7 @@ class TelegramStorageScreen extends ConsumerWidget {
 
   Widget _buildTotalSizeCard(BuildContext context, StorageStatistics? stats) {
     final theme = Theme.of(context);
+    final t = AppLocalizations.of(context);
 
     return Card(
       child: Padding(
@@ -184,7 +188,7 @@ class TelegramStorageScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 12),
             Text(
-              'Total Cache',
+              t.storageTotalCache,
               style: theme.textTheme.titleMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -199,7 +203,7 @@ class TelegramStorageScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '${stats?.fileCount ?? 0} files',
+              '${stats?.fileCount ?? 0} ${t.storageFiles}',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -215,38 +219,39 @@ class TelegramStorageScreen extends ConsumerWidget {
     StorageStatistics? stats,
   ) {
     final theme = Theme.of(context);
+    final t = AppLocalizations.of(context);
 
     final categories = [
       _StorageCategory(
-        'Videos',
+        t.storageVideos,
         stats?.videoSize ?? 0,
         stats?.formattedVideoSize ?? '0 B',
         LucideIcons.video,
         Colors.blue,
       ),
       _StorageCategory(
-        'Photos',
+        t.storagePhotos,
         stats?.photoSize ?? 0,
         stats?.formattedPhotoSize ?? '0 B',
         LucideIcons.image,
         Colors.green,
       ),
       _StorageCategory(
-        'Documents',
+        t.storageDocuments,
         stats?.documentSize ?? 0,
         stats?.formattedDocumentSize ?? '0 B',
         LucideIcons.fileText,
         Colors.orange,
       ),
       _StorageCategory(
-        'Audio',
+        t.storageAudio,
         stats?.audioSize ?? 0,
         stats?.formattedAudioSize ?? '0 B',
         LucideIcons.music,
         Colors.purple,
       ),
       _StorageCategory(
-        'Other',
+        t.storageOther,
         stats?.otherSize ?? 0,
         stats?.formattedOtherSize ?? '0 B',
         LucideIcons.file,
@@ -263,7 +268,7 @@ class TelegramStorageScreen extends ConsumerWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Breakdown',
+              t.storageBreakdown,
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.bold,
               ),
@@ -332,6 +337,7 @@ class TelegramStorageScreen extends ConsumerWidget {
     TelegramCacheState cacheState,
   ) {
     final theme = Theme.of(context);
+    final t = AppLocalizations.of(context);
     final videoSize = cacheState.statistics?.videoSize ?? 0;
     final isNearLimit = cacheState.isVideoNearLimit;
     final usagePercent = cacheState.videoCacheUsagePercent;
@@ -358,7 +364,7 @@ class TelegramStorageScreen extends ConsumerWidget {
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            'Video Cache Limit',
+                            t.storageVideoCacheLimit,
                             style: theme.textTheme.titleMedium?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
@@ -367,7 +373,7 @@ class TelegramStorageScreen extends ConsumerWidget {
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Maximum storage for cached videos (NVR-style: oldest deleted first)',
+                        t.storageCacheLimitDesc,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -394,7 +400,7 @@ class TelegramStorageScreen extends ConsumerWidget {
                         ScaffoldMessenger.of(context).showSnackBar(
                           SnackBar(
                             content: Text(
-                              'Not enough disk space for ${value.label}. Max available: ${StorageStatistics.formatBytes(maxSafeSpace)}',
+                              t.storageNotEnoughSpace(value.label, StorageStatistics.formatBytes(maxSafeSpace)),
                             ),
                             backgroundColor: theme.colorScheme.error,
                           ),
@@ -463,7 +469,7 @@ class TelegramStorageScreen extends ConsumerWidget {
                   ),
                   const SizedBox(width: 4),
                   Text(
-                    'Approaching limit - oldest videos will be auto-deleted',
+                    t.storageApproachingLimit,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.error,
                     ),
@@ -483,6 +489,7 @@ class TelegramStorageScreen extends ConsumerWidget {
     TelegramCacheState cacheState,
   ) {
     final theme = Theme.of(context);
+    final t = AppLocalizations.of(context);
 
     return Card(
       child: Padding(
@@ -498,14 +505,14 @@ class TelegramStorageScreen extends ConsumerWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Keep Media',
+                        t.storageKeepMedia,
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       const SizedBox(height: 4),
                       Text(
-                        'Auto-delete cached files after this period',
+                        t.storageKeepMediaDesc,
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
@@ -545,6 +552,7 @@ class TelegramStorageScreen extends ConsumerWidget {
     WidgetRef ref,
     TelegramCacheState cacheState,
   ) {
+    final t = AppLocalizations.of(context);
     return ElevatedButton.icon(
       onPressed: cacheState.isClearing
           ? null
@@ -561,7 +569,7 @@ class TelegramStorageScreen extends ConsumerWidget {
               child: CircularProgressIndicator(strokeWidth: 2),
             )
           : const Icon(LucideIcons.trash2),
-      label: Text(cacheState.isClearing ? 'Clearing...' : 'Clear Cache'),
+      label: Text(cacheState.isClearing ? t.storageClearing : t.storageClearCache),
     );
   }
 
@@ -569,26 +577,25 @@ class TelegramStorageScreen extends ConsumerWidget {
     BuildContext context,
     WidgetRef ref,
   ) async {
+    final t = AppLocalizations.of(context);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Clear Cache'),
-        content: const Text(
-          'This will delete all downloaded Telegram files. '
-          'You can re-download them from the cloud if needed.\n\n'
-          'Are you sure you want to continue?',
+        title: Text(t.storageClearConfirmTitle),
+        content: Text(
+          t.storageClearConfirmMsg,
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: Text(t.storageClearConfirmCancel),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
             style: TextButton.styleFrom(
               foregroundColor: Theme.of(context).colorScheme.error,
             ),
-            child: const Text('Clear'),
+            child: Text(t.storageClearConfirmClear),
           ),
         ],
       ),
@@ -603,7 +610,7 @@ class TelegramStorageScreen extends ConsumerWidget {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              success ? 'Cache cleared successfully' : 'Failed to clear cache',
+              success ? t.storageCacheCleared : t.storageCacheClearFailed,
             ),
           ),
         );

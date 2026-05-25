@@ -6,6 +6,7 @@ import '../widgets/window_controls.dart';
 import '../providers/telegram_forum_notifier.dart';
 import '../widgets/custom_emoji_icon.dart';
 import '../../config/router/routes.dart';
+import '../../l10n/l10n.dart';
 
 class TelegramTopicsScreen extends ConsumerStatefulWidget {
   final int chatId;
@@ -64,6 +65,7 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(telegramForumProvider(widget.chatId));
+    final t = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
@@ -71,8 +73,8 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
             ? TextField(
                 controller: _searchController,
                 focusNode: _searchFocusNode,
-                decoration: const InputDecoration(
-                  hintText: 'Search topics...',
+                decoration: InputDecoration(
+                  hintText: t.telegramTopicsSearch,
                   border: InputBorder.none,
                 ),
                 textInputAction: TextInputAction.search,
@@ -84,9 +86,9 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(widget.title, style: const TextStyle(fontSize: 16)),
-                  const Text(
-                    'Topics',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
+                  Text(
+                    t.telegramTopicsTitle,
+                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.normal),
                   ),
                 ],
               ),
@@ -98,7 +100,7 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
           if (_isSearching)
             IconButton(
               icon: const Icon(LucideIcons.x),
-              tooltip: 'Cancel Search',
+              tooltip: t.telegramTopicsCancelSearch,
               onPressed: () {
                 setState(() {
                   _isSearching = false;
@@ -110,7 +112,7 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
           else
             IconButton(
               icon: const Icon(LucideIcons.search),
-              tooltip: 'Search',
+              tooltip: t.telegramTopicsSearchBtn,
               onPressed: () {
                 setState(() {
                   _isSearching = true;
@@ -121,7 +123,7 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
           if (!_isSearching)
             IconButton(
               icon: const Icon(LucideIcons.refreshCw),
-              tooltip: 'Refresh',
+              tooltip: t.telegramTopicsRefresh,
               onPressed: () {
                 ref.read(telegramForumProvider(widget.chatId).notifier).refreshTopics();
               },
@@ -132,13 +134,13 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
         ],
       ),
       body: state.isLoading && state.topics.isEmpty
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Loading topics...'),
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(t.telegramTopicsLoading),
                 ],
               ),
             )
@@ -153,9 +155,9 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
                     color: Colors.grey,
                   ),
                   const SizedBox(height: 16),
-                  const Text(
-                    'No topics found',
-                    style: TextStyle(color: Colors.grey),
+                  Text(
+                    t.telegramTopicsNotFound,
+                    style: const TextStyle(color: Colors.grey),
                   ),
                   const SizedBox(height: 8),
                   ElevatedButton.icon(
@@ -165,7 +167,7 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
                           .refreshTopics();
                     },
                     icon: const Icon(LucideIcons.refreshCw),
-                    label: const Text('Retry'),
+                    label: Text(t.telegramTopicsRetry),
                   ),
                 ],
               ),
@@ -216,11 +218,11 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
                         final text = content['text'] as Map<String, dynamic>?;
                         preview = text?['text'] as String?;
                       } else if (type == 'messageVideo') {
-                        preview = '🎬 Video';
+                        preview = '🎬 ${t.telegramTopicVideo}';
                       } else if (type == 'messagePhoto') {
-                        preview = '📷 Photo';
+                        preview = '📷 ${t.telegramTopicPhoto}';
                       } else if (type == 'messageDocument') {
-                        preview = '📎 Document';
+                        preview = '📎 ${t.telegramTopicDocument}';
                       } else {
                         preview = type?.replaceFirst('message', '') ?? '';
                       }

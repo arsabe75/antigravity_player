@@ -17,6 +17,7 @@ import 'telegram_login_screen.dart';
 import '../widgets/chat_icon.dart';
 import '../../domain/entities/playlist_entity.dart';
 import '../providers/playlist_notifier.dart';
+import '../../l10n/l10n.dart';
 
 class TelegramScreen extends ConsumerStatefulWidget {
   const TelegramScreen({super.key});
@@ -146,6 +147,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(telegramAuthProvider);
+    final t = AppLocalizations.of(context);
 
     // If checking auth state, show loading
     if (authState.list == AuthState.initial) {
@@ -171,10 +173,10 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(LucideIcons.arrowLeft),
-          tooltip: 'Back',
+          tooltip: t.controlBack,
           onPressed: () => context.pop(),
         ),
-        title: const Text('Telegram Channels'),
+        title: Text(t.telegramChannels),
         flexibleSpace: GestureDetector(
           onPanStart: (_) => windowManager.startDragging(),
           behavior: HitTestBehavior.translucent,
@@ -182,7 +184,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
         actions: [
           IconButton(
             icon: const Icon(LucideIcons.plus),
-            tooltip: 'Add Channel',
+            tooltip: t.telegramAddChannel,
             onPressed: () async {
               final result = await const TelegramSelectionRoute()
                   .push<Map<String, dynamic>>(context);
@@ -199,33 +201,33 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
           ),
           IconButton(
             icon: const Icon(LucideIcons.hardDrive),
-            tooltip: 'Storage',
+            tooltip: t.telegramStorage,
             onPressed: () {
               const TelegramStorageRoute().push(context);
             },
           ),
           IconButton(
             icon: const Icon(LucideIcons.logOut),
-            tooltip: 'Logout',
+            tooltip: t.telegramLogout,
             onPressed: () {
               showDialog(
                 context: context,
                 builder: (context) => AlertDialog(
-                  title: const Text('Logout'),
-                  content: const Text(
-                    'Are you sure you want to log out from Telegram?',
+                  title: Text(t.telegramLogoutTitle),
+                  content: Text(
+                    t.telegramLogoutMsg,
                   ),
                   actions: [
                     TextButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Cancel'),
+                      child: Text(t.telegramCancel),
                     ),
                     TextButton(
                       onPressed: () {
                         Navigator.of(context).pop();
                         ref.read(telegramAuthProvider.notifier).logout();
                       },
-                      child: const Text('Logout'),
+                      child: Text(t.telegramLogoutConfirm),
                     ),
                   ],
                 ),
@@ -257,8 +259,8 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                               color: Colors.grey,
                             ),
                             const SizedBox(height: 16),
-                            const Text(
-                              'No favorites yet.\nClick + to add channels.',
+                            Text(
+                              t.telegramNoFavorites,
                               textAlign: TextAlign.center,
                               style: TextStyle(color: Colors.grey),
                             ),
@@ -270,7 +272,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                         itemCount: _favorites.length,
                         itemBuilder: (context, index) {
                           final chat = _favorites[index];
-                          final title = chat['title'] ?? 'Unknown';
+                          final title = chat['title'] ?? t.telegramUnknownChat;
                           final isForum = _isForum(chat);
 
                           return Card(
@@ -299,8 +301,8 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                                       size: 12,
                                     ),
                                     const SizedBox(width: 4),
-                                    const Text(
-                                      'Topics',
+                                    Text(
+                                      t.telegramSelectionTopics,
                                       style: TextStyle(fontSize: 12),
                                     ),
                                     const SizedBox(width: 8),
@@ -328,19 +330,19 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                               },
                               trailing: IconButton(
                                 icon: const Icon(LucideIcons.trash2, size: 20),
-                                tooltip: 'Remove',
+                                tooltip: t.telegramRemove,
                                 onPressed: () {
                                   showDialog(
                                     context: context,
                                     builder: (context) => AlertDialog(
-                                      title: const Text('Remove Favorite'),
+                                      title: Text(t.telegramRemoveFavorite),
                                       content: Text(
-                                        'Are you sure you want to remove "$title" from your favorites?',
+                                        t.telegramRemoveFavoriteMsg(title),
                                       ),
                                       actions: [
                                         TextButton(
                                           onPressed: () => Navigator.of(context).pop(),
-                                          child: const Text('Cancel'),
+                                          child: Text(t.telegramCancel),
                                         ),
                                         TextButton(
                                           onPressed: () {
@@ -350,7 +352,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                                               _saveFavorites();
                                             });
                                           },
-                                          child: const Text('Remove'),
+                                          child: Text(t.telegramRemove),
                                         ),
                                       ],
                                     ),
@@ -377,12 +379,12 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                     showDialog(
                       context: context,
                       barrierDismissible: false,
-                      builder: (ctx) => const AlertDialog(
+                      builder: (ctx) => AlertDialog(
                         content: Row(
                           children: [
-                            CircularProgressIndicator(),
-                            SizedBox(width: 16),
-                            Text('Connecting to Telegram...'),
+                            const CircularProgressIndicator(),
+                            const SizedBox(width: 16),
+                            Text(t.telegramConnecting),
                           ],
                         ),
                       ),
@@ -404,9 +406,9 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                           if (context.mounted) Navigator.of(context).pop();
                           if (context.mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
+                              SnackBar(
                                 content: Text(
-                                  'Telegram not authorized. Please log in first.',
+                                  t.telegramNotAuthorized,
                                 ),
                               ),
                             );
@@ -421,9 +423,9 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                         if (context.mounted) Navigator.of(context).pop();
                         if (context.mounted) {
                           ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
+                            SnackBar(
                               content: Text(
-                                'Telegram connection timed out. Please try again.',
+                                t.telegramConnectionTimeout,
                               ),
                             ),
                           );

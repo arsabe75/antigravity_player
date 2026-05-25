@@ -8,6 +8,7 @@ import 'package:package_info_plus/package_info_plus.dart';
 import '../providers/video_repository_provider.dart';
 import '../../infrastructure/services/player_settings_service.dart';
 import '../../config/constants/app_constants.dart';
+import '../../l10n/l10n.dart';
 
 class SettingsDialog extends ConsumerWidget {
   const SettingsDialog({super.key});
@@ -23,16 +24,17 @@ class SettingsDialog extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final t = AppLocalizations.of(context);
 
     return AlertDialog(
-      title: const Text('Settings'),
+      title: Text(t.settingsTitle),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Player Engine',
+            Text(
+              t.settingsPlayerEngine,
               style: TextStyle(fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 10),
@@ -63,16 +65,16 @@ class SettingsDialog extends ConsumerWidget {
                       child: Column(
                         children: [
                           RadioListTile<String>(
-                            title: const Text('MediaKit (Default)'),
-                            subtitle: const Text(
-                              'Supports tracks, hardware acceleration',
+                            title: Text(t.settingsMediaKit),
+                            subtitle: Text(
+                              t.settingsMediaKitSubtitle,
                             ),
                             value: PlayerSettingsService.engineMediaKit,
                           ),
                           RadioListTile<String>(
-                            title: const Text('FVP (VideoPlayer)'),
-                            subtitle: const Text(
-                              'Alternative engine. No subtitles/audio selection.',
+                            title: Text(t.settingsFvp),
+                            subtitle: Text(
+                              t.settingsFvpSubtitle,
                             ),
                             value: PlayerSettingsService.engineFvp,
                           ),
@@ -108,7 +110,7 @@ class SettingsDialog extends ConsumerWidget {
                     },
                   ),
                   const SizedBox(height: 4),
-                  const Text('Desarrollado por Arturo San'),
+                  Text(t.settingsDevelopedBy),
                   const SizedBox(height: 8),
                   GestureDetector(
                     onTap: () => _openUrl('https://t.me/asbSoftware'),
@@ -127,7 +129,7 @@ class SettingsDialog extends ConsumerWidget {
         ),
       ),
       actions: [
-        TextButton(onPressed: () => context.pop(), child: const Text('Close')),
+        TextButton(onPressed: () => context.pop(), child: Text(t.settingsClose)),
       ],
     );
   }

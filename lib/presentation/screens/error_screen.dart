@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../widgets/window_controls.dart';
+import '../../l10n/l10n.dart';
 
 /// Error screen displayed when navigation fails (404, invalid routes, etc.)
 class ErrorScreen extends StatelessWidget {
@@ -40,7 +41,7 @@ class ErrorScreen extends StatelessWidget {
               ),
               const SizedBox(height: 24),
               Text(
-                'Page Not Found',
+                AppLocalizations.of(context).errorPageNotFound,
                 style: theme.textTheme.headlineMedium?.copyWith(
                   fontWeight: FontWeight.bold,
                   color: colorScheme.onSurface,
@@ -48,7 +49,7 @@ class ErrorScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Text(
-                'The page you\'re looking for doesn\'t exist or has been moved.',
+                AppLocalizations.of(context).errorPageNotFoundDesc,
                 style: theme.textTheme.bodyLarge?.copyWith(
                   color: colorScheme.onSurfaceVariant,
                 ),
@@ -76,7 +77,7 @@ class ErrorScreen extends StatelessWidget {
               FilledButton.icon(
                 onPressed: () => context.go('/'),
                 icon: const Icon(LucideIcons.home),
-                label: const Text('Go to Home'),
+                label: Text(AppLocalizations.of(context).errorGoToHome),
               ),
             ],
           ),

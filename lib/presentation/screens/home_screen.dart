@@ -5,9 +5,11 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../config/router/routes.dart';
+import '../../l10n/l10n.dart';
 
 import '../../domain/entities/playlist_entity.dart';
 import '../providers/playlist_notifier.dart';
+import '../providers/locale_provider.dart';
 import '../providers/theme_provider.dart';
 import '../widgets/dialogs/url_input_dialog.dart';
 import '../widgets/home/recent_videos_widget.dart';
@@ -82,6 +84,24 @@ class HomeScreen extends ConsumerWidget {
           behavior: HitTestBehavior.translucent,
         ),
         actions: [
+          Consumer(
+            builder: (context, ref, _) {
+              final locale = ref.watch(localeProvider);
+              final isSpanish = locale.languageCode == 'es';
+              return TextButton(
+                onPressed: () {
+                  ref.read(localeProvider.notifier).toggleLocale();
+                },
+                child: Text(
+                  isSpanish ? 'English' : 'Español',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurface,
+                  ),
+                ),
+              );
+            },
+          ),
           // Theme Toggle Button
           IconButton(
             icon: Icon(
@@ -91,8 +111,8 @@ class HomeScreen extends ConsumerWidget {
               ref.read(themeProvider.notifier).toggleTheme();
             },
             tooltip: isDarkMode
-                ? 'Switch to Light Mode'
-                : 'Switch to Dark Mode',
+                ? AppLocalizations.of(context).homeSwitchToLightMode
+                : AppLocalizations.of(context).homeSwitchToDarkMode,
           ),
           IconButton(
             icon: const Icon(LucideIcons.settings),
@@ -102,7 +122,7 @@ class HomeScreen extends ConsumerWidget {
                 builder: (context) => const SettingsDialog(),
               );
             },
-            tooltip: 'Settings',
+            tooltip: AppLocalizations.of(context).homeSettings,
           ),
           const SizedBox(width: 8),
           const WindowControls(),
@@ -156,7 +176,7 @@ class HomeScreen extends ConsumerWidget {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 SizedBox(
-                                  width: 155,
+                                  width: 190,
                                   height: 50,
                                   child: OutlinedButton.icon(
                                     onPressed: () =>
@@ -177,8 +197,8 @@ class HomeScreen extends ConsumerWidget {
                                     icon: const Icon(
                                       LucideIcons.folderOpen,
                                     ),
-                                    label: const Text(
-                                      'Local Files',
+                                    label: Text(
+                                      AppLocalizations.of(context).homeLocalFiles,
                                       maxLines: 1,
                                       overflow: TextOverflow.ellipsis,
                                     ),
@@ -211,16 +231,16 @@ class HomeScreen extends ConsumerWidget {
                                                 ),
                                           ),
                                     ),
-                                    child: const Column(
+                                    child: Column(
                                       mainAxisAlignment:
                                           MainAxisAlignment.center,
                                       children: [
-                                        Icon(
+                                        const Icon(
                                           LucideIcons.list,
                                           size: 18,
                                         ),
                                         Text(
-                                          'Lists',
+                                          AppLocalizations.of(context).homeLists,
                                           style: TextStyle(
                                             fontSize: 10,
                                           ),
@@ -232,13 +252,13 @@ class HomeScreen extends ConsumerWidget {
                               ],
                             ),
                             SizedBox(
-                              width: 200,
+                              width: 210,
                               height: 50,
                               child: OutlinedButton.icon(
                                 onPressed: () =>
                                     _enterUrl(context, ref),
                                 icon: const Icon(LucideIcons.globe),
-                                label: const Text('Open Network URL'),
+                                label: Text(AppLocalizations.of(context).homeOpenNetworkUrl),
                               ),
                             ),
                             SizedBox(
@@ -248,7 +268,7 @@ class HomeScreen extends ConsumerWidget {
                                 onPressed: () => const TelegramRoute()
                                     .push(context),
                                 icon: const Icon(LucideIcons.send),
-                                label: const Text('Telegram'),
+                                label: Text(AppLocalizations.of(context).homeTelegram),
                               ),
                             ),
                           ],

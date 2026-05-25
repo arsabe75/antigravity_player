@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../../../config/constants/app_constants.dart';
+import '../../../../config/constants/app_constants.dart';
+import '../../../../l10n/l10n.dart';
 
 /// Control de velocidad de reproducción
 class PlaybackSpeedControl extends StatelessWidget {
@@ -19,7 +20,7 @@ class PlaybackSpeedControl extends StatelessWidget {
     return PopupMenuButton<double>(
       initialValue: currentSpeed,
       onSelected: onSpeedChanged,
-      tooltip: 'Playback Speed',
+      tooltip: AppLocalizations.of(context).controlPlaybackSpeed,
       icon: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

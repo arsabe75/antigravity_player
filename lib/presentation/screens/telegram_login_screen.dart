@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../providers/telegram_auth_notifier.dart';
+import '../../l10n/l10n.dart';
 
 import 'package:window_manager/window_manager.dart';
 import '../widgets/window_controls.dart';
@@ -30,10 +31,11 @@ class _TelegramLoginScreenState extends ConsumerState<TelegramLoginScreen> {
   @override
   Widget build(BuildContext context) {
     final authState = ref.watch(telegramAuthProvider);
+    final t = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Connect Telegram'),
+        title: Text(t.telegramConnectTitle),
         centerTitle: true,
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -89,23 +91,24 @@ class _TelegramLoginScreenState extends ConsumerState<TelegramLoginScreen> {
   }
 
   Widget _buildForm(BuildContext context, TelegramAuthState state) {
+    final t = AppLocalizations.of(context);
     if (state.list == AuthState.waitPhoneNumber ||
         state.list == AuthState.initial) {
       return Column(
         children: [
-          const Text(
-            'Enter your phone number starting with +',
+          Text(
+            t.telegramEnterPhone,
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16),
+            style: const TextStyle(fontSize: 16),
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _phoneController,
-            decoration: const InputDecoration(
-              labelText: 'Phone Number',
-              hintText: '+1234567890',
+            decoration: InputDecoration(
+              labelText: t.telegramPhoneLabel,
+              hintText: t.telegramPhoneHint,
               border: OutlineInputBorder(),
-              prefixIcon: Icon(LucideIcons.phone),
+              prefixIcon: const Icon(LucideIcons.phone),
             ),
             keyboardType: TextInputType.phone,
             onSubmitted: (val) =>
@@ -118,7 +121,7 @@ class _TelegramLoginScreenState extends ConsumerState<TelegramLoginScreen> {
                 : () => ref
                       .read(telegramAuthProvider.notifier)
                       .setPhoneNumber(_phoneController.text),
-            child: const Text('Send Code'),
+            child: Text(t.telegramSendCode),
           ),
         ],
       );
@@ -126,17 +129,17 @@ class _TelegramLoginScreenState extends ConsumerState<TelegramLoginScreen> {
       return Column(
         children: [
           Text(
-            'Enter the code sent to ${_phoneController.text}',
+            '${t.telegramCodeSent} ${_phoneController.text}',
             textAlign: TextAlign.center,
             style: const TextStyle(fontSize: 16),
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _codeController,
-            decoration: const InputDecoration(
-              labelText: 'Code',
+            decoration: InputDecoration(
+              labelText: t.telegramCodeLabel,
               border: OutlineInputBorder(),
-              prefixIcon: Icon(LucideIcons.lock),
+              prefixIcon: const Icon(LucideIcons.lock),
             ),
             keyboardType: TextInputType.number,
             onSubmitted: (val) =>
@@ -149,25 +152,25 @@ class _TelegramLoginScreenState extends ConsumerState<TelegramLoginScreen> {
                 : () => ref
                       .read(telegramAuthProvider.notifier)
                       .checkCode(_codeController.text),
-            child: const Text('Verify Code'),
+            child: Text(t.telegramVerifyCode),
           ),
         ],
       );
     } else if (state.list == AuthState.waitPassword) {
       return Column(
         children: [
-          const Text(
-            'Enter your Two-Step Verification password',
+          Text(
+            t.telegramPasswordHint,
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 16),
+            style: const TextStyle(fontSize: 16),
           ),
           const SizedBox(height: 16),
           TextField(
             controller: _passwordController,
-            decoration: const InputDecoration(
-              labelText: 'Password',
+            decoration: InputDecoration(
+              labelText: t.telegramPasswordLabel,
               border: OutlineInputBorder(),
-              prefixIcon: Icon(LucideIcons.key),
+              prefixIcon: const Icon(LucideIcons.key),
             ),
             obscureText: true,
             onSubmitted: (val) =>
@@ -180,7 +183,7 @@ class _TelegramLoginScreenState extends ConsumerState<TelegramLoginScreen> {
                 : () => ref
                       .read(telegramAuthProvider.notifier)
                       .checkPassword(_passwordController.text),
-            child: const Text('Unlock'),
+            child: Text(t.telegramUnlock),
           ),
         ],
       );

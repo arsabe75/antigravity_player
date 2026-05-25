@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
-import '../../../config/constants/app_constants.dart';
+import '../../../../config/constants/app_constants.dart';
+import '../../../../l10n/l10n.dart';
 
 /// Control de volumen con icono y slider
 class VolumeControl extends StatelessWidget {
@@ -35,7 +36,7 @@ class VolumeControl extends StatelessWidget {
             size: AppConstants.iconSize,
           ),
           onPressed: onToggleMute,
-          tooltip: volume > 0 ? 'Mute' : 'Unmute',
+          tooltip: volume > 0 ? AppLocalizations.of(context).controlMute : AppLocalizations.of(context).controlUnmute,
         ),
         SizedBox(
           width: AppConstants.volumeSliderWidth,

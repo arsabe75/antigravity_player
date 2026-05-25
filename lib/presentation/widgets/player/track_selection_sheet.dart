@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../providers/player_notifier.dart';
+import '../../../l10n/l10n.dart';
 
 class TrackSelectionSheet extends ConsumerStatefulWidget {
   const TrackSelectionSheet({super.key});
@@ -75,7 +76,7 @@ class _TrackSelectionSheetState extends ConsumerState<TrackSelectionSheet> {
                           size: 20,
                         ),
                         onPressed: _onRefresh,
-                        tooltip: 'Refresh tracks',
+                        tooltip: AppLocalizations.of(context).trackRefreshTracks,
                         padding: EdgeInsets.zero,
                         constraints: const BoxConstraints(),
                       ),
@@ -92,7 +93,7 @@ class _TrackSelectionSheetState extends ConsumerState<TrackSelectionSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildHeader(context, 'Subtitles'),
+                      _buildHeader(context, AppLocalizations.of(context).trackSubtitles),
                       Expanded(
                         child: _buildTrackList(
                           context,
@@ -112,7 +113,7 @@ class _TrackSelectionSheetState extends ConsumerState<TrackSelectionSheet> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _buildHeader(context, 'Audio'),
+                      _buildHeader(context, AppLocalizations.of(context).trackAudio),
                       Expanded(
                         child: _buildTrackList(
                           context,
@@ -155,9 +156,9 @@ class _TrackSelectionSheetState extends ConsumerState<TrackSelectionSheet> {
     required IconData icon,
   }) {
     if (tracks.isEmpty) {
-      return const Padding(
+      return Padding(
         padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-        child: Text('None available', style: TextStyle(color: Colors.white54)),
+        child: Text(AppLocalizations.of(context).trackNoneAvailable, style: TextStyle(color: Colors.white54)),
       );
     }
 

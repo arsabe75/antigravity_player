@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../infrastructure/services/url_validator.dart';
 import '../../../infrastructure/services/recent_urls_service.dart';
+import '../../../l10n/l10n.dart';
 
 /// Diálogo mejorado para ingresar URLs de video
 class UrlInputDialog extends StatefulWidget {
@@ -106,7 +107,7 @@ class _UrlInputDialogState extends State<UrlInputDialog> {
         children: [
           const Icon(LucideIcons.globe, size: 24),
           const SizedBox(width: 12),
-          const Text('Open Network URL'),
+          Text(AppLocalizations.of(context).urlDialogOpenNetworkUrl),
         ],
       ),
       content: SizedBox(
@@ -119,7 +120,7 @@ class _UrlInputDialogState extends State<UrlInputDialog> {
             TextField(
               controller: _controller,
               decoration: InputDecoration(
-                hintText: 'https://example.com/video.mp4',
+                hintText: AppLocalizations.of(context).urlDialogHint,
                 border: const OutlineInputBorder(),
                 prefixIcon: const Icon(LucideIcons.link),
                 suffixIcon: Row(
@@ -140,7 +141,7 @@ class _UrlInputDialogState extends State<UrlInputDialog> {
                     IconButton(
                       icon: const Icon(LucideIcons.clipboard, size: 20),
                       onPressed: _pasteFromClipboard,
-                      tooltip: 'Paste from clipboard',
+                      tooltip: AppLocalizations.of(context).urlDialogPaste,
                     ),
                     // Clear button
                     if (_controller.text.isNotEmpty)
@@ -152,7 +153,7 @@ class _UrlInputDialogState extends State<UrlInputDialog> {
                             _validationResult = null;
                           });
                         },
-                        tooltip: 'Clear',
+                        tooltip: AppLocalizations.of(context).urlDialogClear,
                       ),
                   ],
                 ),
@@ -218,7 +219,7 @@ class _UrlInputDialogState extends State<UrlInputDialog> {
                   const Icon(LucideIcons.history, size: 16, color: Colors.grey),
                   const SizedBox(width: 8),
                   Text(
-                    'Recent URLs',
+                    AppLocalizations.of(context).urlDialogRecentUrls,
                     style: TextStyle(
                       color: Colors.grey[600],
                       fontSize: 12,
@@ -252,7 +253,7 @@ class _UrlInputDialogState extends State<UrlInputDialog> {
                       trailing: IconButton(
                         icon: const Icon(LucideIcons.x, size: 14),
                         onPressed: () => _removeRecentUrl(url),
-                        tooltip: 'Remove',
+                        tooltip: AppLocalizations.of(context).urlDialogRemove,
                       ),
                       onTap: () => _selectUrl(url),
                     );
@@ -273,12 +274,12 @@ class _UrlInputDialogState extends State<UrlInputDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
+          child: Text(AppLocalizations.of(context).urlDialogCancel),
         ),
         ElevatedButton.icon(
           onPressed: _validationResult?.isValid == true ? _submit : null,
           icon: const Icon(LucideIcons.play, size: 18),
-          label: const Text('Open'),
+          label: Text(AppLocalizations.of(context).urlDialogOpen),
         ),
       ],
     );

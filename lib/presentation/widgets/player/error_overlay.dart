@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../domain/entities/player_error.dart';
+import '../../../l10n/l10n.dart';
 
 /// Widget que muestra un overlay de error sobre el video
 class ErrorOverlay extends StatelessWidget {
@@ -77,7 +78,7 @@ class ErrorOverlay extends StatelessWidget {
 
               // Error Title
               Text(
-                _getErrorTitle(),
+                _getErrorTitle(context),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 20,
@@ -103,7 +104,7 @@ class ErrorOverlay extends StatelessWidget {
                   OutlinedButton.icon(
                     onPressed: onGoHome,
                     icon: const Icon(LucideIcons.home),
-                    label: const Text('Go Home'),
+                    label: Text(AppLocalizations.of(context).errorGoHome),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.white,
                       side: const BorderSide(color: Colors.white54),
@@ -117,7 +118,7 @@ class ErrorOverlay extends StatelessWidget {
                     ElevatedButton.icon(
                       onPressed: onRemoveFromHistory,
                       icon: const Icon(LucideIcons.trash2),
-                      label: const Text('Remove from History'),
+                      label: Text(AppLocalizations.of(context).errorRemoveFromHistory),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.red,
                         foregroundColor: Colors.white,
@@ -131,7 +132,7 @@ class ErrorOverlay extends StatelessWidget {
                     ElevatedButton.icon(
                       onPressed: onRetry,
                       icon: const Icon(LucideIcons.refreshCw),
-                      label: const Text('Retry'),
+                      label: Text(AppLocalizations.of(context).errorRetry),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _getErrorColor(),
                         foregroundColor: Colors.white,
@@ -147,7 +148,7 @@ class ErrorOverlay extends StatelessWidget {
                 color: Colors.transparent,
                 child: ExpansionTile(
                   title: Text(
-                    'Technical Details',
+                    AppLocalizations.of(context).errorTechnicalDetails,
                     style: TextStyle(color: Colors.grey[600], fontSize: 12),
                   ),
                   collapsedIconColor: Colors.grey[600],
@@ -180,14 +181,15 @@ class ErrorOverlay extends StatelessWidget {
     );
   }
 
-  String _getErrorTitle() {
+  String _getErrorTitle(BuildContext context) {
+    final t = AppLocalizations.of(context);
     return switch (error) {
-      NetworkError() => 'Connection Error',
-      FileNotFoundError() => 'File Not Found',
-      UnsupportedFormatError() => 'Unsupported Format',
-      PlaybackError() => 'Playback Error',
-      PermissionError() => 'Permission Denied',
-      UnknownError() => 'Error',
+      NetworkError() => t.errorConnectionError,
+      FileNotFoundError() => t.errorFileNotFound,
+      UnsupportedFormatError() => t.errorUnsupportedFormat,
+      PlaybackError() => t.errorPlaybackError,
+      PermissionError() => t.errorPermissionDenied,
+      UnknownError() => t.errorTitle,
     };
   }
 }

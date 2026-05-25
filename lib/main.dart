@@ -10,10 +10,14 @@ import 'package:flutter_single_instance/flutter_single_instance.dart';
 import 'package:windows_single_instance/windows_single_instance.dart';
 import 'package:flutter_media_session/flutter_media_session.dart';
 
+import 'package:flutter_localizations/flutter_localizations.dart';
+
 import 'config/router/app_router.dart';
 import 'config/theme/app_theme.dart';
 import 'config/constants/app_constants.dart';
 import 'presentation/providers/theme_provider.dart';
+import 'presentation/providers/locale_provider.dart';
+import 'l10n/l10n.dart';
 import 'infrastructure/services/player_settings_service.dart';
 import 'infrastructure/services/secure_storage_service.dart';
 import 'presentation/providers/video_repository_provider.dart';
@@ -217,11 +221,23 @@ class _VideoPlayerAppState extends ConsumerState<VideoPlayerApp>
   @override
   Widget build(BuildContext context) {
     final themeMode = ref.watch(themeProvider);
+    final locale = ref.watch(localeProvider);
     final router = ref.watch(appRouterProvider);
 
     return MaterialApp.router(
       title: 'VideoPlayerApp',
       debugShowCheckedModeBanner: false,
+      locale: locale,
+      supportedLocales: const [
+        Locale('es'),
+        Locale('en'),
+      ],
+      localizationsDelegates: const [
+        AppLocalizations.delegate,
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,
       themeMode: themeMode,

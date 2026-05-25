@@ -14,6 +14,7 @@ import 'package:path/path.dart' as p;
 
 import '../../config/router/routes.dart';
 import '../../config/constants/app_constants.dart';
+import '../../l10n/l10n.dart';
 import '../../domain/entities/player_error.dart';
 
 import '../providers/player_notifier.dart';
@@ -957,7 +958,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
           );
         },
         icon: const Icon(LucideIcons.fileVideo),
-        label: const Text('Open Video'),
+        label: Text(AppLocalizations.of(context).playerOpenVideo),
       ),
     );
   }

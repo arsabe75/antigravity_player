@@ -11,6 +11,7 @@ import '../../config/router/routes.dart';
 import '../../domain/entities/playlist_entity.dart';
 import '../providers/playlist_notifier.dart';
 import '../widgets/window_controls.dart';
+import '../../l10n/l10n.dart';
 
 class PlaylistManagerScreen extends ConsumerStatefulWidget {
   const PlaylistManagerScreen({super.key});
@@ -86,18 +87,18 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
       final confirm = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Unsaved Changes'),
-          content: const Text(
-            'You have unsaved changes. Are you sure you want to start a new playlist?',
+          title: Text(AppLocalizations.of(context).playlistUnsavedChanges),
+          content: Text(
+            AppLocalizations.of(context).playlistUnsavedChangesMsg,
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
+              child: Text(AppLocalizations.of(context).playlistCancel),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Discard'),
+              child: Text(AppLocalizations.of(context).playlistDiscard),
             ),
           ],
         ),
@@ -114,22 +115,23 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
 
   Future<void> _loadPlaylist() async {
     final messenger = ScaffoldMessenger.of(context);
+    final t = AppLocalizations.of(context);
     if (_isDirty && _items.isNotEmpty) {
       final confirm = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Unsaved Changes'),
-          content: const Text(
-            'You have unsaved changes. Are you sure you want to load a new playlist?',
+          title: Text(t.playlistUnsavedChanges),
+          content: Text(
+            t.playlistUnsavedChangesLoadMsg,
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel'),
+              child: Text(t.playlistCancel),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Discard'),
+              child: Text(t.playlistDiscard),
             ),
           ],
         ),
@@ -194,7 +196,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
         });
       } catch (e) {
         messenger.showSnackBar(
-          SnackBar(content: Text('Error loading playlist: $e')),
+          SnackBar(content: Text('${t.playlistErrorLoading}: $e')),
         );
       }
     }
@@ -203,10 +205,11 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
   Future<void> _savePlaylist({bool asNew = false}) async {
     String? targetPath = _currentFilePath;
     final messenger = ScaffoldMessenger.of(context);
+    final t = AppLocalizations.of(context);
 
     if (asNew || targetPath == null) {
       targetPath = await FilePicker.platform.saveFile(
-        dialogTitle: 'Save Playlist',
+        dialogTitle: t.playlistSave,
         fileName: 'playlist.m3u',
         type: FileType.custom,
         allowedExtensions: ['m3u'],
@@ -237,10 +240,10 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
           _currentFilePath = targetPath;
           _isDirty = false;
         });
-        messenger.showSnackBar(const SnackBar(content: Text('Playlist saved')));
+        messenger.showSnackBar(SnackBar(content: Text(t.playlistSaved)));
       } catch (e) {
         messenger.showSnackBar(
-          SnackBar(content: Text('Error saving playlist: $e')),
+          SnackBar(content: Text('${t.playlistErrorSaving}: $e')),
         );
       }
     }
@@ -270,7 +273,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Playlist Manager'),
+            Text(AppLocalizations.of(context).playlistManagerTitle),
             if (_currentFilePath != null)
               Text(
                 path.basename(_currentFilePath!),
@@ -285,24 +288,24 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
         actions: [
           IconButton(
             icon: const Icon(LucideIcons.filePlus),
-            tooltip: 'New Playlist',
+            tooltip: AppLocalizations.of(context).playlistNew,
             onPressed: _newPlaylist,
           ),
           IconButton(
             icon: const Icon(LucideIcons.folderOpen),
-            tooltip: 'Load Playlist',
+            tooltip: AppLocalizations.of(context).playlistLoad,
             onPressed: _loadPlaylist,
           ),
           IconButton(
             icon: const Icon(LucideIcons.save),
-            tooltip: 'Save Playlist',
+            tooltip: AppLocalizations.of(context).playlistSave,
             onPressed: _items.isEmpty
                 ? null
                 : () => _savePlaylist(asNew: false),
           ),
           IconButton(
             icon: const Icon(LucideIcons.saveAll),
-            tooltip: 'Save As...',
+            tooltip: AppLocalizations.of(context).playlistSaveAs,
             onPressed: _items.isEmpty ? null : () => _savePlaylist(asNew: true),
           ),
           const WindowControls(),
@@ -325,7 +328,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          'No videos in playlist',
+                          AppLocalizations.of(context).playlistNoVideos,
                           style: Theme.of(context).textTheme.titleLarge
                               ?.copyWith(
                                 color: Theme.of(
@@ -337,7 +340,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
                         ElevatedButton.icon(
                           onPressed: _pickVideos,
                           icon: const Icon(LucideIcons.plus),
-                          label: const Text('Add Videos'),
+                          label: Text(AppLocalizations.of(context).playlistAddVideos),
                         ),
                       ],
                     ),
@@ -386,7 +389,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
                     heroTag: 'add',
                     onPressed: _pickVideos,
                     icon: const Icon(LucideIcons.plus),
-                    label: const Text('Add'),
+                    label: Text(AppLocalizations.of(context).playlistAdd),
                   ),
                   const SizedBox(width: 16),
                   // Loop playlist button
@@ -417,9 +420,9 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
                             : null,
                       ),
                       tooltip: switch (_repeatMode) {
-                        RepeatMode.none => 'Repeat: Off',
-                        RepeatMode.all => 'Repeat: All',
-                        RepeatMode.one => 'Repeat: One',
+                        RepeatMode.none => AppLocalizations.of(context).controlRepeatOff,
+                        RepeatMode.all => AppLocalizations.of(context).controlRepeatAll,
+                        RepeatMode.one => AppLocalizations.of(context).controlRepeatOne,
                       },
                     ),
                   ),
@@ -443,7 +446,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
                               setState(() => _startFromBeginning = v ?? false),
                         ),
                         Text(
-                          'Restart',
+                          AppLocalizations.of(context).playlistRestart,
                           style: Theme.of(context).textTheme.labelMedium,
                         ),
                         const SizedBox(width: 8),
@@ -455,7 +458,7 @@ class _PlaylistManagerScreenState extends ConsumerState<PlaylistManagerScreen> {
                     heroTag: 'play',
                     onPressed: _play,
                     icon: const Icon(LucideIcons.play),
-                    label: const Text('Play List'),
+                    label: Text(AppLocalizations.of(context).playlistPlayList),
                     backgroundColor: Theme.of(context).colorScheme.primary,
                     foregroundColor: Theme.of(context).colorScheme.onPrimary,
                   ),

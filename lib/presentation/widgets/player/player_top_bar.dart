@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
+import '../../../../l10n/l10n.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../../../config/constants/app_constants.dart';
@@ -52,7 +53,7 @@ class PlayerTopBar extends StatelessWidget {
                   size: 24.0,
                 ),
                 onPressed: onBack,
-                tooltip: 'Back',
+                tooltip: AppLocalizations.of(context).controlBack,
               ),
               const SizedBox(width: 8),
               // Video title
@@ -75,7 +76,7 @@ class PlayerTopBar extends StatelessWidget {
                   size: 24.0,
                 ),
                 onPressed: () => windowManager.minimize(),
-                tooltip: 'Minimize',
+                tooltip: AppLocalizations.of(context).controlMinimize,
               ),
               IconButton(
                 icon: const Icon(
@@ -90,7 +91,7 @@ class PlayerTopBar extends StatelessWidget {
                     windowManager.maximize();
                   }
                 },
-                tooltip: 'Maximize',
+                tooltip: AppLocalizations.of(context).controlMaximize,
               ),
               IconButton(
                 icon: const Icon(
@@ -99,7 +100,7 @@ class PlayerTopBar extends StatelessWidget {
                   size: 24.0,
                 ),
                 onPressed: onClose,
-                tooltip: 'Close',
+                tooltip: AppLocalizations.of(context).controlClose,
               ),
             ],
           ),

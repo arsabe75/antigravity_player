@@ -4,6 +4,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../providers/telegram_content_notifier.dart';
 import '../widgets/chat_icon.dart';
 import 'package:window_manager/window_manager.dart';
+import '../../l10n/l10n.dart';
 import '../widgets/window_controls.dart';
 
 class TelegramSelectionScreen extends ConsumerStatefulWidget {
@@ -84,23 +85,24 @@ class _TelegramSelectionScreenState
   }
 
   /// Get subtitle based on chat type
-  String _getChatSubtitle(Map<String, dynamic> chat) {
-    String typeStr = 'Chat';
+  String _getChatSubtitle(BuildContext context, Map<String, dynamic> chat) {
+    final t = AppLocalizations.of(context);
+    String typeStr = t.telegramChatTypePrivate;
     final chatType = chat['type'];
     if (chatType != null) {
       final type = chatType['@type'];
       if (type == 'chatTypeSupergroup') {
         if (chatType['is_channel'] == true) {
-          typeStr = 'Canal';
+          typeStr = t.telegramChatTypeChannel;
         } else if (_isForum(chat)) {
-          typeStr = 'Grupo con temas';
+          typeStr = t.telegramChatTypeForum;
         } else {
-          typeStr = 'Supergrupo';
+          typeStr = t.telegramChatTypeSupergroup;
         }
       } else if (type == 'chatTypeBasicGroup') {
-        typeStr = 'Grupo';
+        typeStr = t.telegramChatTypeGroup;
       } else if (type == 'chatTypePrivate') {
-        typeStr = 'Chat privado';
+        typeStr = t.telegramChatTypePrivate;
       }
     }
 
@@ -115,7 +117,7 @@ class _TelegramSelectionScreenState
     }
 
     if (isArchived) {
-      return '$typeStr (Archivado)';
+      return '$typeStr ${t.telegramChatTypeArchived}';
     }
     return typeStr;
   }
@@ -123,10 +125,11 @@ class _TelegramSelectionScreenState
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(telegramContentProvider);
+    final t = AppLocalizations.of(context);
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Select Chats'),
+        title: Text(t.telegramSelectionTitle),
         flexibleSpace: GestureDetector(
           onPanStart: (_) => windowManager.startDragging(),
           behavior: HitTestBehavior.translucent,
@@ -134,7 +137,7 @@ class _TelegramSelectionScreenState
         actions: [
           IconButton(
             icon: const Icon(LucideIcons.refreshCw),
-            tooltip: 'Refresh',
+            tooltip: t.telegramSelectionRefresh,
             onPressed: () {
               ref.read(telegramContentProvider.notifier).reloadChats();
             },
@@ -145,13 +148,13 @@ class _TelegramSelectionScreenState
         ],
       ),
       body: state.isLoading && state.chats.isEmpty
-          ? const Center(
+          ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 16),
-                  Text('Loading chats...'),
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 16),
+                  Text(t.telegramSelectionLoading),
                 ],
               ),
             )
@@ -162,8 +165,8 @@ class _TelegramSelectionScreenState
                 children: [
                   const Icon(LucideIcons.inbox, size: 64, color: Colors.grey),
                   const SizedBox(height: 16),
-                  const Text(
-                    'No chats found',
+                  Text(
+                    t.telegramSelectionNoChats,
                     style: TextStyle(color: Colors.grey),
                   ),
                   const SizedBox(height: 8),
@@ -172,7 +175,7 @@ class _TelegramSelectionScreenState
                       ref.read(telegramContentProvider.notifier).reloadChats();
                     },
                     icon: const Icon(LucideIcons.refreshCw),
-                    label: const Text('Retry'),
+                    label: Text(t.telegramSelectionRetry),
                   ),
                 ],
               ),
@@ -204,17 +207,17 @@ class _TelegramSelectionScreenState
                     ),
                   ),
                   title: Text(title),
-                  subtitle: Text(_getChatSubtitle(chat)),
+                  subtitle: Text(_getChatSubtitle(context, chat)),
                   trailing: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       if (isForum)
-                        const Padding(
-                          padding: EdgeInsets.only(right: 8),
+                        Padding(
+                          padding: const EdgeInsets.only(right: 8),
                           child: Chip(
                             label: Text(
-                              'Topics',
-                              style: TextStyle(fontSize: 10),
+                              t.telegramSelectionTopics,
+                              style: const TextStyle(fontSize: 10),
                             ),
                             padding: EdgeInsets.zero,
                             visualDensity: VisualDensity.compact,
@@ -222,7 +225,7 @@ class _TelegramSelectionScreenState
                         ),
                       IconButton(
                         icon: const Icon(LucideIcons.plus),
-                        tooltip: 'Select',
+                        tooltip: t.telegramSelectionSelect,
                         onPressed: () {
                           Navigator.of(context).pop(chat);
                         },

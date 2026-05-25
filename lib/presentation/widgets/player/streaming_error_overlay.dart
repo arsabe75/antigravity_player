@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../../domain/value_objects/streaming_error.dart';
+import '../../../../l10n/l10n.dart';
 
 /// Overlay que muestra un error de streaming al usuario.
 /// Se muestra cuando el proxy no puede reproducir el video
@@ -52,84 +53,63 @@ class StreamingErrorOverlay extends StatelessWidget {
     };
   }
 
-  String _getTitle() {
+  String _getTitle(BuildContext context) {
+    final t = AppLocalizations.of(context);
     return switch (error.type) {
-      StreamingErrorType.timeout => 'Tiempo de espera agotado',
-      StreamingErrorType.networkError => 'Error de conexión',
-      StreamingErrorType.corruptFile => 'Video dañado',
-      StreamingErrorType.unsupportedCodec => 'Formato no compatible',
-      StreamingErrorType.diskFull => 'Disco lleno',
-      StreamingErrorType.fileNotFound => 'Video no disponible',
-      StreamingErrorType.maxRetriesExceeded => 'No se pudo reproducir el video',
-      StreamingErrorType.degraded => 'Advertencia de rendimiento',
-      StreamingErrorType.metadataUnavailable => 'Metadatos no disponibles',
-      StreamingErrorType.playbackStall => 'Problema de reproducción',
-      StreamingErrorType.unknown => 'Error de reproducción',
+      StreamingErrorType.timeout => t.streamingTimeout,
+      StreamingErrorType.networkError => t.streamingNetworkError,
+      StreamingErrorType.corruptFile => t.streamingCorruptFile,
+      StreamingErrorType.unsupportedCodec => t.streamingUnsupportedCodec,
+      StreamingErrorType.diskFull => t.streamingDiskFull,
+      StreamingErrorType.fileNotFound => t.streamingFileNotFound,
+      StreamingErrorType.maxRetriesExceeded => t.streamingMaxRetries,
+      StreamingErrorType.degraded => t.streamingDegraded,
+      StreamingErrorType.metadataUnavailable => t.streamingMetadataUnavailable,
+      StreamingErrorType.playbackStall => t.streamingPlaybackStall,
+      StreamingErrorType.unknown => t.streamingUnknown,
     };
   }
 
-  String _getSubtitle() {
+  String _getSubtitle(BuildContext context) {
+    final t = AppLocalizations.of(context);
     return switch (error.type) {
-      StreamingErrorType.timeout =>
-        'El servidor tardó demasiado en responder. El video puede estar temporalmente inaccesible.',
-      StreamingErrorType.networkError =>
-        'No se pudo conectar al servidor. Verifica tu conexión a internet.',
-      StreamingErrorType.corruptFile =>
-        'El reproductor no puede procesar este video. Puede estar dañado, tener un formato no compatible, o presentar problemas temporales de transmisión.',
-      StreamingErrorType.unsupportedCodec =>
-        'El formato de este video no es compatible con el reproductor.',
-      StreamingErrorType.diskFull =>
-        'No hay suficiente espacio en disco para descargar el video. Libera espacio e intenta de nuevo.',
-      StreamingErrorType.fileNotFound =>
-        'El video ya no está disponible en Telegram. Puede haber sido eliminado.',
-      StreamingErrorType.maxRetriesExceeded =>
-        'Se agotaron los intentos de descarga. El video puede tener problemas de transmisión o estar temporalmente inaccesible.',
-      StreamingErrorType.degraded =>
-        'Este video muestra signos de transmisión inestable. Puede continuar viéndolo pero es posible que experimente pausas breves.',
-      StreamingErrorType.metadataUnavailable =>
-        'Los metadatos del video no están disponibles temporalmente. '
-        'El video puede reproducirse una vez que se cargue la información necesaria.',
-      StreamingErrorType.playbackStall =>
-        'Este video presenta interrupciones persistentes que bloquean la interfaz. Puede estar dañado o tener un formato de transmisión incompatible.',
-      StreamingErrorType.unknown =>
-        'Ocurrió un error inesperado al reproducir el video.',
+      StreamingErrorType.timeout => t.streamingTimeoutSubtitle,
+      StreamingErrorType.networkError => t.streamingNetworkSubtitle,
+      StreamingErrorType.corruptFile => t.streamingCorruptSubtitle,
+      StreamingErrorType.unsupportedCodec => t.streamingUnsupportedSubtitle,
+      StreamingErrorType.diskFull => t.streamingDiskFullSubtitle,
+      StreamingErrorType.fileNotFound => t.streamingNotFoundSubtitle,
+      StreamingErrorType.maxRetriesExceeded => t.streamingMaxRetriesSubtitle,
+      StreamingErrorType.degraded => t.streamingDegradedSubtitle,
+      StreamingErrorType.metadataUnavailable => t.streamingMetadataSubtitle,
+      StreamingErrorType.playbackStall => t.streamingStallSubtitle,
+      StreamingErrorType.unknown => t.streamingUnknownSubtitle,
     };
   }
 
   bool get _isWarning => error.type == StreamingErrorType.degraded;
 
-  String _getSuggestion() {
+  String _getSuggestion(BuildContext context) {
+    final t = AppLocalizations.of(context);
     return switch (error.type) {
-      StreamingErrorType.timeout =>
-        'Verifica tu conexión a internet e intenta de nuevo.',
-      StreamingErrorType.networkError =>
-        'Verifica tu conexión e intenta en unos minutos.',
-      StreamingErrorType.corruptFile =>
-        'Usa "Forzar reproducción" para un reintento más agresivo, o vuelve más tarde.',
-      StreamingErrorType.unsupportedCodec =>
-        'Convierte el video a un formato compatible (H.264/AAC).',
-      StreamingErrorType.diskFull =>
-        'Libera espacio en disco y vuelve a intentar.',
-      StreamingErrorType.fileNotFound =>
-        'El video fue eliminado de Telegram.',
-      StreamingErrorType.maxRetriesExceeded =>
-        'Puedes reintentar normalmente o usar "Forzar" para un '
-            'reintento más agresivo.',
-      StreamingErrorType.degraded =>
-        'El video puede seguir viéndose con algunas pausas.',
-      StreamingErrorType.metadataUnavailable =>
-        'Espera unos segundos y vuelve a intentar. Si el problema persiste, '
-        'usa "Forzar" para un reintento más agresivo.',
-      StreamingErrorType.playbackStall =>
-        'Este video tiene problemas persistentes. Puede estar mal codificado.',
-      StreamingErrorType.unknown =>
-        'Contacta al soporte si el problema persiste.',
+      StreamingErrorType.timeout => t.streamingSuggestionTimeout,
+      StreamingErrorType.networkError => t.streamingSuggestionNetwork,
+      StreamingErrorType.corruptFile => t.streamingSuggestionCorrupt,
+      StreamingErrorType.unsupportedCodec => t.streamingSuggestionUnsupported,
+      StreamingErrorType.diskFull => t.streamingSuggestionDiskFull,
+      StreamingErrorType.fileNotFound => t.streamingSuggestionNotFound,
+      StreamingErrorType.maxRetriesExceeded => t.streamingSuggestionMaxRetries,
+      StreamingErrorType.degraded => t.streamingSuggestionDegraded,
+      StreamingErrorType.metadataUnavailable => t.streamingSuggestionMetadata,
+      StreamingErrorType.playbackStall => t.streamingSuggestionStall,
+      StreamingErrorType.unknown => t.streamingSuggestionUnknown,
     };
   }
 
   @override
   Widget build(BuildContext context) {
     final color = _getColor();
+    final t = AppLocalizations.of(context);
 
     return Container(
       // For warnings, use a more transparent background so the video
@@ -166,7 +146,7 @@ class StreamingErrorOverlay extends StatelessWidget {
 
               // Title
               Text(
-                _getTitle(),
+                _getTitle(context),
                 style: const TextStyle(
                   color: Colors.white,
                   fontSize: 20,
@@ -178,7 +158,7 @@ class StreamingErrorOverlay extends StatelessWidget {
 
               // Subtitle / description
               Text(
-                _getSubtitle(),
+                _getSubtitle(context),
                 style: TextStyle(color: Colors.grey[400], fontSize: 14),
                 textAlign: TextAlign.center,
               ),
@@ -192,7 +172,7 @@ class StreamingErrorOverlay extends StatelessWidget {
                   OutlinedButton.icon(
                     onPressed: onGoBack,
                     icon: const Icon(LucideIcons.arrowLeft),
-                    label: const Text('Volver'),
+                    label: Text(AppLocalizations.of(context).streamingGoBack),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: Colors.white,
                       side: const BorderSide(color: Colors.white54),
@@ -206,7 +186,7 @@ class StreamingErrorOverlay extends StatelessWidget {
                     OutlinedButton.icon(
                       onPressed: onForceRetry,
                       icon: const Icon(LucideIcons.zap),
-                      label: const Text('Forzar'),
+                      label: Text(AppLocalizations.of(context).streamingForceRetry),
                       style: OutlinedButton.styleFrom(
                         foregroundColor: Colors.orange,
                         side: const BorderSide(color: Colors.orange),
@@ -221,7 +201,7 @@ class StreamingErrorOverlay extends StatelessWidget {
                       icon: Icon(
                         _isWarning ? LucideIcons.x : LucideIcons.refreshCw,
                       ),
-                      label: Text(_isWarning ? 'Entendido' : 'Reintentar'),
+                      label: Text(_isWarning ? AppLocalizations.of(context).streamingGotIt : AppLocalizations.of(context).streamingRetry),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: color,
                         foregroundColor: Colors.white,
@@ -236,7 +216,7 @@ class StreamingErrorOverlay extends StatelessWidget {
                 color: Colors.transparent,
                 child: ExpansionTile(
                   title: Text(
-                    'Detalles técnicos',
+                    AppLocalizations.of(context).streamingTechnicalDetails,
                     style: TextStyle(color: Colors.grey[600], fontSize: 12),
                   ),
                   collapsedIconColor: Colors.grey[600],
@@ -266,7 +246,7 @@ class StreamingErrorOverlay extends StatelessWidget {
                         ),
                         const SizedBox(height: 8),
                         Text(
-                          'Sugerencia: ${_getSuggestion()}',
+                          '${t.streamingSuggestion}: ${_getSuggestion(context)}',
                           style: TextStyle(
                             color: Colors.grey[400],
                             fontSize: 12,
