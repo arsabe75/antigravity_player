@@ -262,5 +262,11 @@
   "storageApproachingLimit": "Approaching limit - oldest videos will be auto-deleted",
 
   "playerOpenVideo": "Open Video",
-  "playerPlayCount": "Play ({count})"
+  "playerPlayCount": "Play ({count})",
+
+  "subtitleConfigTitle": "Subtitle Configuration",
+  "subtitleConfigFontSize": "Font Size",
+  "subtitleConfigColor": "Color",
+  "subtitleConfigPreview": "Subtitle Preview 123",
+  "subtitleConfigButton": "Subtitle Settings"
 }

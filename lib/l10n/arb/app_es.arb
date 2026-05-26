@@ -262,5 +262,11 @@
   "storageApproachingLimit": "Acercándose al límite - los videos más antiguos se eliminarán automáticamente",
 
   "playerOpenVideo": "Abrir Video",
-  "playerPlayCount": "Reproducir ({count})"
+  "playerPlayCount": "Reproducir ({count})",
+
+  "subtitleConfigTitle": "Configuración de Subtítulos",
+  "subtitleConfigFontSize": "Tamaño de Fuente",
+  "subtitleConfigColor": "Color",
+  "subtitleConfigPreview": "Vista Previa de Subtítulos 123",
+  "subtitleConfigButton": "Ajustes de Subtítulos"
 }

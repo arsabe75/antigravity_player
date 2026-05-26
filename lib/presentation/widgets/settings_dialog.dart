@@ -6,9 +6,11 @@ import 'package:go_router/go_router.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 
 import '../providers/video_repository_provider.dart';
+import '../providers/player_notifier.dart';
 import '../../infrastructure/services/player_settings_service.dart';
 import '../../config/constants/app_constants.dart';
 import '../../l10n/l10n.dart';
+import 'subtitle_config_dialog.dart';
 
 class SettingsDialog extends ConsumerWidget {
   const SettingsDialog({super.key});
@@ -82,6 +84,49 @@ class SettingsDialog extends ConsumerWidget {
                       ),
                     );
                   },
+                );
+              },
+            ),
+            const SizedBox(height: 16),
+            FutureBuilder<String>(
+              future: PlayerSettingsService().getPlayerEngine(),
+              builder: (context, snapshot) {
+                final isMediaKit = snapshot.data == PlayerSettingsService.engineMediaKit;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      t.subtitleConfigTitle,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      isMediaKit
+                          ? t.settingsMediaKitSubtitle
+                          : t.settingsFvpSubtitle,
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextButton.icon(
+                      onPressed: isMediaKit
+                          ? () {
+                              final notifier = ref.read(playerProvider.notifier);
+                              showDialog(
+                                context: context,
+                                builder: (_) => SubtitleConfigDialog(
+                                  onSettingsChanged: () =>
+                                      notifier.applySubtitleSettings(),
+                                ),
+                              );
+                            }
+                          : null,
+                      icon: const Icon(Icons.subtitles, size: 18),
+                      label: Text(t.subtitleConfigButton),
+                    ),
+                  ],
                 );
               },
             ),

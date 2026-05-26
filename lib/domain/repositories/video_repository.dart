@@ -56,4 +56,8 @@ abstract class VideoRepository {
 
   /// Stream that emits player errors (codec issues, network problems, etc.)
   Stream<String> get errorStream;
+
+  /// Applies user-configured subtitle styling (font size, color, outline).
+  /// No-op for backends that don't support subtitle rendering.
+  Future<void> applySubtitleSettings();
 }

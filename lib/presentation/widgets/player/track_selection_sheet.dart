@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import '../../providers/player_notifier.dart';
 import '../../../l10n/l10n.dart';
+import '../subtitle_config_dialog.dart';
 
 class TrackSelectionSheet extends ConsumerStatefulWidget {
   const TrackSelectionSheet({super.key});
@@ -57,6 +58,30 @@ class _TrackSelectionSheetState extends ConsumerState<TrackSelectionSheet> {
                 ),
               ),
               const Spacer(),
+              // Subtitle config button
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: IconButton(
+                  icon: const Icon(
+                    LucideIcons.settings,
+                    color: Colors.white54,
+                    size: 20,
+                  ),
+                  onPressed: () {
+                    final notifier = ref.read(playerProvider.notifier);
+                    showDialog(
+                      context: context,
+                      builder: (_) => SubtitleConfigDialog(
+                        onSettingsChanged: () =>
+                            notifier.applySubtitleSettings(),
+                      ),
+                    );
+                  },
+                  tooltip: AppLocalizations.of(context).subtitleConfigButton,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(),
+                ),
+              ),
               // Refresh button
               Padding(
                 padding: const EdgeInsets.only(right: 12),

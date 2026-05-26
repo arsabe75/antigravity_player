@@ -345,4 +345,9 @@ class FvpVideoRepository implements VideoRepository {
   // Return FVP errors and simulated spurious_eof errors
   @override
   Stream<String> get errorStream => _errorController.stream;
+
+  @override
+  Future<void> applySubtitleSettings() async {
+    // FVP does not support subtitle rendering configuration
+  }
 }

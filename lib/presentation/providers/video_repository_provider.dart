@@ -3,6 +3,7 @@ import '../../domain/repositories/video_repository.dart';
 import '../../infrastructure/repositories/media_kit_video_repository.dart';
 import '../../infrastructure/repositories/fvp_video_repository.dart';
 import '../../infrastructure/services/player_settings_service.dart';
+import '../../infrastructure/services/subtitle_settings_service.dart';
 import '../../domain/repositories/streaming_repository.dart';
 import '../../infrastructure/repositories/local_streaming_repository.dart';
 import '../../infrastructure/services/playback_storage_service.dart';
@@ -35,6 +36,12 @@ PlaybackStorageService playbackStorageService(Ref ref) {
 @Riverpod()
 RecentVideosService recentVideosService(Ref ref) {
   return RecentVideosService();
+}
+
+/// Provider for subtitle settings service
+@Riverpod()
+SubtitleSettingsService subtitleSettingsService(Ref ref) {
+  return SubtitleSettingsService();
 }
 
 // ============================================================================

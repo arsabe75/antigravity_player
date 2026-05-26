@@ -1206,6 +1206,12 @@ class PlayerNotifier extends _$PlayerNotifier {
     await _loadTracks();
   }
 
+  /// Apply user-configured subtitle styling to the active player.
+  /// Has no effect when using FVP backend.
+  Future<void> applySubtitleSettings() async {
+    await _repository.applySubtitleSettings();
+  }
+
   Future<void> stop() async {
     _abortCurrentProxyRequest();
     _saveTimer?.cancel();

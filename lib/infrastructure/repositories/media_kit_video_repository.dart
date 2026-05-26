@@ -6,6 +6,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../../domain/entities/video_entity.dart';
 import '../../domain/repositories/video_repository.dart';
 import '../services/local_streaming_proxy.dart';
+import '../services/subtitle_settings_service.dart';
 
 class MediaKitVideoRepository implements VideoRepository {
   Player? _player;
@@ -102,6 +103,9 @@ class MediaKitVideoRepository implements VideoRepository {
         bufferSize: 32 * 1024 * 1024,
         // DIAG: Enable verbose logging to diagnose 61s playback stop
         logLevel: MPVLogLevel.info,
+        // Enable libass for mpv-native subtitle rendering so that
+        // mpv properties (sub-font-size, sub-color, sub-border-*, etc.) take effect.
+        libass: true,
       ),
     );
     _player = player;
@@ -293,6 +297,10 @@ class MediaKitVideoRepository implements VideoRepository {
       return;
     }
 
+    if (_initId != currentId) return;
+
+    // Apply subtitle styling AFTER media is loaded (mpv resets properties on open)
+    await _applySubtitleProperties(player, currentId);
     if (_initId != currentId) return;
 
     // RESUME FIX WITH STUTTER PROTECTION:
@@ -569,4 +577,45 @@ class MediaKitVideoRepository implements VideoRepository {
 
   @override
   Stream<String> get errorStream => _errorController.stream;
+
+  @override
+  Future<void> applySubtitleSettings() async {
+    if (_player == null) return;
+    await _applySubtitleProperties(_player!, _initId);
+  }
+
+  Future<void> _applySubtitleProperties(Player player, int currentId) async {
+    final service = SubtitleSettingsService();
+    final fontSize = service.getFontSize();
+    final colorName = service.getColor();
+    final mpvScale = SubtitleSettingsService.fontSizeToMpvScale(fontSize);
+    final mpvColor = SubtitleSettingsService.colorNameToMpvHex(colorName);
+
+    Future<void> setProp(String key, String value) async {
+      if (_initId != currentId) return;
+      try {
+        await (player.platform as dynamic).setProperty(key, value);
+      } catch (e) {
+        debugPrint(
+          'MediaKit: Error setting subtitle property $key: $e',
+        );
+      }
+    }
+
+    await setProp('sub-font-size', mpvScale.toStringAsFixed(0));
+    if (_initId != currentId) return;
+    await setProp('sub-color', mpvColor);
+    if (_initId != currentId) return;
+    // Thick black outline via border + shadow for readability on large screens
+    await setProp('sub-border-color', '#000000');
+    if (_initId != currentId) return;
+    await setProp('sub-border-size', '3.0');
+    if (_initId != currentId) return;
+    await setProp('sub-shadow-color', '#000000');
+    if (_initId != currentId) return;
+    await setProp('sub-shadow-offset', '1');
+    if (_initId != currentId) return;
+    // Force override of embedded ASS/SSA styles so user font size & color take effect
+    await setProp('sub-ass-override', 'force');
+  }
 }
