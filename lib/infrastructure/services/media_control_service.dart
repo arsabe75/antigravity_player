@@ -291,6 +291,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     try {
       final session = FlutterMediaSession();
 
+      // ignore: deprecated_member_use
       await session.updateAvailableActions({
         MediaAction.play,
         MediaAction.pause,
@@ -299,6 +300,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
         MediaAction.seekTo,
       });
 
+      // ignore: deprecated_member_use
       _smTcSubscription = session.onMediaAction.listen((action) {
         if (action == MediaAction.play) {
           onPlay?.call();
@@ -331,6 +333,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     final session = FlutterMediaSession();
     final status = isPlaying ? PlaybackStatus.playing : PlaybackStatus.paused;
 
+    // ignore: deprecated_member_use
     session.updatePlaybackState(PlaybackState(
       status: status,
       position: position,
@@ -341,6 +344,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
   void _restoreSmTcActionsIfNeeded() {
     if (!_smTcActionsCleared) return;
     _smTcActionsCleared = false;
+    // ignore: deprecated_member_use
     FlutterMediaSession().updateAvailableActions({
       MediaAction.play,
       MediaAction.pause,
@@ -361,6 +365,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     }
     final session = FlutterMediaSession();
 
+    // ignore: deprecated_member_use
     session.updateMetadata(MediaMetadata(
       title: title,
       artist: artist,
@@ -408,7 +413,9 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
     _smTcSubscription = null;
     if (Platform.isWindows) {
       final session = FlutterMediaSession();
+      // ignore: deprecated_member_use
       session.updateAvailableActions({});
+      // ignore: deprecated_member_use
       session.updateMetadata(const MediaMetadata(
         title: '',
         artist: '',
@@ -416,6 +423,7 @@ StartupWMClass=com.arsabe75.videoplayerapp.video_player_app
         artworkUri: null,
         duration: Duration.zero,
       ));
+      // ignore: deprecated_member_use
       session.updatePlaybackState(const PlaybackState(
         status: PlaybackStatus.idle,
         position: Duration.zero,

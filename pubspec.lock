@@ -165,10 +165,10 @@ packages:
     dependency: transitive
     description:
       name: code_assets
-      sha256: "83ccdaa064c980b5596c35dd64a8d3ecc68620174ab9b90b6343b753aa721687"
+      sha256: "67cf6d84013f9c601e42a6f8a6b74c4c0d9dc1a1619d775f2b28b732d3551b85"
       url: "https://pub.dev"
     source: hosted
-    version: "1.0.0"
+    version: "1.2.0"
   code_builder:
     dependency: transitive
     description:
@@ -367,10 +367,10 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_media_session
-      sha256: e9d01a129366932831c56cf3660ba0ee2402bc1cb95179dcf621f069200cae06
+      sha256: bfefb44836e92203c03fbb1528bab0bd485545311bb0e77491b4bf78f2b30a69
       url: "https://pub.dev"
     source: hosted
-    version: "2.1.3"
+    version: "2.2.0"
   flutter_plugin_android_lifecycle:
     dependency: transitive
     description:
@@ -391,26 +391,26 @@ packages:
     dependency: "direct main"
     description:
       name: flutter_secure_storage
-      sha256: "6848263f9744072d0977347c383fb8b57d9780319a6bf5238b5a2866a029de62"
+      sha256: "7686b1d6a29985dcbb808c59518226e603e3bfa7c0ddfd1a0d00e4cda77c868e"
       url: "https://pub.dev"
     source: hosted
-    version: "10.2.0"
+    version: "10.3.1"
   flutter_secure_storage_darwin:
     dependency: transitive
     description:
       name: flutter_secure_storage_darwin
-      sha256: "67cd1ff671add31dc13e45194398187a04bb63804b37fa47866afae296d73fcb"
+      sha256: "82329fa5cdf343773b1b6897dea959105a29f092454259edff92f9f6637e8149"
       url: "https://pub.dev"
     source: hosted
-    version: "0.3.1"
+    version: "0.3.2"
   flutter_secure_storage_linux:
     dependency: transitive
     description:
       name: flutter_secure_storage_linux
-      sha256: "2b5c76dce569ab752d55a1cee6a2242bcc11fdba927078fb88c503f150767cda"
+      sha256: a5f35ddab43cf5c8215d2feb4ce1957851f28c5c37e6f04335066a0602087bf5
       url: "https://pub.dev"
     source: hosted
-    version: "3.0.0"
+    version: "3.0.1"
   flutter_secure_storage_platform_interface:
     dependency: transitive
     description:
@@ -481,10 +481,10 @@ packages:
     dependency: "direct main"
     description:
       name: fvp
-      sha256: e03c4ba02c367cde8610c09325d085c9b1efe4f7d98a563950993a1fee17a28b
+      sha256: "98af0fe7ea362b234d72f2907d7e6f8e885269b6421822aaa7379a8a6e36bdba"
       url: "https://pub.dev"
     source: hosted
-    version: "0.35.2"
+    version: "0.37.0"
   glob:
     dependency: transitive
     description:
@@ -553,10 +553,10 @@ packages:
     dependency: transitive
     description:
       name: hooks
-      sha256: "025f060e86d2d4c3c47b56e33caf7f93bf9283340f26d23424ebcfccf34f621e"
+      sha256: a41af4e8fc687cd6d33de9751eb936c8c0204ebe2bcb6c15ecf707504bf47f31
       url: "https://pub.dev"
     source: hosted
-    version: "1.0.3"
+    version: "2.0.0"
   html:
     dependency: transitive
     description:
@@ -705,10 +705,10 @@ packages:
     dependency: "direct main"
     description:
       name: lucide_icons_flutter
-      sha256: f9fd5d49b93bf14b89e0ff4818658a74ab16899bdaf7aa745358ee1a34f54eed
+      sha256: "7c5dc01a32a9905ae34e2d84224e92d6d0c42acf8926df9e01c35a1446bf1b69"
       url: "https://pub.dev"
     source: hosted
-    version: "3.1.14+1"
+    version: "3.1.14+2"
   matcher:
     dependency: transitive
     description:
@@ -730,7 +730,7 @@ packages:
     description:
       path: media_kit
       ref: main
-      resolved-ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
+      resolved-ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
       url: "https://github.com/Predidit/media-kit.git"
     source: git
     version: "1.1.11"
@@ -738,8 +738,8 @@ packages:
     dependency: transitive
     description:
       path: "libs/android/media_kit_libs_android_video"
-      ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
-      resolved-ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
+      ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
+      resolved-ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
       url: "https://github.com/Predidit/media-kit.git"
     source: git
     version: "1.3.6"
@@ -747,8 +747,8 @@ packages:
     dependency: transitive
     description:
       path: "libs/ios/media_kit_libs_ios_video"
-      ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
-      resolved-ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
+      ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
+      resolved-ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
       url: "https://github.com/Predidit/media-kit.git"
     source: git
     version: "1.1.4"
@@ -757,7 +757,7 @@ packages:
     description:
       path: "libs/linux/media_kit_libs_linux"
       ref: main
-      resolved-ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
+      resolved-ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
       url: "https://github.com/Predidit/media-kit.git"
     source: git
     version: "1.1.3"
@@ -765,8 +765,8 @@ packages:
     dependency: transitive
     description:
       path: "libs/macos/media_kit_libs_macos_video"
-      ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
-      resolved-ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
+      ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
+      resolved-ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
       url: "https://github.com/Predidit/media-kit.git"
     source: git
     version: "1.1.4"
@@ -774,8 +774,8 @@ packages:
     dependency: transitive
     description:
       path: "libs/ohos/media_kit_libs_ohos"
-      ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
-      resolved-ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
+      ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
+      resolved-ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
       url: "https://github.com/Predidit/media-kit.git"
     source: git
     version: "1.0.0"
@@ -784,7 +784,7 @@ packages:
     description:
       path: "libs/universal/media_kit_libs_video"
       ref: main
-      resolved-ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
+      resolved-ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
       url: "https://github.com/Predidit/media-kit.git"
     source: git
     version: "1.0.5"
@@ -793,7 +793,7 @@ packages:
     description:
       path: "libs/windows/media_kit_libs_windows_video"
       ref: main
-      resolved-ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
+      resolved-ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
       url: "https://github.com/Predidit/media-kit.git"
     source: git
     version: "1.0.10"
@@ -802,7 +802,7 @@ packages:
     description:
       path: media_kit_video
       ref: main
-      resolved-ref: "21aacaf9600c4bd00f2a3c57310363bc0cc9597f"
+      resolved-ref: "13b332ad3fd4cd5d84c64670eceda48a6d54504e"
       url: "https://github.com/Predidit/media-kit.git"
     source: git
     version: "1.2.5"
@@ -838,14 +838,6 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "1.0.5"
-  native_toolchain_c:
-    dependency: transitive
-    description:
-      name: native_toolchain_c
-      sha256: "6ba77bb18063eebe9de401f5e6437e95e1438af0a87a3a39084fbd37c90df572"
-      url: "https://pub.dev"
-    source: hosted
-    version: "0.17.6"
   node_preamble:
     dependency: transitive
     description:
@@ -858,10 +850,10 @@ packages:
     dependency: transitive
     description:
       name: objective_c
-      sha256: "100a1c87616ab6ed41ec263b083c0ef3261ee6cd1dc3b0f35f8ddfa4f996fe52"
+      sha256: "6cb691c686fa2838c6deb34980d426145c2a5d537491cb83d463c33cdbc726ed"
       url: "https://pub.dev"
     source: hosted
-    version: "9.3.0"
+    version: "9.4.1"
   package_config:
     dependency: transitive
     description:
