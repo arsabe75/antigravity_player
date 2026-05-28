@@ -46,13 +46,14 @@ class LoadChatMessagesUseCase
 
   @override
   Future<LoadChatMessagesResult> call(LoadChatMessagesParams params) async {
-    // If a search query is provided, we use the standard searchChatMessages (even for topics)
-    // with the thread specified (if applicable, though TDLib searchChatMessages supports message_thread_id).
     // If it's a regular thread history load with no generic search, use _fetchTopicHistory.
     if (params.query.isEmpty && params.messageThreadId != null && params.messageThreadId != 0) {
       return _fetchTopicHistory(params);
     }
 
+    // SEARCH PATH: searchChatMessages (video + document filters).
+    // For channels without a query, we supplement exhausted search results
+    // with getChatHistory (which has no index limit) to capture older videos.
     bool hasMoreVideos = true;
     bool hasMoreDocs = true;
     int currentNextVideoFromId = params.nextVideoFromId;
@@ -117,6 +118,42 @@ class LoadChatMessagesUseCase
       }
       return true;
     }).toList();
+
+    // For channels without a search query: when searchChatMessages is
+    // exhausted, fall back to getChatHistory to pick up videos beyond
+    // the search index limit (~100-120 results per filter).
+    final isChannel = params.query.isEmpty &&
+        (params.messageThreadId == null || params.messageThreadId == 0);
+
+    if (isChannel && !hasMoreVideos && !hasMoreDocs) {
+      final oldestId = validMsgs.isNotEmpty
+          ? validMsgs.last['id'] as int
+          : params.nextVideoFromId;
+
+      if (oldestId > 0) {
+        final historyMsgs = await _fetchHistoryFrom(oldestId, params.chatId);
+        if (historyMsgs.isNotEmpty) {
+          // Merge, dedup by ID, re-sort by date descending
+          final existingIds = validMsgs.map((m) => m['id'] as int).toSet();
+          for (final msg in historyMsgs) {
+            if (!existingIds.contains(msg['id'])) {
+              validMsgs.add(msg);
+            }
+          }
+          validMsgs.sort((a, b) {
+            final dateA = a['date'] as int;
+            final dateB = b['date'] as int;
+            if (dateB != dateA) return dateB.compareTo(dateA);
+            return (b['id'] as int).compareTo(a['id'] as int);
+          });
+
+          // Continue paginating via getChatHistory on subsequent loadMore calls
+          hasMoreVideos = historyMsgs.length == 100;
+          currentNextVideoFromId = historyMsgs.last['id'] as int;
+        }
+      }
+    }
+
     return LoadChatMessagesResult(
       messages: validMsgs,
       nextVideoFromId: currentNextVideoFromId,
@@ -197,6 +234,48 @@ class LoadChatMessagesUseCase
         hasMoreVideos: false,
         hasMoreDocs: false,
       );
+    }
+  }
+
+  /// Fallback for channels: getChatHistory from a real message ID to
+  /// capture videos beyond the searchChatMessages index limit.
+  /// Returns video messages only, sorted newest-first.
+  Future<List<Map<String, dynamic>>> _fetchHistoryFrom(
+    int fromMessageId,
+    int chatId,
+  ) async {
+    try {
+      final result = await _service.sendWithResult({
+        '@type': 'getChatHistory',
+        'chat_id': chatId,
+        'from_message_id': fromMessageId,
+        'offset': 0,
+        'limit': 100,
+        'only_local': false,
+      });
+
+      if (result['@type'] == 'error') {
+        debugPrint(
+          'TDLib getChatHistory fallback error: ${result['code']} - ${result['message']}',
+        );
+        return [];
+      }
+
+      final msgsList = result['messages'] as List?;
+      if (msgsList == null || msgsList.isEmpty) return [];
+
+      final typedMsgs = msgsList.cast<Map<String, dynamic>>();
+      final validMsgs = typedMsgs.where(_isVideoMessage).toList();
+
+      debugPrint(
+        'TDLib getChatHistory fallback: fetched ${typedMsgs.length} messages, '
+        'found ${validMsgs.length} videos (from_message_id: $fromMessageId)',
+      );
+
+      return validMsgs;
+    } catch (e) {
+      debugPrint('TDLib getChatHistory fallback exception: $e');
+      return [];
     }
   }
 

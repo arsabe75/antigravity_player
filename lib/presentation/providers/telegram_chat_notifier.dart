@@ -28,11 +28,17 @@ class TelegramChat extends _$TelegramChat {
       _service.send({'@type': 'closeChat', 'chat_id': params.chatId});
     });
 
-    // Inform TDLib we are viewing this chat/topic to ensure live updates
-    _service.send({'@type': 'openChat', 'chat_id': params.chatId});
-
-    // Defer loading to avoid modifying state during build
-    Future.microtask(() => loadMessages());
+    // Inform TDLib we are viewing this chat/topic to ensure live updates.
+    // We await openChat so the chat is fully synced before loadMessages calls
+    // getChat — otherwise getChat.last_message.id may be stale, causing the
+    // first getChatHistory page to return the wrong range of messages.
+    Future.microtask(() async {
+      await _service.sendWithResult({
+        '@type': 'openChat',
+        'chat_id': params.chatId,
+      });
+      await loadMessages();
+    });
 
     return const TelegramChatState(isLoading: true);
   }
