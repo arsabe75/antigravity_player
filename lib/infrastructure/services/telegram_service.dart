@@ -185,9 +185,7 @@ class TelegramService implements TdlibClient {
           final extra = message['@extra'];
           if (extra is int && _pendingRequests.containsKey(extra)) {
             _pendingRequests.remove(extra)?.complete(message);
-            return; // Don't broadcast responses to general stream if specific requester exists?
-            // Actually, keep it just in case, or remove?
-            // Better to consume it to avoid noise.
+            return;
           }
         }
         _updateController.add(message);

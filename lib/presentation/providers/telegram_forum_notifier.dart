@@ -67,26 +67,85 @@ class TelegramForum extends _$TelegramForum {
   }
 
   // chatId getter is provided by generated code (_$TelegramForum)
+
+  /// Extracts the topic identifier from a forumTopicInfo map.
+  /// TDLib uses message_thread_id in some contexts (e.g. updateForumTopicInfo)
+  /// and forum_topic_id in others (e.g. getForumTopics response). Try both.
+  int? _getTopicIdFromInfo(Map<String, dynamic>? info) {
+    if (info == null) return null;
+    return (info['forum_topic_id'] ?? info['message_thread_id']) as int?;
+  }
+
+  /// Finds a topic by its ID in the current topic list.
+  int _findTopicIndex(List<Map<String, dynamic>> topics, int? topicId) {
+    if (topicId == null) return -1;
+    return topics.indexWhere((t) => _getTopicIdFromInfo(t['info']) == topicId);
+  }
+
   void _handleUpdate(Map<String, dynamic> update) {
     // Guard against disposed provider
     if (!ref.mounted) return;
     try {
-      if (update['@type'] == 'updateForumTopicInfo') {
+      if (update['@type'] == 'updateForumTopic') {
         final chatIdUpdate = update['chat_id'];
         if (chatIdUpdate != chatId) return;
+
+        final topic = update['topic'] as Map<String, dynamic>?;
+        if (topic == null) return;
+
+        final topicInfo = topic['info'] as Map<String, dynamic>?;
+        if (topicInfo == null) return;
+
+        final topicId = _getTopicIdFromInfo(topicInfo);
+        if (topicId == null) return;
+
+        final currentTopics = List<Map<String, dynamic>>.from(state.topics);
+        final index = _findTopicIndex(currentTopics, topicId);
+
+        if (index != -1) {
+          // Preserve forum_topic_id from old info for future matches
+          final oldInfo = currentTopics[index]['info'] as Map<String, dynamic>?;
+          final mergedInfo = Map<String, dynamic>.from(topicInfo);
+          if (mergedInfo['forum_topic_id'] == null && oldInfo?['forum_topic_id'] != null) {
+            mergedInfo['forum_topic_id'] = oldInfo!['forum_topic_id'];
+          }
+          currentTopics[index] = {...topic, 'info': mergedInfo};
+          state = state.copyWith(topics: currentTopics);
+        } else {
+          // New topic — insert in correct position
+          currentTopics.add(topic);
+          currentTopics.sort((a, b) {
+            final aPinned = a['is_pinned'] == true ? 1 : 0;
+            final bPinned = b['is_pinned'] == true ? 1 : 0;
+            if (aPinned != bPinned) return bPinned - aPinned;
+            final aOrder = BigInt.tryParse(a['order']?.toString() ?? '0') ?? BigInt.zero;
+            final bOrder = BigInt.tryParse(b['order']?.toString() ?? '0') ?? BigInt.zero;
+            return bOrder.compareTo(aOrder);
+          });
+          state = state.copyWith(topics: currentTopics);
+        }
+      } else if (update['@type'] == 'updateForumTopicInfo') {
+        // TDLib 1.8.64 sometimes sends updateForumTopicInfo with null chatId.
+        // Accept it as long as the chatId matches OR is null (we match by topic ID).
+        final chatIdUpdate = update['chat_id'];
+        if (chatIdUpdate != null && chatIdUpdate != chatId) return;
 
         final topicInfo = update['info'] as Map<String, dynamic>?;
         if (topicInfo == null) return;
 
-        final topicId = topicInfo['forum_topic_id'];
+        final topicId = _getTopicIdFromInfo(topicInfo);
+        if (topicId == null) return;
+
         final currentTopics = List<Map<String, dynamic>>.from(state.topics);
-        final index = currentTopics.indexWhere((t) {
-          final info = t['info'] as Map<String, dynamic>?;
-          return info?['forum_topic_id'] == topicId;
-        });
+        final index = _findTopicIndex(currentTopics, topicId);
 
         if (index != -1) {
-          currentTopics[index] = {...currentTopics[index], 'info': topicInfo};
+          final oldInfo = currentTopics[index]['info'] as Map<String, dynamic>?;
+          final mergedInfo = Map<String, dynamic>.from(topicInfo);
+          if (mergedInfo['forum_topic_id'] == null && oldInfo?['forum_topic_id'] != null) {
+            mergedInfo['forum_topic_id'] = oldInfo!['forum_topic_id'];
+          }
+          currentTopics[index] = {...currentTopics[index], 'info': mergedInfo};
           state = state.copyWith(topics: currentTopics);
         }
       } else if (update['@type'] == 'updateNewMessage') {
@@ -107,10 +166,7 @@ class TelegramForum extends _$TelegramForum {
         if (topicId == null || topicId == 0) return;
 
         final currentTopics = List<Map<String, dynamic>>.from(state.topics);
-        final index = currentTopics.indexWhere((t) {
-          final info = t['info'] as Map<String, dynamic>?;
-          return info?['forum_topic_id'] == topicId;
-        });
+        final index = _findTopicIndex(currentTopics, topicId);
 
         if (index != -1) {
           final topic = Map<String, dynamic>.from(currentTopics[index]);
@@ -152,7 +208,7 @@ class TelegramForum extends _$TelegramForum {
             final deletedIds = messageIdsList.cast<int>().toSet();
             final updatedTopics = state.topics.where((t) {
               final info = t['info'] as Map<String, dynamic>?;
-              final topicId = info?['forum_topic_id'] as int?;
+              final topicId = _getTopicIdFromInfo(info);
               if (topicId == null) return true;
               // In TDLib for supergroups, the message ID of a topic is its topicId * 2^20
               final topicMessageId = topicId * 1048576;
@@ -212,13 +268,10 @@ class TelegramForum extends _$TelegramForum {
         final topicInfo = topic['info'] as Map<String, dynamic>?;
         if (topicInfo == null) continue;
 
-        final topicId = topicInfo['forum_topic_id'];
+        final topicId = _getTopicIdFromInfo(topicInfo);
         if (topicId == null) continue;
 
-        final index = currentTopics.indexWhere((t) {
-          final info = t['info'] as Map<String, dynamic>?;
-          return info?['forum_topic_id'] == topicId;
-        });
+        final index = _findTopicIndex(currentTopics, topicId);
 
         if (index == -1) {
           currentTopics.add(topic);
