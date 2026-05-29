@@ -5,6 +5,7 @@ import 'package:window_manager/window_manager.dart';
 import '../widgets/window_controls.dart';
 import '../providers/telegram_forum_notifier.dart';
 import '../widgets/custom_emoji_icon.dart';
+import '../../config/router/app_router.dart';
 import '../../config/router/routes.dart';
 import '../../l10n/l10n.dart';
 
@@ -22,7 +23,8 @@ class TelegramTopicsScreen extends ConsumerStatefulWidget {
   ConsumerState<TelegramTopicsScreen> createState() => _TelegramTopicsScreenState();
 }
 
-class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
+class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen>
+    with RouteAware {
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
@@ -32,18 +34,41 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
+      final notifier = ref.read(telegramForumProvider(widget.chatId).notifier);
       final state = ref.read(telegramForumProvider(widget.chatId));
       if (state.searchQuery.isNotEmpty) {
-        ref.read(telegramForumProvider(widget.chatId).notifier).setSearchQuery('');
+        notifier.setSearchQuery('');
+      }
+      // Refresh topics when re-entering the group (provider is keepAlive,
+      // so on re-entry we get cached state — force a refresh if already loaded).
+      if (!state.isLoading && state.topics.isNotEmpty) {
+        notifier.refreshTopics();
       }
     });
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    routeObserver.subscribe(this, ModalRoute.of(context)!);
+  }
+
+  @override
   void dispose() {
+    routeObserver.unsubscribe(this);
     _searchController.dispose();
     _searchFocusNode.dispose();
     super.dispose();
+  }
+
+  @override
+  void didPopNext() {
+    // Called when a route on top of this one is popped (e.g. coming back from chat).
+    final notifier = ref.read(telegramForumProvider(widget.chatId).notifier);
+    final state = ref.read(telegramForumProvider(widget.chatId));
+    if (!state.isLoading && state.topics.isNotEmpty) {
+      notifier.refreshTopics();
+    }
   }
 
   /// Get topic icon color from topic info.

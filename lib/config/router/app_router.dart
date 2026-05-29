@@ -55,6 +55,7 @@ class _ExtraDecoder extends Converter<Object?, Object?> {
 // ============================================================================
 
 final GlobalKey<NavigatorState> rootNavigatorKey = GlobalKey<NavigatorState>();
+final RouteObserver<ModalRoute<void>> routeObserver = RouteObserver<ModalRoute<void>>();
 
 class _RouterNotifier extends ChangeNotifier {
   final Ref _ref;
@@ -80,6 +81,7 @@ GoRouter appRouter(Ref ref) {
 
   return GoRouter(
     navigatorKey: rootNavigatorKey,
+    observers: [routeObserver],
     initialLocation: '/',
     debugLogDiagnostics: true,
     routes: $appRoutes, // Generated from routes.g.dart

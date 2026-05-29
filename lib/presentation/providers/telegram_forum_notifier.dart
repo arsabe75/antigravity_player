@@ -148,6 +148,20 @@ class TelegramForum extends _$TelegramForum {
           currentTopics[index] = {...currentTopics[index], 'info': mergedInfo};
           state = state.copyWith(topics: currentTopics);
         }
+      } else if (update['@type'] == 'updateChatLastMessage') {
+        final chatIdUpdate = update['chat_id'];
+        if (chatIdUpdate != chatId) return;
+
+        final lastMessage = update['last_message'] as Map<String, dynamic>?;
+        if (lastMessage == null) return;
+
+        final threadId = lastMessage['message_thread_id'] as int?;
+        if (threadId == null || threadId == 0) return;
+
+        final existingIndex = _findTopicIndex(state.topics, threadId);
+        if (existingIndex == -1) {
+          Future.microtask(() => _syncTopics());
+        }
       } else if (update['@type'] == 'updateNewMessage') {
         final message = update['message'] as Map<String, dynamic>?;
         if (message == null || message['chat_id'] != chatId) return;
@@ -304,6 +318,24 @@ class TelegramForum extends _$TelegramForum {
     }
   }
 
+  /// Reload topics without clearing the current list (for detecting new topics).
+  Future<void> _syncTopics() async {
+    try {
+      final result = await _service.sendWithResult({
+        '@type': 'getForumTopics',
+        'chat_id': chatId,
+        'query': state.searchQuery,
+        'offset_date': 0,
+        'offset_message_id': 0,
+        'offset_message_thread_id': 0,
+        'limit': 50,
+      });
+      _processForumTopics(result);
+    } catch (e) {
+      debugPrint('TelegramForum: Error syncing topics: $e');
+    }
+  }
+
   Future<void> loadTopics() async {
     try {
       // Reset cursors
@@ -314,7 +346,7 @@ class TelegramForum extends _$TelegramForum {
       state = state.copyWith(
         isLoading: true,
         topics: [],
-      ); 
+      );
       debugPrint('TelegramForum: Loading topics for chat $chatId');
 
       final result = await _service.sendWithResult({
