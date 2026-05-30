@@ -28,6 +28,7 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen>
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
+  final ScrollController _scrollController = ScrollController();
 
   @override
   void initState() {
@@ -39,10 +40,10 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen>
       if (state.searchQuery.isNotEmpty) {
         notifier.setSearchQuery('');
       }
-      // Refresh topics when re-entering the group (provider is keepAlive,
-      // so on re-entry we get cached state — force a refresh if already loaded).
+      // Sync topics silently when re-entering the group (provider is keepAlive,
+      // so on re-entry we get cached state — merge new topics without clearing).
       if (!state.isLoading && state.topics.isNotEmpty) {
-        notifier.refreshTopics();
+        notifier.syncTopics();
       }
     });
   }
@@ -58,6 +59,7 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen>
     routeObserver.unsubscribe(this);
     _searchController.dispose();
     _searchFocusNode.dispose();
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -71,7 +73,7 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen>
       final notifier = ref.read(telegramForumProvider(widget.chatId).notifier);
       final state = ref.read(telegramForumProvider(widget.chatId));
       if (!state.isLoading && state.topics.isNotEmpty) {
-        notifier.refreshTopics();
+        notifier.syncTopics();
       }
     });
   }
@@ -215,6 +217,7 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen>
                 return false;
               },
               child: ListView.builder(
+                controller: _scrollController,
                 padding: const EdgeInsets.symmetric(vertical: 8),
                 itemCount: state.topics.length + (state.isLoadingMore ? 1 : 0),
                 itemBuilder: (context, index) {

@@ -160,7 +160,7 @@ class TelegramForum extends _$TelegramForum {
 
         final existingIndex = _findTopicIndex(state.topics, threadId);
         if (existingIndex == -1) {
-          Future.microtask(() => _syncTopics());
+          Future.microtask(() => syncTopics());
         }
       } else if (update['@type'] == 'updateNewMessage') {
         final message = update['message'] as Map<String, dynamic>?;
@@ -319,7 +319,7 @@ class TelegramForum extends _$TelegramForum {
   }
 
   /// Reload topics without clearing the current list (for detecting new topics).
-  Future<void> _syncTopics() async {
+  Future<void> syncTopics() async {
     try {
       final result = await _service.sendWithResult({
         '@type': 'getForumTopics',
