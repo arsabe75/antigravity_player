@@ -5,6 +5,7 @@ import 'package:lucide_icons_flutter/lucide_icons.dart';
 
 import '../../config/router/routes.dart';
 import '../../infrastructure/services/secure_storage_service.dart';
+import 'dart:async';
 import 'dart:convert';
 import 'package:window_manager/window_manager.dart';
 
@@ -27,16 +28,64 @@ class TelegramScreen extends ConsumerStatefulWidget {
 }
 
 class _TelegramScreenState extends ConsumerState<TelegramScreen> {
-  List<Map<String, dynamic>> _favorites = []; // No longer final
+  List<Map<String, dynamic>> _favorites = [];
   bool _hasRefreshedFavorites = false;
   final _recentVideosKey = GlobalKey<RecentVideosWidgetState>();
+  StreamSubscription<Map<String, dynamic>>? _updatesSubscription;
 
   @override
   void initState() {
     super.initState();
-    // Start Proxy
     LocalStreamingProxy().start();
     _loadFavorites();
+    _subscribeToUpdates();
+  }
+
+  void _subscribeToUpdates() {
+    _updatesSubscription = TelegramService().updates.listen((update) {
+      if (!mounted) return;
+      final type = update['@type'] as String?;
+      if (type == 'updateChatTitle') {
+        _handleChatTitleUpdate(update);
+      } else if (type == 'updateChatPhoto') {
+        _handleChatPhotoUpdate(update);
+      }
+    });
+  }
+
+  void _handleChatTitleUpdate(Map<String, dynamic> update) {
+    final chatId = update['chat_id'] as int?;
+    final newTitle = update['title'] as String?;
+    if (chatId == null || newTitle == null) return;
+
+    final index = _favorites.indexWhere((c) => c['id'] == chatId);
+    if (index == -1) return;
+
+    setState(() {
+      _favorites[index] = Map<String, dynamic>.from(_favorites[index])
+        ..['title'] = newTitle;
+    });
+    _saveFavorites();
+  }
+
+  void _handleChatPhotoUpdate(Map<String, dynamic> update) {
+    final chatId = update['chat_id'] as int?;
+    if (chatId == null) return;
+
+    final index = _favorites.indexWhere((c) => c['id'] == chatId);
+    if (index == -1) return;
+
+    // photo can be null (photo removed) or a chatPhotoInfo object
+    final photo = update['photo'] as Map<String, dynamic>?;
+    setState(() {
+      _favorites[index] = Map<String, dynamic>.from(_favorites[index]);
+      if (photo == null) {
+        _favorites[index].remove('photo');
+      } else {
+        _favorites[index]['photo'] = photo;
+      }
+    });
+    _saveFavorites();
   }
 
   Future<void> _loadFavorites() async {
@@ -141,6 +190,7 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
 
   @override
   void dispose() {
+    _updatesSubscription?.cancel();
     super.dispose();
   }
 
