@@ -134,41 +134,57 @@ class SettingsDialog extends ConsumerWidget {
             const Divider(),
             const SizedBox(height: 16),
             // About section
-            Center(
-              child: Column(
-                children: [
-                  Image.asset(
-                    'assets/icon/app_icon_v2.png',
-                    width: 48,
-                    height: 48,
-                  ),
-                  const SizedBox(height: 8),
-                  FutureBuilder<PackageInfo>(
-                    future: PackageInfo.fromPlatform(),
-                    builder: (context, snapshot) {
-                      final version =
-                          snapshot.hasData ? ' v${snapshot.data!.version}' : '';
-                      return Text(
-                        '${AppConstants.appName}$version',
-                        style: const TextStyle(fontWeight: FontWeight.bold),
-                      );
-                    },
-                  ),
-                  const SizedBox(height: 4),
-                  Text(t.settingsDevelopedBy),
-                  const SizedBox(height: 8),
-                  GestureDetector(
-                    onTap: () => _openUrl('https://t.me/asbSoftware'),
-                    child: Text(
-                      't.me/asbSoftware',
-                      style: TextStyle(
-                        color: theme.colorScheme.primary,
-                        decoration: TextDecoration.underline,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Left column: Logo + App name + Version
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Image.asset(
+                        'assets/icon/app_icon_v2.png',
+                        width: 48,
+                        height: 48,
                       ),
-                    ),
+                      const SizedBox(height: 8),
+                      FutureBuilder<PackageInfo>(
+                        future: PackageInfo.fromPlatform(),
+                        builder: (context, snapshot) {
+                          final version = snapshot.hasData
+                              ? ' v${snapshot.data!.version}'
+                              : '';
+                          return Text(
+                            '${AppConstants.appName}$version',
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                            textAlign: TextAlign.center,
+                          );
+                        },
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                // Right column: Developer + Telegram link
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(t.settingsDevelopedBy),
+                      const SizedBox(height: 8),
+                      GestureDetector(
+                        onTap: () => _openUrl('https://t.me/asbSoftware'),
+                        child: Text(
+                          't.me/asbSoftware',
+                          style: TextStyle(
+                            color: theme.colorScheme.primary,
+                            decoration: TextDecoration.underline,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ],
         ),
