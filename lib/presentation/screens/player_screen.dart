@@ -527,7 +527,7 @@ class _PlayerScreenState extends ConsumerState<PlayerScreen>
             return KeyEventResult.ignored;
           },
           child: MouseRegion(
-            cursor: state.isFullscreen && !state.areControlsVisible
+            cursor: !state.areControlsVisible
                 ? SystemMouseCursors.none
                 : SystemMouseCursors.basic,
             onEnter: (_) => _startHideTimer(),
