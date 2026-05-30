@@ -84,9 +84,7 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
       context: context,
       builder: (context) => AlertDialog(
         title: Text(AppLocalizations.of(context).recentClearHistory),
-        content: Text(
-          AppLocalizations.of(context).recentClearHistoryMsg,
-        ),
+        content: Text(AppLocalizations.of(context).recentClearHistoryMsg),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -94,7 +92,10 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(AppLocalizations.of(context).recentClear, style: TextStyle(color: Colors.red)),
+            child: Text(
+              AppLocalizations.of(context).recentClear,
+              style: TextStyle(color: Colors.red),
+            ),
           ),
         ],
       ),
@@ -150,23 +151,24 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
     if (!service.isClientReady) return;
 
     _pendingChatIds.add(chatId);
-    service.sendWithResult({
-      '@type': 'getChat',
-      'chat_id': chatId,
-    }).then((result) {
-      if (result['@type'] == 'chat') {
-        final title = result['title'] as String?;
-        if (title != null && mounted) {
-          setState(() {
-            _chatNames[chatId] = title;
-          });
-        }
-      }
-    }).catchError((e) {
-      debugPrint('Error getting chat name for recent video: $e');
-    }).whenComplete(() {
-      _pendingChatIds.remove(chatId);
-    });
+    service
+        .sendWithResult({'@type': 'getChat', 'chat_id': chatId})
+        .then((result) {
+          if (result['@type'] == 'chat') {
+            final title = result['title'] as String?;
+            if (title != null && mounted) {
+              setState(() {
+                _chatNames[chatId] = title;
+              });
+            }
+          }
+        })
+        .catchError((e) {
+          debugPrint('Error getting chat name for recent video: $e');
+        })
+        .whenComplete(() {
+          _pendingChatIds.remove(chatId);
+        });
   }
 
   @override
@@ -273,7 +275,8 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
   Widget _buildVerticalVideoCard(RecentVideo video, bool isDark) {
     if (video.isTelegramVideo && video.telegramChatId != null) {
       final chatId = video.telegramChatId!;
-      if (!_chatNames.containsKey(chatId) && !_pendingChatIds.contains(chatId)) {
+      if (!_chatNames.containsKey(chatId) &&
+          !_pendingChatIds.contains(chatId)) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _resolveChatName(chatId);
         });
@@ -298,18 +301,22 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                   color: video.isTelegramVideo
                       ? Colors.blue.withValues(alpha: 0.2)
                       : video.isNetwork
-                          ? Colors.blue.withValues(alpha: 0.2)
-                          : Colors.green.withValues(alpha: 0.2),
+                      ? Colors.blue.withValues(alpha: 0.2)
+                      : Colors.green.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Icon(
                   video.isTelegramVideo
                       ? LucideIcons.send
-                      : video.isNetwork ? LucideIcons.globe : LucideIcons.file,
+                      : video.isNetwork
+                      ? LucideIcons.globe
+                      : LucideIcons.file,
                   size: 14,
                   color: video.isTelegramVideo
                       ? Colors.blue
-                      : video.isNetwork ? Colors.blue : Colors.green,
+                      : video.isNetwork
+                      ? Colors.blue
+                      : Colors.green,
                 ),
               ),
               const SizedBox(width: 10),
@@ -328,7 +335,8 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    if (video.isTelegramVideo && video.telegramChatId != null) ...[
+                    if (video.isTelegramVideo &&
+                        video.telegramChatId != null) ...[
                       if (video.telegramTopicName != null) ...[
                         // Topic name
                         Padding(
@@ -369,7 +377,10 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
-                                  _chatNames[video.telegramChatId] ?? AppLocalizations.of(context).recentLoadingGroup,
+                                  _chatNames[video.telegramChatId] ??
+                                      AppLocalizations.of(
+                                        context,
+                                      ).recentLoadingGroup,
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w400,
@@ -396,7 +407,10 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
-                                  _chatNames[video.telegramChatId] ?? AppLocalizations.of(context).recentLoadingChannel,
+                                  _chatNames[video.telegramChatId] ??
+                                      AppLocalizations.of(
+                                        context,
+                                      ).recentLoadingChannel,
                                   style: TextStyle(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w400,
@@ -415,7 +429,10 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                     Row(
                       children: [
                         Text(
-                          _formatTimeAgo(video.playedAt, AppLocalizations.of(context)),
+                          _formatTimeAgo(
+                            video.playedAt,
+                            AppLocalizations.of(context),
+                          ),
                           style: TextStyle(
                             fontSize: 10,
                             color: Colors.grey[500],
@@ -452,7 +469,7 @@ class RecentVideosWidgetState extends ConsumerState<RecentVideosWidget> {
                     onTap: () => _removeVideo(video),
                     child: Icon(
                       LucideIcons.x,
-                      size: 14,
+                      size: 20,
                       color: Colors.grey[500],
                     ),
                   ),
