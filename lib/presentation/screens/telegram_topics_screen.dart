@@ -64,11 +64,16 @@ class _TelegramTopicsScreenState extends ConsumerState<TelegramTopicsScreen>
   @override
   void didPopNext() {
     // Called when a route on top of this one is popped (e.g. coming back from chat).
-    final notifier = ref.read(telegramForumProvider(widget.chatId).notifier);
-    final state = ref.read(telegramForumProvider(widget.chatId));
-    if (!state.isLoading && state.topics.isNotEmpty) {
-      notifier.refreshTopics();
-    }
+    // Defer via microtask to avoid modifying provider during build (RouteObserver
+    // callbacks may fire while the widget tree is building).
+    Future.microtask(() {
+      if (!mounted) return;
+      final notifier = ref.read(telegramForumProvider(widget.chatId).notifier);
+      final state = ref.read(telegramForumProvider(widget.chatId));
+      if (!state.isLoading && state.topics.isNotEmpty) {
+        notifier.refreshTopics();
+      }
+    });
   }
 
   /// Get topic icon color from topic info.

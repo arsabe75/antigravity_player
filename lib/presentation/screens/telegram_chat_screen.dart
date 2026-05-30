@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons_flutter/lucide_icons.dart';
 import 'package:window_manager/window_manager.dart';
 import '../widgets/window_controls.dart';
+import '../widgets/video_card_thumbnail.dart';
 import '../providers/telegram_chat_notifier.dart';
 import '../providers/telegram_content_notifier.dart'; // For getStreamUrl helper if needed
 import '../../config/router/routes.dart';
@@ -253,6 +254,24 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                         return const SizedBox.shrink();
                       }
 
+                      // Extract thumbnail data for card background
+                      int? thumbnailFileId;
+                      String? minithumbnailData;
+                      if (content['@type'] == 'messageVideo') {
+                        final thumbnail = content['video']?['thumbnail'];
+                        thumbnailFileId = thumbnail?['file']?['id'] as int?;
+                        minithumbnailData =
+                            content['video']?['minithumbnail']?['data']
+                                as String?;
+                      } else if (content['@type'] == 'messageDocument') {
+                        final thumbnail =
+                            content['document']?['thumbnail'];
+                        thumbnailFileId = thumbnail?['file']?['id'] as int?;
+                        minithumbnailData =
+                            content['document']?['minithumbnail']?['data']
+                                as String?;
+                      }
+
                       // Note: preloadVideoStart was removed - it was a no-op
                       // TDLib handles download on-demand when video is played
 
@@ -327,10 +346,9 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                                     child: Stack(
                                       fit: StackFit.expand,
                                       children: [
-                                        Container(
-                                          decoration: const BoxDecoration(
-                                            color: Colors.transparent,
-                                          ),
+                                        VideoCardThumbnail(
+                                          thumbnailFileId: thumbnailFileId,
+                                          minithumbnailData: minithumbnailData,
                                         ),
                                         Positioned(
                                           top: 8,
