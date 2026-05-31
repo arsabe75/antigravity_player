@@ -106,6 +106,53 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
       return false;
     }).toList();
 
+    // Build album cover map from photos sharing media_album_id with videos
+    // (for bots that upload photo+video as grouped albums).
+    final albumCovers = <int, Map<String, dynamic>>{};
+    {
+      final albumVideoIds = <int>{};
+      for (final m in videoMessages) {
+        final albumId = m['media_album_id'];
+        if (albumId is int && albumId != 0) {
+          albumVideoIds.add(albumId);
+        }
+      }
+      if (albumVideoIds.isNotEmpty) {
+        for (final m in state.messages) {
+          final content = m['content'];
+          if (content == null || content['@type'] != 'messagePhoto') continue;
+          final albumId = m['media_album_id'];
+          if (albumId is int &&
+              albumId != 0 &&
+              albumVideoIds.contains(albumId) &&
+              !albumCovers.containsKey(albumId)) {
+            final photo = content['photo'] as Map<String, dynamic>?;
+            if (photo == null) continue;
+            final sizes = photo['sizes'] as List? ?? [];
+            Map<String, dynamic>? bestSize;
+            for (final type in ['m', 's', 'x', 'y']) {
+              for (final s in sizes) {
+                if (s is Map && s['type'] == type) {
+                  bestSize = s as Map<String, dynamic>;
+                  break;
+                }
+              }
+              if (bestSize != null) break;
+            }
+            bestSize ??= (sizes.isNotEmpty
+                ? sizes.first as Map<String, dynamic>
+                : null);
+            if (bestSize != null && bestSize['photo'] != null) {
+              albumCovers[albumId] = {
+                'fileId': bestSize['photo']['id'],
+                'minithumbnailData': photo['minithumbnail']?['data'],
+              };
+            }
+          }
+        }
+      }
+    }
+
     // Calculate how many items we need to fill the screen to trigger scroll
     // A standard window height is usually under 1500px.
     // Our grid items are max 250 wide and 1.3 aspect ratio -> ~190 height.
@@ -254,22 +301,74 @@ class _TelegramChatScreenState extends ConsumerState<TelegramChatScreen> {
                         return const SizedBox.shrink();
                       }
 
-                      // Extract thumbnail data for card background
+                      // Extract thumbnail data for card background.
+                      // Priority: 1) messageVideo cover photo (bot custom cover),
+                      // 2) album photo from same media_album_id,
+                      // 3) standard video/document thumbnail.
                       int? thumbnailFileId;
                       String? minithumbnailData;
+
+                      // 1. Check for high-quality cover photo (messageVideo only).
+                      // Bots set a custom cover via upload that becomes a photo
+                      // object at content.cover, separate from video.thumbnail.
                       if (content['@type'] == 'messageVideo') {
-                        final thumbnail = content['video']?['thumbnail'];
-                        thumbnailFileId = thumbnail?['file']?['id'] as int?;
-                        minithumbnailData =
-                            content['video']?['minithumbnail']?['data']
-                                as String?;
-                      } else if (content['@type'] == 'messageDocument') {
-                        final thumbnail =
-                            content['document']?['thumbnail'];
-                        thumbnailFileId = thumbnail?['file']?['id'] as int?;
-                        minithumbnailData =
-                            content['document']?['minithumbnail']?['data']
-                                as String?;
+                        final cover =
+                            content['cover'] as Map<String, dynamic>?;
+                        if (cover != null) {
+                          final sizes = cover['sizes'] as List? ?? [];
+                          Map<String, dynamic>? bestSize;
+                          for (final t in ['m', 's', 'x', 'y']) {
+                            for (final s in sizes) {
+                              if (s is Map && s['type'] == t) {
+                                bestSize = s as Map<String, dynamic>;
+                                break;
+                              }
+                            }
+                            if (bestSize != null) break;
+                          }
+                          bestSize ??= (sizes.isNotEmpty
+                              ? sizes.first as Map<String, dynamic>
+                              : null);
+                          if (bestSize != null && bestSize['photo'] != null) {
+                            thumbnailFileId =
+                                bestSize['photo']['id'] as int?;
+                            minithumbnailData =
+                                cover['minithumbnail']?['data'] as String?;
+                          }
+                        }
+                      }
+
+                      // 2. Fall back to album cover from media_album_id
+                      if (thumbnailFileId == null) {
+                        final albumId = msg['media_album_id'];
+                        if (albumId is int && albumId != 0) {
+                          final albumCover = albumCovers[albumId];
+                          if (albumCover != null) {
+                            thumbnailFileId =
+                                albumCover['fileId'] as int?;
+                            minithumbnailData =
+                                albumCover['minithumbnailData'] as String?;
+                          }
+                        }
+                      }
+
+                      // 3. Fall back to standard video/document thumbnail
+                      if (thumbnailFileId == null) {
+                        if (content['@type'] == 'messageVideo') {
+                          final thumbnail =
+                              content['video']?['thumbnail'];
+                          thumbnailFileId =
+                              thumbnail?['file']?['id'] as int?;
+                          minithumbnailData = content['video']
+                                  ?['minithumbnail']?['data'] as String?;
+                        } else if (content['@type'] == 'messageDocument') {
+                          final thumbnail =
+                              content['document']?['thumbnail'];
+                          thumbnailFileId =
+                              thumbnail?['file']?['id'] as int?;
+                          minithumbnailData = content['document']
+                                  ?['minithumbnail']?['data'] as String?;
+                        }
                       }
 
                       // Note: preloadVideoStart was removed - it was a no-op

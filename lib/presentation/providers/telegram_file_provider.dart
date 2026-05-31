@@ -60,7 +60,7 @@ class TelegramFile extends _$TelegramFile {
       final result = await _service.sendWithResult({
         '@type': 'downloadFile',
         'file_id': fileId,
-        'priority': 32,
+        'priority': 1, // Background priority: cosmetic files, don't compete with video playback
         'synchronous': false,
       });
 
