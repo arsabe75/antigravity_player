@@ -343,26 +343,21 @@ class _TelegramScreenState extends ConsumerState<TelegramScreen> {
                                 ),
                               ),
                               title: Text(title),
-                              subtitle: Row(
-                                children: [
-                                  if (isForum) ...[
-                                    const Icon(
-                                      LucideIcons.messagesSquare,
-                                      size: 12,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    Text(
-                                      t.telegramSelectionTopics,
-                                      style: TextStyle(fontSize: 12),
-                                    ),
-                                    const SizedBox(width: 8),
-                                  ],
-                                  Text(
-                                    'ID: ${chat['id']}',
-                                    style: const TextStyle(fontSize: 12),
-                                  ),
-                                ],
-                              ),
+                              subtitle: isForum
+                                  ? Row(
+                                      children: [
+                                        const Icon(
+                                          LucideIcons.messagesSquare,
+                                          size: 12,
+                                        ),
+                                        const SizedBox(width: 4),
+                                        Text(
+                                          t.telegramSelectionTopics,
+                                          style: TextStyle(fontSize: 12),
+                                        ),
+                                      ],
+                                    )
+                                  : null,
                               onTap: () {
                                 if (isForum) {
                                   // Navigate to topics screen for forum groups
