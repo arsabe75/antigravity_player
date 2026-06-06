@@ -46,6 +46,11 @@ class LocalStreamingRepository implements StreamingRepository {
   }
 
   @override
+  bool isLoadingMoov(int fileId) {
+    return _proxy.isLoadingMoov(fileId);
+  }
+
+  @override
   LoadingProgress? getLoadingProgress(int fileId) {
     return _proxy.getLoadingProgress(fileId);
   }

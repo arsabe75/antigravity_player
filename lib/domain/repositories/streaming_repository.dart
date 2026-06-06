@@ -25,6 +25,12 @@ abstract class StreamingRepository {
   /// Returns true if the video requires extra loading time due to metadata placement
   bool isVideoNotOptimizedForStreaming(int fileId);
 
+  /// Check if the proxy is currently loading the MOOV atom for a file.
+  /// Returns true while the proxy is in [FileLoadState.loadingMoov] state,
+  /// meaning HTTP data requests are blocked until the MOOV download completes.
+  /// UI can use this to keep loading indicators visible during MOOV preparation.
+  bool isLoadingMoov(int fileId);
+
   /// Get current loading progress for a file.
   /// Returns null if file is not being tracked.
   /// UI can use this to show loading indicators, progress bars, and MOOV fetching status.

@@ -108,6 +108,8 @@ class PlayerNotifier extends _$PlayerNotifier {
   StreamSubscription? _errorSub;
   Timer? _saveTimer;
   Timer? _moovCheckTimer;
+  DateTime? _moovCheckTimerStartTime;
+  static const Duration _moovCheckGracePeriod = Duration(seconds: 60);
   Timer? _seekRecoveryTimer;
   Duration? _lastSeekTarget;
   DateTime? _lastSeekTime;
@@ -129,6 +131,13 @@ class PlayerNotifier extends _$PlayerNotifier {
 
   // Track the position when initial loading started to detect actual playback
   Duration? _initialLoadingStartPosition;
+
+  // Tracks whether the player has emitted at least one valid position event.
+  // This is the only reliable signal that mpv is actually decoding frames.
+  // Used to prevent FIX 3 from clearing isInitialLoading when the player
+  // reports isPlaying=true, buffering=false but no data is actually flowing
+  // (e.g. while the proxy downloads data at the playback offset).
+  bool _hasReceivedNaturalPosition = false;
 
   // Track the position when ANY error occurred (MediaKit or streaming) to detect recovery
   Duration? _errorOccurredAtPosition;
@@ -231,6 +240,16 @@ class PlayerNotifier extends _$PlayerNotifier {
         }
 
         _lastPositionUpdate = now;
+        // Only mark position as received if it has advanced significantly
+        // from the initial loading start position. A position event at the
+        // exact optimistic start position (set in loadVideo) does NOT count
+        // as evidence of real playback — mpv may emit position at the target
+        // even while waiting for data.
+        final startPos = _initialLoadingStartPosition;
+        if (startPos != null &&
+            pos.inMilliseconds > startPos.inMilliseconds + 100) {
+          _hasReceivedNaturalPosition = true;
+        }
         state = state.copyWith(position: pos);
       }
 
@@ -326,18 +345,47 @@ class PlayerNotifier extends _$PlayerNotifier {
       // genuinely started (mpv has data and is decoding). Clear isInitialLoading
       // here to prevent the loading spinner from persisting over active video.
       // The position-based check in the position listener remains as a fallback.
+      //
+      // GUARD: Don't clear isInitialLoading unless real playback is confirmed.
+      //
+      // The player (mpv) may report isPlaying=true, buffering=false even when
+      // no data is flowing — e.g. while the proxy downloads data at the playback
+      // offset, or while waiting for the MOOV atom. Clearing the spinner in this
+      // state leaves the user staring at a frozen frame with no feedback.
+      //
+      // We require at least one of these to be true before clearing:
+      // 1. A natural position event has arrived (mpv is decoding frames), OR
+      // 2. The proxy is NOT fetching MOOV AND it's NOT a network video
+      //
+      // Condition 1 is the gold standard: if frames are being decoded, the
+      // position stream emits events. Condition 2 is the fast path for local
+      // files where data is available immediately.
       if (state.isInitialLoading) {
         if (!buffering && state.isPlaying) {
-          // Player is playing and not buffering — real playback has started
-          debugPrint(
-            'PlayerNotifier: FIX 3 - Clearing isInitialLoading '
-            '(buffering=false, isPlaying=true)',
-          );
-          state = state.copyWith(
-            isInitialLoading: false,
-            isBuffering: false,
-            isVideoNotOptimizedForStreaming: isNotOptimized,
-          );
+          final proxyFetchingMoov = _currentProxyFileId != null &&
+              _streamingRepository.isLoadingMoov(_currentProxyFileId!);
+
+          if (proxyFetchingMoov || !_hasReceivedNaturalPosition) {
+            debugPrint(
+              'PlayerNotifier: FIX 3 suppressed - '
+              'proxyFetchingMoov=$proxyFetchingMoov, '
+              'hasPosition=$_hasReceivedNaturalPosition '
+              '(pos: ${state.position.inSeconds}s)',
+            );
+            if (isNotOptimized && !state.isVideoNotOptimizedForStreaming) {
+              state = state.copyWith(isVideoNotOptimizedForStreaming: true);
+            }
+          } else {
+            debugPrint(
+              'PlayerNotifier: FIX 3 - Clearing isInitialLoading '
+              '(buffering=false, isPlaying=true, hasPosition=true)',
+            );
+            state = state.copyWith(
+              isInitialLoading: false,
+              isBuffering: false,
+              isVideoNotOptimizedForStreaming: isNotOptimized,
+            );
+          }
         } else if (isNotOptimized && !state.isVideoNotOptimizedForStreaming) {
           // During initial load, only update moov optimization status
           state = state.copyWith(isVideoNotOptimizedForStreaming: true);
@@ -565,9 +613,15 @@ class PlayerNotifier extends _$PlayerNotifier {
   }
 
   /// Start a timer to periodically check if video is not optimized for streaming
-  /// This catches late detection of moov-at-end during initial buffering
+  /// This catches late detection of moov-at-end during initial buffering.
+  ///
+  /// Includes a grace period (60s) where the timer keeps running even if
+  /// isBuffering and isInitialLoading are both false. This handles the case
+  /// where FIX 3 or other mechanisms clear the loading state prematurely
+  /// while the proxy is still downloading the MOOV atom.
   void _startMoovCheckTimer() {
     _stopMoovCheckTimer();
+    _moovCheckTimerStartTime = DateTime.now();
     // FIX: Run every 100ms (not 500ms) to catch MOOV detection before playback confirms
     _moovCheckTimer = Timer.periodic(const Duration(milliseconds: 100), (_) {
       if (!ref.mounted) {
@@ -579,9 +633,16 @@ class PlayerNotifier extends _$PlayerNotifier {
         return;
       }
 
-      // FIX: Keep checking during initial loading OR buffering
-      // Don't stop just because buffering is false - we need to detect during initial load
-      if (!state.isBuffering && !state.isInitialLoading) {
+      final inGracePeriod = _moovCheckTimerStartTime != null &&
+          DateTime.now().difference(_moovCheckTimerStartTime!) <
+              _moovCheckGracePeriod;
+
+      // Keep checking during initial loading, buffering, OR within the grace period.
+      // The grace period ensures we detect MOOV-at-end even if the loading state
+      // was cleared prematurely by FIX 3 or other mechanisms.
+      if (!state.isBuffering &&
+          !state.isInitialLoading &&
+          !inGracePeriod) {
         _stopMoovCheckTimer();
         return;
       }
@@ -601,6 +662,7 @@ class PlayerNotifier extends _$PlayerNotifier {
   void _stopMoovCheckTimer() {
     _moovCheckTimer?.cancel();
     _moovCheckTimer = null;
+    _moovCheckTimerStartTime = null;
   }
 
   /// Clears progress for a finished video using captured values.
@@ -826,6 +888,7 @@ class PlayerNotifier extends _$PlayerNotifier {
       // Track starting position for detecting actual playback (position must advance)
       if (isNetwork) {
         _initialLoadingStartPosition = startPosition;
+        _hasReceivedNaturalPosition = false;
       }
       final video = VideoEntity(path: path, isNetwork: isNetwork);
 

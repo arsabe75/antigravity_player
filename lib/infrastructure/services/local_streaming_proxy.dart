@@ -400,6 +400,16 @@ class LocalStreamingProxy {
   bool isVideoNotOptimizedForStreaming(int fileId) =>
       _getOrCreateState(fileId).isMoovAtEnd;
 
+  /// Check if the proxy is actively loading the MOOV atom for a file.
+  /// Returns true while in [FileLoadState.loadingMoov] or when a forced MOOV
+  /// download is in progress. During this state, HTTP requests that target
+  /// non-MOOV offsets are blocked until the MOOV completes.
+  bool isLoadingMoov(int fileId) {
+    final state = _getOrCreateState(fileId);
+    return state.loadState == FileLoadState.loadingMoov ||
+        state.forcedMoovOffset != null;
+  }
+
   // ============================================================
   // P0 FIX: MOOV-FIRST STATE MACHINE
   // ============================================================

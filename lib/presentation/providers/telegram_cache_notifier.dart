@@ -100,6 +100,7 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
       final availableSpace = await _service.getAvailableDiskSpace();
       final totalSpace = await _service.getTotalDiskSpace();
 
+      if (!ref.mounted) return;
       state = state.copyWith(
         statistics: stats,
         keepMediaDuration: keepDuration,
@@ -109,6 +110,7 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
         isLoading: false,
       );
     } catch (e) {
+      if (!ref.mounted) return;
       state = state.copyWith(
         isLoading: false,
         error: 'Failed to load storage statistics: $e',
@@ -123,6 +125,8 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
     try {
       final success = await _service.clearCache(forceAll: true);
 
+      if (!ref.mounted) return false;
+
       if (success) {
         // Invalidate streaming proxy cache to ensure fresh file info
         LocalStreamingProxy().invalidateAllFiles();
@@ -130,6 +134,7 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
         // Reload statistics after clearing
         final stats = await _service.getStorageStatistics();
         final availableSpace = await _service.getAvailableDiskSpace();
+        if (!ref.mounted) return false;
         state = state.copyWith(
           statistics: stats,
           availableDiskSpace: availableSpace,
@@ -144,6 +149,7 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
         return false;
       }
     } catch (e) {
+      if (!ref.mounted) return false;
       state = state.copyWith(
         isClearing: false,
         error: 'Error clearing cache: $e',
@@ -155,11 +161,13 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
   /// Update the "Keep Media" duration preference.
   Future<void> setKeepMediaDuration(KeepMediaDuration duration) async {
     await _service.setKeepMediaDuration(duration);
+    if (!ref.mounted) return;
     state = state.copyWith(keepMediaDuration: duration);
 
     // Run optimization with new setting if not "Forever"
     if (duration != KeepMediaDuration.forever) {
       await _service.runOptimization();
+      if (!ref.mounted) return;
       await loadStatistics(); // Reload stats after optimization
     }
   }
@@ -169,10 +177,12 @@ class TelegramCacheNotifier extends _$TelegramCacheNotifier {
   /// Triggers NVR-style cleanup if new limit is lower than current usage.
   Future<void> setCacheSizeLimit(CacheSizeLimit limit) async {
     await _service.setCacheSizeLimit(limit);
+    if (!ref.mounted) return;
     state = state.copyWith(cacheSizeLimit: limit);
 
     // Enforce new limit immediately
     await _service.enforceVideoSizeLimit();
+    if (!ref.mounted) return;
     await loadStatistics(); // Reload stats after enforcement
   }
 }
