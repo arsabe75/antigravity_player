@@ -285,6 +285,7 @@ class TelegramContent extends _$TelegramContent {
 
     // Safety timeout - if no chats arrived, retry
     Future.delayed(const Duration(seconds: 5), () {
+      if (!ref.mounted) return;
       try {
         if (state.isLoading &&
             state.chats.isEmpty &&

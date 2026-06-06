@@ -37,6 +37,7 @@ class TelegramChat extends _$TelegramChat {
         '@type': 'openChat',
         'chat_id': params.chatId,
       });
+      if (!ref.mounted) return;
       await loadMessages();
     });
 
@@ -211,6 +212,8 @@ class TelegramChat extends _$TelegramChat {
         ),
       );
 
+      if (!ref.mounted) return;
+
       _nextVideoFromId = result.nextVideoFromId;
       _nextDocFromId = result.nextDocFromId;
       _hasMoreVideos = result.hasMoreVideos;
@@ -241,6 +244,7 @@ class TelegramChat extends _$TelegramChat {
         hasMore: _hasMoreVideos || _hasMoreDocs,
       );
     } catch (e) {
+      if (!ref.mounted) return;
       debugPrint('TelegramChat: Error loading messages: $e');
       state = state.copyWith(isLoading: false, error: e.toString());
     }
@@ -288,6 +292,8 @@ class TelegramChat extends _$TelegramChat {
         ),
       );
 
+      if (!ref.mounted) return;
+
       // Only update cursors if we requested them
       if (_hasMoreVideos) {
         _nextVideoFromId = result.nextVideoFromId;
@@ -324,6 +330,7 @@ class TelegramChat extends _$TelegramChat {
         hasMore: _hasMoreVideos || _hasMoreDocs,
       );
     } catch (e) {
+      if (!ref.mounted) return;
       debugPrint('TelegramChat: Error loading more: $e');
       state = state.copyWith(isLoadingMore: false, hasMore: false);
     }
