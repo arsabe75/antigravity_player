@@ -181,7 +181,7 @@ class _SubtitleConfigDialogState extends ConsumerState<SubtitleConfigDialog> {
             ),
             const SizedBox(height: 10),
             Row(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: SubtitleSettingsService.availableColors.map((name) {
                 final colorValue =
                     SubtitleSettingsService.colorNameToFlutterValue(name);

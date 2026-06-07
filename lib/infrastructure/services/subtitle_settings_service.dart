@@ -15,6 +15,7 @@ class SubtitleSettingsService {
     'yellow',
     'grey',
     'cyan',
+    'greenAccent',
   ];
 
   double getFontSize() {
@@ -55,6 +56,8 @@ class SubtitleSettingsService {
         return '#E0E0E0';
       case 'cyan':
         return '#18FFFF';
+      case 'greenAccent':
+        return '#69F0AE';
       default:
         return '#FFFFFF';
     }
@@ -71,6 +74,8 @@ class SubtitleSettingsService {
         return 0xFFE0E0E0;
       case 'cyan':
         return 0xFF18FFFF;
+      case 'greenAccent':
+        return 0xFF69F0AE;
       default:
         return 0xFFFFFFFF;
     }
