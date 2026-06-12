@@ -12,6 +12,7 @@ import 'package:flutter_media_session/flutter_media_session.dart';
 
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'config/licenses/native_licenses.dart';
 import 'config/router/app_router.dart';
 import 'config/theme/app_theme.dart';
 import 'config/constants/app_constants.dart';
@@ -35,6 +36,11 @@ class _PreloadedBackendNotifier extends PlayerBackend {
 
 void main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Register native library licenses before the app starts.
+  // This adds attributions for DLLs (mpv, FFmpeg, libvlc, etc.) to the
+  // LicensePage, which already includes Dart packages via NOTICES.Z.
+  registerNativeLibraryLicenses();
 
   // Fire I/O-heavy init that isn't needed for the first frame in parallel.
   // dotenv is only used by TelegramAuth (lazy provider, accessed on navigation).

@@ -75,6 +75,7 @@
   "settingsMediaKitSubtitle": "Supports tracks, hardware acceleration",
   "settingsFvp": "FVP (VideoPlayer)",
   "settingsFvpSubtitle": "Alternative engine. No subtitles/audio selection.",
+  "settingsLicenses": "Licenses",
   "settingsClose": "Close",
   "settingsDevelopedBy": "Developed by Arturo San",
 

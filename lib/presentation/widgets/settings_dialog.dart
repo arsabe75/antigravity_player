@@ -131,23 +131,16 @@ class SettingsDialog extends ConsumerWidget {
               },
             ),
             const SizedBox(height: 20),
-            const Divider(),
-            const SizedBox(height: 16),
-            // About section
+            // About section — two columns
             Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Left column: Logo + App name + Version
+                // Left column: App name + Licenses
                 Expanded(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
-                      Image.asset(
-                        'assets/icon/app_icon_v2.png',
-                        width: 48,
-                        height: 48,
-                      ),
-                      const SizedBox(height: 8),
                       FutureBuilder<PackageInfo>(
                         future: PackageInfo.fromPlatform(),
                         builder: (context, snapshot) {
@@ -157,9 +150,14 @@ class SettingsDialog extends ConsumerWidget {
                           return Text(
                             '${AppConstants.appName}$version',
                             style: const TextStyle(fontWeight: FontWeight.bold),
-                            textAlign: TextAlign.center,
                           );
                         },
+                      ),
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        onPressed: () => showLicensePage(context: context),
+                        icon: const Icon(Icons.article_outlined, size: 18),
+                        label: Text(t.settingsLicenses),
                       ),
                     ],
                   ),
@@ -168,6 +166,7 @@ class SettingsDialog extends ConsumerWidget {
                 Expanded(
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.center,
                     children: [
                       Text(t.settingsDevelopedBy),
                       const SizedBox(height: 8),
