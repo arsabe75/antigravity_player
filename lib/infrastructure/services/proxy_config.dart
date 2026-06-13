@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 /// Centralized configuration for LocalStreamingProxy.
 /// Adjust these values to tune streaming behavior.
 class ProxyConfig {
@@ -370,12 +372,19 @@ class ProxyConfig {
   static const int previewPreloadBytes = 2 * 1024 * 1024; // 2MB
 
   /// Retardo después de cancelar descarga TDLib para garantizar procesamiento (ms).
-  /// Reduced from 200ms to 100ms: Windows FFI bus processes cancellations
-  /// faster than originally estimated, and 100ms provides sufficient margin.
-  static const int cancelToDownloadDelayMs = 100;
+  /// Windows: 100ms (FFI bus processes cancellations quickly).
+  /// Linux: 200ms (slower TDLib thread scheduling via pthreads).
+  static int get cancelToDownloadDelayMs => Platform.isLinux ? 200 : 100;
 
   /// Retardo adicional si la cancelación no fue confirmada (ms).
-  static const int cancelRetryDelayMs = 100;
+  /// Duplicado en Linux por la misma razón que cancelToDownloadDelayMs.
+  static int get cancelRetryDelayMs => Platform.isLinux ? 200 : 100;
+
+  /// Ventana de coalescencia para forceRestart (ms).
+  /// Si ya se envió un cancelDownloadFile + downloadFile para este archivo
+  /// dentro de esta ventana, los forceRestart subsecuentes se descartan.
+  /// Rompe el ciclo cancel-restart que impide a TDLib completar descargas.
+  static const int forceRestartCoalesceMs = 3000;
 
   /// Cooldown del stall timer después de iniciar descarga normal (ms).
   static const int stallCooldownNormalMs = 5000;

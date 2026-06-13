@@ -308,6 +308,12 @@ class LocalStreamingProxy {
   // new HTTP connections cleared the flag before old loops could see it.
   final Map<int, int> _seekGeneration = {};
 
+  // Coalesce redundant forceRestart calls per file.
+  // Prevents the cancel-restart death spiral where the stall timer and the
+  // connection-level recovery both send cancelDownloadFile + downloadFile
+  // simultaneously, causing TDLib to cancel both downloads.
+  final Map<int, DateTime> _lastForceRestartTime = {};
+
   // H1: Captura la generación de seek al momento de programar la detección
   // de MOOV. Se usa en _startProactiveMoovDownload para detectar si un seek
   // del usuario ocurrió entre la programación y la ejecución asíncrona.
@@ -748,6 +754,7 @@ class LocalStreamingProxy {
     _evictedConnectionOffsets.remove(fileId);
     _connectionsSkipDecrement.remove(fileId);
     _seekGeneration.remove(fileId);
+    _lastForceRestartTime.remove(fileId);
     _moovDetectionSeekGen.remove(fileId); // H1
     _evictionTimestamps.remove(fileId);
     _lastDownloadProgress.remove(fileId);
@@ -772,6 +779,7 @@ class LocalStreamingProxy {
     _evictedConnectionOffsets.clear();
     _connectionsSkipDecrement.clear();
     _seekGeneration.clear();
+    _lastForceRestartTime.clear();
     _moovDetectionSeekGen.clear(); // H1
     _evictionTimestamps.clear();
 
@@ -3095,6 +3103,24 @@ class LocalStreamingProxy {
     const int downloadLimit = 0;
 
     if (forceRestart) {
+      // Coalesce redundant forceRestart calls to prevent cancel-restart loops.
+      // When both the stall timer and a connection-level recovery fire
+      // simultaneously, duplicate cancelDownloadFile calls cancel each other
+      // out in TDLib, resetting download progress to zero.
+      final lastRestart = _lastForceRestartTime[fileId];
+      if (lastRestart != null) {
+        final sinceLastRestart = DateTime.now().difference(lastRestart).inMilliseconds;
+        if (sinceLastRestart < ProxyConfig.forceRestartCoalesceMs) {
+          _logTrace(
+            'Skipping redundant forceRestart for $fileId '
+            '(last was ${sinceLastRestart}ms ago, within ${ProxyConfig.forceRestartCoalesceMs}ms window)',
+            fileId: fileId,
+          );
+          return;
+        }
+      }
+      _lastForceRestartTime[fileId] = DateTime.now();
+
       _logTrace(
         'Processing force restart for $fileId: sending cancelDownloadFile first',
         fileId: fileId,
@@ -3105,7 +3131,7 @@ class LocalStreamingProxy {
         'only_if_pending': false,
       });
       await Future.delayed(
-        const Duration(milliseconds: ProxyConfig.cancelToDownloadDelayMs),
+        Duration(milliseconds: ProxyConfig.cancelToDownloadDelayMs),
       );
 
       final cachedAfterCancel = _filePaths[fileId];
@@ -3121,7 +3147,7 @@ class LocalStreamingProxy {
           'only_if_pending': false,
         });
         await Future.delayed(
-          const Duration(milliseconds: ProxyConfig.cancelRetryDelayMs),
+          Duration(milliseconds: ProxyConfig.cancelRetryDelayMs),
         );
       }
     }
@@ -3516,7 +3542,12 @@ class LocalStreamingProxy {
   Duration _getAdaptiveTimeout(int fileId, bool isMoovRequest) {
     if (isMoovRequest) return ProxyConfig.moovDataTimeout;
     final attempts = _retryTracker.totalAttempts(fileId);
-    final baseMs = ProxyConfig.normalDataTimeoutInitial.inMilliseconds;
+    // Linux: TDLib thread scheduling (pthreads) is slower to respond to
+    // downloadFile requests than Windows (NT threads). A higher timeout floor
+    // prevents false timeouts that trigger cancel-restart loops.
+    final baseMs = Platform.isLinux
+        ? ProxyConfig.normalDataTimeoutInitial.inMilliseconds + 3000
+        : ProxyConfig.normalDataTimeoutInitial.inMilliseconds;
     final maxMs = ProxyConfig.normalDataTimeoutMax.inMilliseconds;
     final backoffMs =
         (baseMs * pow(ProxyConfig.timeoutBackoffMultiplier, attempts))
