@@ -246,9 +246,17 @@ class PlayerNotifier extends _$PlayerNotifier {
         // as evidence of real playback — mpv may emit position at the target
         // even while waiting for data.
         final startPos = _initialLoadingStartPosition;
-        if (startPos != null &&
-            pos.inMilliseconds > startPos.inMilliseconds + 100) {
-          _hasReceivedNaturalPosition = true;
+        if (startPos != null) {
+          final deltaFromStart = pos.inMilliseconds - startPos.inMilliseconds;
+          if (deltaFromStart > 100) {
+            // Position advanced from the reference point — real playback detected
+            _hasReceivedNaturalPosition = true;
+          } else if (deltaFromStart < -2000) {
+            // Position dropped significantly backward (user seeked to an earlier
+            // timestamp). Reset the reference so that forward progress from the
+            // NEW position can still set _hasReceivedNaturalPosition.
+            _initialLoadingStartPosition = pos;
+          }
         }
         state = state.copyWith(position: pos);
       }

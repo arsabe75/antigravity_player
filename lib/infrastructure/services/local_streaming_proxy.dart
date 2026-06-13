@@ -3477,6 +3477,12 @@ class LocalStreamingProxy {
 
     final isMoovAtomRequest = mightBeMoovRequest && !isConfirmedVideoData;
     if (isMoovAtomRequest && !_getOrCreateState(fileId).isMoovAtEnd) {
+      // GUARD: Don't mark as MOOV-at-end if MOOV was already confirmed at
+      // START by _triggerEarlyMoovDetection / _detectMoovPosition.
+      // Without this, _detectMoovAtEnd fires before the sample table is
+      // available and overwrites a correct START detection with END.
+      if (_getOrCreateState(fileId).moovPosition == MoovPosition.start) return;
+
       _getOrCreateState(fileId).isMoovAtEnd = true;
       _debugLog(
         'Proxy: File $fileId has moov atom at end (not optimized for streaming)',
