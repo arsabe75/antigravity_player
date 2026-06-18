@@ -165,8 +165,13 @@ class StreamingErrorOverlay extends StatelessWidget {
               const SizedBox(height: 24),
 
               // Action Buttons
-              Row(
-                mainAxisSize: MainAxisSize.min,
+              // Usamos Wrap en lugar de Row para evitar overflow horizontal
+              // cuando hay 3 botones ("Volver", "Forzar", "Reintentar") con
+              // texto en español en el espacio limitado (maxWidth: 480).
+              Wrap(
+                spacing: 16,
+                runSpacing: 12,
+                alignment: WrapAlignment.center,
                 children: [
                   // Go Back Button
                   OutlinedButton.icon(
@@ -181,8 +186,7 @@ class StreamingErrorOverlay extends StatelessWidget {
 
                   // "Forzar reproducción": disponible para todos los errores
                   // como vía de escape incluso cuando la clasificación falla.
-                  if (!_isWarning && onForceRetry != null) ...[
-                    const SizedBox(width: 16),
+                  if (!_isWarning && onForceRetry != null)
                     OutlinedButton.icon(
                       onPressed: onForceRetry,
                       icon: const Icon(LucideIcons.zap),
@@ -192,8 +196,6 @@ class StreamingErrorOverlay extends StatelessWidget {
                         side: const BorderSide(color: Colors.orange),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                  ],
                   // Reintentar/Entendido: solo para errores recuperables
                   if (error.isRecoverable && onRetry != null)
                     ElevatedButton.icon(

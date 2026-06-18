@@ -97,8 +97,12 @@ class ErrorOverlay extends StatelessWidget {
               const SizedBox(height: 24),
 
               // Action Buttons
-              Row(
-                mainAxisSize: MainAxisSize.min,
+              // Usamos Wrap en lugar de Row para evitar overflow horizontal
+              // en ventanas estrechas o si se agregan más botones en el futuro.
+              Wrap(
+                spacing: 16,
+                runSpacing: 12,
+                alignment: WrapAlignment.center,
                 children: [
                   // Go Home Button
                   OutlinedButton.icon(
@@ -113,8 +117,7 @@ class ErrorOverlay extends StatelessWidget {
 
                   // Remove from History Button (if applicable)
                   if (error is FileNotFoundError &&
-                      onRemoveFromHistory != null) ...[
-                    const SizedBox(width: 16),
+                      onRemoveFromHistory != null)
                     ElevatedButton.icon(
                       onPressed: onRemoveFromHistory,
                       icon: const Icon(LucideIcons.trash2),
@@ -124,11 +127,9 @@ class ErrorOverlay extends StatelessWidget {
                         foregroundColor: Colors.white,
                       ),
                     ),
-                  ],
 
                   // Retry Button (if applicable)
-                  if (error.canRetry && onRetry != null) ...[
-                    const SizedBox(width: 16),
+                  if (error.canRetry && onRetry != null)
                     ElevatedButton.icon(
                       onPressed: onRetry,
                       icon: const Icon(LucideIcons.refreshCw),
@@ -138,7 +139,6 @@ class ErrorOverlay extends StatelessWidget {
                         foregroundColor: Colors.white,
                       ),
                     ),
-                  ],
                 ],
               ),
 
