@@ -30,8 +30,10 @@ class SettingsDialog extends ConsumerWidget {
 
     return AlertDialog(
       title: Text(t.settingsTitle),
-      content: SingleChildScrollView(
-        child: Column(
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: SingleChildScrollView(
+          child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -98,16 +100,6 @@ class SettingsDialog extends ConsumerWidget {
                     Text(
                       t.subtitleConfigTitle,
                       style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      isMediaKit
-                          ? t.settingsMediaKitSubtitle
-                          : t.settingsFvpSubtitle,
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 12,
-                      ),
                     ),
                     const SizedBox(height: 8),
                     TextButton.icon(
@@ -199,6 +191,7 @@ class SettingsDialog extends ConsumerWidget {
               textAlign: TextAlign.center,
             ),
           ],
+        ),
         ),
       ),
       actions: [
