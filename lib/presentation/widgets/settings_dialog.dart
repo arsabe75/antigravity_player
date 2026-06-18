@@ -133,6 +133,7 @@ class SettingsDialog extends ConsumerWidget {
             const SizedBox(height: 20),
             // About section — two columns
             Row(
+
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 // Left column: App name + Licenses
@@ -184,6 +185,18 @@ class SettingsDialog extends ConsumerWidget {
                   ),
                 ),
               ],
+            ),
+            const SizedBox(height: 16),
+            Divider(height: 1, color: Colors.grey[700]),
+            const SizedBox(height: 12),
+            Text(
+              t.settingsDisclaimer,
+              style: TextStyle(
+                fontSize: 11,
+                color: Colors.grey[500],
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),

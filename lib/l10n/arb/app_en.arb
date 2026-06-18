@@ -78,6 +78,7 @@
   "settingsLicenses": "Licenses",
   "settingsClose": "Close",
   "settingsDevelopedBy": "Developed by Arturo San",
+  "settingsDisclaimer": "This application is a tool for playing multimedia content hosted on Telegram accounts. The user is solely responsible for ensuring they have the necessary rights to access and play such content. The developer is not responsible for the use that users make of the application.",
 
   "errorPageNotFound": "Page Not Found",
   "errorPageNotFoundDesc": "The page you're looking for doesn't exist or has been moved.",

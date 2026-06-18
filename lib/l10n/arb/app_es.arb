@@ -78,6 +78,7 @@
   "settingsLicenses": "Licencias",
   "settingsClose": "Cerrar",
   "settingsDevelopedBy": "Desarrollado por Arturo San",
+  "settingsDisclaimer": "Esta aplicación es una herramienta para la reproducción de contenido multimedia alojado en cuentas de Telegram. El usuario es el único responsable de asegurarse de que posee los derechos necesarios para acceder y reproducir dicho contenido. El desarrollador no se hace responsable del uso que los usuarios hagan de la aplicación.",
 
   "errorPageNotFound": "Página No Encontrada",
   "errorPageNotFoundDesc": "La página que buscas no existe o ha sido movida.",
